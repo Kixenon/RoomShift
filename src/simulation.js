@@ -86,8 +86,8 @@ export function evaluatePlacement({ fan, zones, room, obstacles = [] }) {
   };
 }
 
-function isClear(point, zones, obstacles) {
-  if (zones.some((zone) => Math.hypot(zone.x - point.x, zone.y - point.y) < SEARCH.minimumClearance)) {
+export function isPlacementClear(point, zones = [], obstacles = [], minimumClearance = SEARCH.minimumClearance) {
+  if (zones.some((zone) => Math.hypot(zone.x - point.x, zone.y - point.y) < minimumClearance)) {
     return false;
   }
 
@@ -107,7 +107,7 @@ export function recommendPlacement({ room, zones, obstacles = [], initialFan }) 
   for (let x = SEARCH.edge; x <= maxX + 1e-8; x += SEARCH.spacing) {
     for (let y = SEARCH.edge; y <= maxY + 1e-8; y += SEARCH.spacing) {
       const position = { x: round(x, 2), y: round(y, 2) };
-      if (!isClear(position, zones, obstacles)) continue;
+      if (!isPlacementClear(position, zones, obstacles)) continue;
 
       for (let step = 0; step < SEARCH.angleSteps; step += 1) {
         const fan = { ...position, angle: -180 + step * (360 / SEARCH.angleSteps) };

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f6f3" />
+    <meta name="description" content="Test a fan placement in your room before you move it." />
+    <title>RoomShift — Try the room before you move it</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="RoomShift home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 28 28" fill="none">
+            <path d="M4 8.5 14 3l10 5.5v11L14 25 4 19.5v-11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+            <path d="m9 15 3.2 3.2L19.5 11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
+        <span>roomshift<span class="brand-period">.</span></span>
+      </a>
+      <div class="topbar-context"><span class="context-dot"></span> ROOM LAB <span class="context-slash">/</span> LIVING ROOM</div>
+      <div class="topbar-right">
+        <span class="model-status"><span class="status-dot"></span> AIRFLOW ESTIMATE</span>
+        <button class="icon-button reset-button" id="reset-test" type="button" aria-label="Reset test placement" title="Reset test placement">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.4 9.4A6.7 6.7 0 1 1 5 14.2M3 4.9v4.8h4.8" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          <span>Reset</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="top" class="page-shell">
+      <section class="intro">
+        <div class="eyebrow"><span class="eyebrow-mark"></span> A SMALL CHANGE, TESTED FIRST</div>
+        <div class="intro-row">
+          <div>
+            <h1>Give every seat<br class="mobile-break" /> a little more air.</h1>
+            <p>Try a fan move on the map. See what changes before you lift a thing.</p>
+          </div>
+          <details class="room-editor" id="room-editor">
+            <summary class="room-badge" aria-label="Edit room dimensions">
+              <span class="room-badge-icon" aria-hidden="true">⌗</span>
+              <span><strong>Living room</strong><small id="room-size-label">5.2 × 4.0 m</small></span>
+              <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            </summary>
+            <form class="room-editor-popover" id="room-size-form">
+              <div class="room-editor-title">Room dimensions <span>3–8 m</span></div>
+              <div class="room-inputs">
+                <label>Width <span>m</span><input id="room-width" name="width" type="number" min="3" max="8" step="0.1" value="5.2" required /></label>
+                <label>Length <span>m</span><input id="room-height" name="height" type="number" min="3" max="8" step="0.1" value="4" required /></label>
+              </div>
+              <button class="room-apply" type="submit">Update room</button>
+            </form>
+          </details>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Fan placement comparison">
+        <article class="panel comparison-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="eyebrow panel-eyebrow">ROOM COMPARISON <span class="heading-separator">·</span> TWO OCCUPIED SPOTS</div>
+              <h2>Try a different fan position</h2>
+            </div>
+            <span class="dimension-tag"><span class="dimension-icon">↔</span> <span id="panel-room-dimensions">5.2 × 4.0 m</span></span>
+          </div>
+
+          <div class="map-pair">
+            <figure class="map-card" aria-label="Current room arrangement">
+              <figcaption class="map-caption">
+                <span class="map-name"><span class="caption-dot current-dot"></span> CURRENT</span>
+                <span class="map-note">Starting setup</span>
+              </figcaption>
+              <svg class="room-map" id="current-map" data-map="current" viewBox="0 0 520 400" role="group" aria-label="Current room. Fan at the left side of the room."></svg>
+              <div class="map-coordinates"><span class="mini-icon fan-mini" aria-hidden="true">✳</span><span id="current-location">Fan · west side</span></div>
+            </figure>
+
+            <figure class="map-card proposal-card">
+              <figcaption class="map-caption">
+                <span class="map-name"><span class="caption-dot proposal-dot"></span> YOUR TEST</span>
+                <span class="map-note" id="proposal-status">Suggested start</span>
+              </figcaption>
+              <svg class="room-map interactive-map" id="proposal-map" data-map="proposal" viewBox="0 0 520 400" role="group" aria-label="Test room. Drag or tap to move the fan; use arrow keys to adjust its position."></svg>
+              <div class="map-coordinates"><span class="mini-icon proposal-mini" aria-hidden="true">✳</span><span id="proposal-location">Move the fan to test</span></div>
+            </figure>
+          </div>
+
+          <div class="map-tools">
+            <p class="drag-instruction"><span class="drag-icon" aria-hidden="true"><svg viewBox="0 0 22 22"><path d="M11 3v16M3 11h16M11 3l-2 2m2-2 2 2M19 11l-2-2m2 2-2 2M11 19l-2-2m2 2 2-2M3 11l2-2m-2 2 2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg></span><span><strong>Drag or tap</strong> inside your test room</span></p>
+            <div class="map-actions">
+              <button class="button-secondary rotate-button" id="rotate-fan" type="button" aria-label="Rotate fan 15 degrees clockwise"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.8 8.2a6.2 6.2 0 1 0 .1 3.8M15.7 4.7v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg><span>Rotate</span></button>
+              <button class="button-primary" id="find-best" type="button"><span class="sparkle" aria-hidden="true">✳</span> Find best spot</button>
+            </div>
+          </div>
+
+          <div class="map-legend" aria-label="Airflow map legend">
+            <span class="legend-title">ESTIMATED AIRFLOW</span>
+            <span class="legend-key"><i class="legend-swatch low-swatch"></i>Less</span>
+            <span class="legend-key"><i class="legend-swatch mid-swatch"></i>Some</span>
+            <span class="legend-key"><i class="legend-swatch high-swatch"></i>More</span>
+            <span class="legend-spacer"></span>
+            <span class="legend-help">Move fan to update</span>
+          </div>
+        </article>
+
+        <aside class="panel results-panel" aria-live="polite" aria-atomic="false">
+          <div class="result-heading">
+            <div class="eyebrow panel-eyebrow">THE TRADE-OFF</div>
+            <span class="live-indicator"><span class="live-dot"></span> LIVE</span>
+          </div>
+          <div class="average-block">
+            <div class="average-label">Average comfort</div>
+            <div class="score-row">
+              <div class="score-value"><span id="after-average">—</span><span class="score-denominator">/100</span></div>
+              <span class="change-pill" id="average-change">—</span>
+            </div>
+            <div class="average-track" aria-hidden="true"><span class="average-track-before" id="before-track"></span><span class="average-track-after" id="after-track"></span></div>
+            <div class="track-labels"><span><i class="track-dot before-track-dot"></i> Current <strong id="before-average">—</strong></span><span><i class="track-dot after-track-dot"></i> Your test <strong id="after-average-label">—</strong></span></div>
+          </div>
+
+          <div class="results-divider"></div>
+          <div class="zone-heading"><span>BY SEAT</span><span>EST. COMFORT</span></div>
+          <div class="zone-results" id="zone-results"></div>
+
+          <div class="insight-box" id="insight-box">
+            <span class="insight-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 2.8v1.5m0 11.4v1.5m7.2-7.2h-1.5M4.3 10H2.8m12.3-5.1-1.1 1.1M6 14l-1.1 1.1m10.2 0L14 14M6 6 4.9 4.9" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><circle cx="10" cy="10" r="3.1" fill="none" stroke="currentColor" stroke-width="1.45"/></svg></span>
+            <p id="tradeoff-message">Move the fan to see who gets more air.</p>
+          </div>
+
+          <details class="model-notes">
+            <summary><span>About this estimate</span><span class="notes-plus" aria-hidden="true">＋</span></summary>
+            <div class="notes-body">
+              <p>Color and scores are relative estimates, not measured wind speed. This small model uses fan distance, direction and the coffee table as an obstruction.</p>
+              <p>It does not model fan power, ceiling height, temperature or real drafts. Treat the map as a way to compare options, then test the room itself.</p>
+            </div>
+          </details>
+        </aside>
+      </section>
+
+      <footer class="page-footer">
+        <span><span class="footer-mark">R</span> ROOMSHIFT <span class="footer-separator">/</span> A ROOM-CHANGE TEST</span>
+        <span>Good for comparing ideas. Not a promise of real-world airflow.</span>
+      </footer>
+    </main>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
