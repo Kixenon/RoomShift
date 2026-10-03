@@ -13,6 +13,7 @@ import {
   setFanEnabled,
   setWindowFlow,
   setWindowOpen,
+  setWindowWall,
 } from './model/room-scene.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
@@ -59,6 +60,12 @@ const fieldControls = {
   legendMin: $('#field-legend-min'),
   legendMax: $('#field-legend-max'),
 };
+const timeControls = {
+  group: $('#time-controls'),
+  clock: $('#clock-label'),
+  slider: $('#time-of-day'),
+  lamps: $('#lamps-toggle'),
+};
 
 let editorState = createEditorState();
 let roomScene = editorState.scene;
@@ -95,6 +102,36 @@ function updateScene(scene, { record = !isDragging } = {}) {
   fieldController?.setScene(scene);
 }
 
+function renderTimeOfDay() {
+  const state = viewport?.daylightState;
+  if (!state) return;
+  timeControls.clock.textContent = state.clock;
+  timeControls.clock.title = state.sun.altitude > 0
+    ? `Sun ${state.sun.altitude.toFixed(0)}° up, bearing ${Math.round(state.sun.azimuth)}°. ${state.site.name}.`
+    : `Sun below the horizon. ${state.site.name}.`;
+  // The button is a lamp switch, so it reads as on whenever the lamps are lit,
+  // whether dusk turned them on or the user did. Only the explanation differs.
+  setPressed(timeControls.lamps, state.lampsOn);
+  timeControls.lamps.setAttribute('aria-label', state.lampsOn ? 'Switch the lamps off' : 'Switch the lamps on');
+  const manual = viewport.lampsOverride !== null;
+  timeControls.lamps.title = state.lampsOn
+    ? `Lamps on${manual ? ', set by hand' : ', following dusk'}. Click to switch them off.`
+    : `Lamps off${manual ? ', set by hand' : ''}. Click to switch them on.`;
+}
+
+timeControls.slider.addEventListener('input', () => {
+  viewport.setTimeOfDay({ timeMinutes: Number(timeControls.slider.value) });
+  renderTimeOfDay();
+});
+timeControls.lamps.addEventListener('click', () => {
+  // A plain on/off switch. It flips whatever the lamps are doing now, so it can
+  // switch them off at night as well as on during the day; the dusk threshold
+  // only decides the state until the first click.
+  const next = !(viewport?.daylightState?.lampsOn ?? false);
+  viewport.setTimeOfDay({ lampsOverride: next });
+  renderTimeOfDay();
+});
+
 function renderFieldState({ mode, loading, result, error, stale }) {
   const viewportElement = $('#viewport');
   const displayStyle = fieldController?.displayStyle;
@@ -128,9 +165,15 @@ function renderFieldState({ mode, loading, result, error, stale }) {
   fieldControls.legend.hidden = !mode || (!result && !(mode === 'light' && displayStyle === 'preview'));
   fieldControls.status.textContent = loading ? (mode === 'light' ? 'Estimating…' : 'Solving…') : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
   fieldControls.status.title = error?.message ?? '';
-  if (mode === 'light' && displayStyle === 'preview') {
-    if (!loading && !error) fieldControls.status.textContent = 'Realtime shadows';
-    fieldControls.status.title = error?.message ?? 'Monochrome room render with lamp point lights and cast shadows.';
+  const showDaylightControls = mode === 'light' && displayStyle === 'preview';
+  timeControls.group.hidden = !showDaylightControls;
+  if (showDaylightControls) {
+    renderTimeOfDay();
+    // The active mode is already named by the pressed button and the clock
+    // reports the time, so there is nothing worth saying here. Keep the
+    // transient states, which are the only part that carries new information.
+    fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
+    fieldControls.status.title = error?.message ?? '';
     fieldControls.gradient.dataset.mode = 'light';
     fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
     fieldControls.legendMin.textContent = 'shadow';
@@ -251,6 +294,9 @@ function renderProperties() {
     <div class="properties-form">
       <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
       ${isWindow ? `
+        <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="Window wall">
+          <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
+        </select></label>
         <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="Window open" ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
         <label class="property-field"><span>Window pressure</span><select class="property-input" data-window-flow-direction aria-label="Window exterior pressure direction">
           <option value="exchange">Stack exchange · two-way</option><option value="inlet">Positive pressure · intake bias</option><option value="outlet">Negative pressure · exhaust bias</option>
@@ -294,6 +340,7 @@ function renderProperties() {
   `;
   properties.querySelector('[data-object-name]').value = object.name;
   if (isWindow) {
+    properties.querySelector('[data-window-wall]').value = object.wall ?? 'back';
     properties.querySelector('[data-window-flow-direction]').value = object.flowDirection ?? 'exchange';
   }
   else properties.querySelector('[data-object-model]').value = object.model;
@@ -419,6 +466,8 @@ properties.addEventListener('change', (event) => {
       updateScene(result.scene);
     } else if (input.matches('[data-window-open]')) {
       updateScene(setWindowOpen(roomScene, object.id, input.checked).scene);
+    } else if (input.matches('[data-window-wall]')) {
+      updateScene(setWindowWall(roomScene, object.id, input.value).scene);
     } else if (input.matches('[data-fan-enabled]')) {
       updateScene(setFanEnabled(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-flow-direction]')) {

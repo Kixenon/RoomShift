@@ -3,6 +3,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
+import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
+
+// Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
+// light preview used before there was a time of day, so an unchanged scene looks
+// the same at the times when the lamps are on.
+const LAMP_LIGHT_DISTANCE = 9;
 
 const COLORS = Object.freeze({
   fan: 0x6d9c85,
@@ -227,6 +233,10 @@ export class RoomViewport {
     this.fieldLayer = null;
     this.lightingPreview = false;
     this.lightingLights = [];
+    this.timeMinutes = DEFAULT_TIME_MINUTES;
+    this.lampsOverride = null;
+    this.daylightState = null;
+    this.sunPatchMeshes = [];
     this.pointerStart = null;
     this.isTopView = false;
     this.projection = 'perspective';
@@ -547,15 +557,25 @@ export class RoomViewport {
   setLightingPreview(enabled) {
     if (enabled === this.lightingPreview) return;
     this.lightingPreview = enabled;
-    this.hemisphereLight.intensity = enabled ? 0.34 : 2.1;
-    this.keyLight.intensity = enabled ? 0.08 : 2.6;
-    this.renderer.toneMappingExposure = enabled ? 0.92 : 1.04;
-    this.scene.background.set(enabled ? 0xf3f3f1 : 0xf6f8f6);
+    this.clearSunPatches();
     for (const light of this.lightingLights) {
       this.scene.remove(light);
       light.dispose?.();
     }
     this.lightingLights = [];
+
+    if (!enabled) {
+      // Restore the neutral studio lighting the editor shows outside the preview.
+      this.hemisphereLight.intensity = 2.1;
+      this.keyLight.intensity = 2.6;
+      this.keyLight.color.setHex(0xfff7e9);
+      this.keyLight.castShadow = false;
+      this.keyLight.visible = true;
+      this.keyLight.position.set(-4, 8, 6);
+      this.hemisphereLight.color.setHex(0xeaf3ed);
+      this.renderer.toneMappingExposure = 1.04;
+      this.scene.background.set(0xf6f8f6);
+    }
 
     this.sceneRoot.traverse((child) => {
       const materials = Array.isArray(child.material) ? child.material : [child.material];
@@ -566,8 +586,8 @@ export class RoomViewport {
       for (const object of this.roomScene.objects.filter((item) => item.model === 'lamp')) {
         const group = this.groups.get(object.id);
         if (!group) continue;
-        const source = new THREE.PointLight(0xffffff, 1, 9, 2);
-        source.power = 4500 * (object.intensity ?? 1);
+        const source = new THREE.PointLight(0xffffff, 1, LAMP_LIGHT_DISTANCE, 2);
+        source.power = DEFAULT_LAMP_POWER * (object.intensity ?? 1);
         source.castShadow = true;
         source.position.set(0, object.dimensions.height * 0.22, 0);
         group.localToWorld(source.position);
@@ -582,10 +602,135 @@ export class RoomViewport {
         this.lightingLights.push(source);
       }
     }
-    this.renderer.domElement.dataset.lightingPreview = String(enabled);
     if (enabled) {
+      // Daylight replaces the fixed preview lighting, so derive it from the
+      // current scene and clock rather than hard-coding a look.
+      this.setTimeOfDay({});
       this.renderer.domElement.dataset.fieldMode = 'light';
       this.renderer.domElement.dataset.fieldVolumeVoxels = '0';
+    } else {
+      this.clearDaylightDataset();
+    }
+    this.renderer.domElement.dataset.lightingPreview = String(enabled);
+  }
+
+  /**
+   * Recompute the daylight state and push it into the scene. Safe to call at any
+   * time; it is a no-op for rendering while the light preview is off, but the
+   * state is kept so the inspector can show it.
+   */
+  setTimeOfDay({ timeMinutes, lampsOverride } = {}) {
+    if (timeMinutes !== undefined) this.timeMinutes = timeMinutes;
+    if (lampsOverride !== undefined) this.lampsOverride = lampsOverride;
+    if (!this.roomScene) return null;
+    this.daylightState = describeDaylight({
+      scene: this.roomScene,
+      timeMinutes: this.timeMinutes,
+      lampsOverride: this.lampsOverride,
+    });
+    if (this.lightingPreview) this.applyDaylight();
+    return this.daylightState;
+  }
+
+  applyDaylight() {
+    const state = this.daylightState;
+    if (!state) return;
+
+    const { colour, intensity, direction } = state.sun;
+    this.keyLight.color.setRGB(colour.r, colour.g, colour.b);
+    this.keyLight.intensity = intensity;
+    // Park the sun far enough out that its shadow camera covers the room.
+    const reach = Math.max(this.roomScene?.room.width ?? 5, this.roomScene?.room.depth ?? 4) + 6;
+    this.keyLight.position.set(direction.x * reach, Math.max(direction.y, 0.05) * reach, direction.z * reach);
+    this.keyLight.target.position.set(
+      (this.roomScene?.room.width ?? 5) / 2,
+      0,
+      (this.roomScene?.room.depth ?? 4) / 2,
+    );
+    this.keyLight.target.updateMatrixWorld();
+    this.keyLight.castShadow = state.sun.daylight > 0.02;
+    this.keyLight.visible = state.sun.daylight > 0;
+
+    this.hemisphereLight.color.setRGB(state.sky.colour.r, state.sky.colour.g, state.sky.colour.b);
+    this.hemisphereLight.intensity = state.sky.intensity;
+
+    this.scene.background.setRGB(state.background.r, state.background.g, state.background.b);
+    this.renderer.toneMappingExposure = state.exposure;
+
+    for (const light of this.lightingLights) {
+      const lamp = this.roomScene.objects.find((object) => object.id === light.userData.objectId);
+      light.power = (state.lampsOn ? DEFAULT_LAMP_POWER : 0) * (lamp?.intensity ?? 1);
+    }
+    this.rebuildSunPatches();
+    this.updateDaylightDataset();
+  }
+
+  /** Publish the current daylight so tests and the DOM can read it. */
+  updateDaylightDataset() {
+    const state = this.daylightState;
+    if (!state || !this.lightingPreview) return;
+    const data = this.renderer.domElement.dataset;
+    data.sunAltitude = String(Number(state.sun.altitude.toFixed(1)));
+    data.sunAzimuth = String(Number(state.sun.azimuth.toFixed(1)));
+    data.clockTime = state.clock;
+    data.lampsOn = String(state.lampsOn);
+    data.sunPatches = String(this.sunPatchMeshes.length);
+  }
+
+  clearDaylightDataset() {
+    const data = this.renderer.domElement.dataset;
+    delete data.sunAltitude;
+    delete data.sunAzimuth;
+    delete data.clockTime;
+    delete data.lampsOn;
+    delete data.sunPatches;
+  }
+
+  clearSunPatches() {
+    for (const mesh of this.sunPatchMeshes) {
+      this.sceneRoot.remove(mesh);
+      disposeTree(mesh);
+    }
+    this.sunPatchMeshes = [];
+  }
+
+  /** Sunlit floor patches, drawn as translucent polygons just above the floor. */
+  rebuildSunPatches() {
+    this.clearSunPatches();
+    const state = this.daylightState;
+    if (!state || !state.patches.length) return;
+    const floorY = 0.012;
+
+    for (const patch of state.patches) {
+      const points = patch.polygon;
+      if (points.length < 3) continue;
+      const positions = [];
+      for (let index = 1; index < points.length - 1; index += 1) {
+        for (const point of [points[0], points[index], points[index + 1]]) {
+          positions.push(point.x, floorY, point.z);
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.computeVertexNormals();
+      const colour = state.sun.colour;
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+        color: new THREE.Color(colour.r, colour.g, colour.b),
+        transparent: true,
+        // The directional light already washes the whole floor, so the patch is
+        // what makes direct sun legible. Grazing light spreads the same energy
+        // over more floor and reads as a softer wash rather than a hard shape.
+        opacity: Math.min(0.9, 0.34 + 0.62 * patch.intensity),
+        depthWrite: false,
+        toneMapped: false,
+      }));
+      mesh.renderOrder = 2;
+      mesh.name = `sun-patch-${patch.windowId}`;
+      mesh.userData.windowId = patch.windowId;
+      mesh.userData.area = patch.area;
+      mesh.userData.intensity = patch.intensity;
+      this.sceneRoot.add(mesh);
+      this.sunPatchMeshes.push(mesh);
     }
   }
 

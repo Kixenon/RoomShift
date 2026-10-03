@@ -42,10 +42,15 @@
             </div>
           </div>
           <div class="simulation-controls">
-            <div class="field-controls" role="group" aria-label="Simulation fields">
-              <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow" aria-pressed="false">Air</button>
-              <button id="show-temperature" class="field-button" type="button" aria-label="Show heat" aria-pressed="false">Heat</button>
-              <button id="show-light" class="field-button" type="button" aria-label="Show lighting" aria-pressed="false">Light</button>
+            <div class="field-controls" role="group" aria-label="Simulation and lighting views">
+              <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false">Air</button>
+              <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false">Heat</button>
+              <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false">Light</button>
+              <span class="time-controls" id="time-controls" hidden>
+                <span class="time-clock" id="clock-label">13:30</span>
+                <input id="time-of-day" type="range" min="0" max="1439" step="5" value="810" aria-label="Time of day" />
+                <button id="lamps-toggle" class="tool-button" type="button" aria-pressed="false" aria-label="Switch the lamps on">Lamps</button>
+              </span>
               <span id="field-status" class="field-status" aria-live="polite"></span>
             </div>
             <div id="field-display-controls" class="display-controls" role="group" aria-label="Field display" hidden>
