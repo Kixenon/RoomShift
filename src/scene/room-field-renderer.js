@@ -114,18 +114,20 @@ export function createFieldVolume(result, mode) {
       uOpacity: { value: mode === 'airflow' ? 1.2 : 1.55 },
       uFieldMode: { value: mode === 'airflow' ? 0 : mode === 'temperature' ? 1 : 2 },
     },
-    side: THREE.FrontSide,
+    side: THREE.DoubleSide,
     transparent: true,
     depthTest: true,
     depthWrite: false,
     toneMapped: false,
     vertexShader: `
       varying vec3 vLocalPosition;
-      varying vec3 vRayDirection;
+      varying vec3 vRayOrigin;
       void main() {
         vec4 worldPosition = modelMatrix * vec4(position, 1.0);
         vLocalPosition = position;
-        vRayDirection = normalize(worldPosition.xyz - cameraPosition);
+        // Camera position in the volume's local space, so the raymarch can start
+        // at the eye instead of assuming it sits outside the box.
+        vRayOrigin = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
         gl_Position = projectionMatrix * viewMatrix * worldPosition;
       }
     `,
@@ -137,7 +139,7 @@ export function createFieldVolume(result, mode) {
       uniform float uOpacity;
       uniform int uFieldMode;
       varying vec3 vLocalPosition;
-      varying vec3 vRayDirection;
+      varying vec3 vRayOrigin;
       out vec4 fragColor;
 
       vec3 palette(float value) {
@@ -173,14 +175,37 @@ export function createFieldVolume(result, mode) {
       }
 
       void main() {
-        vec3 direction = normalize(vRayDirection);
-        float stepLength = uStepLength;
-        vec4 accumulated = vec4(0.0);
         vec3 halfSize = uVolumeSize * 0.5;
+        vec3 rayOrigin = vRayOrigin;
+        vec3 direction = vLocalPosition - rayOrigin;
+        float rayLength = length(direction);
+        if (rayLength < 1e-6) discard;
+        direction /= rayLength;
+        bool cameraInside = all(lessThan(abs(rayOrigin), halfSize));
+        // Rasterise exactly one surface per pixel: the entry face when the camera
+        // is outside, the exit face once it is inside. Both faces otherwise
+        // composite the same segment and double the opacity.
+        if (gl_FrontFacing == cameraInside) discard;
+
+        // Clip the view ray to the volume so the march starts at the surface the
+        // camera actually sees through, which is the camera itself when inside.
+        vec3 inverseDirection = 1.0 / direction;
+        vec3 near = (-halfSize - rayOrigin) * inverseDirection;
+        vec3 far = (halfSize - rayOrigin) * inverseDirection;
+        vec3 entry = min(near, far);
+        vec3 exit = max(near, far);
+        float startDistance = max(max(entry.x, entry.y), entry.z);
+        float endDistance = min(min(exit.x, exit.y), exit.z);
+        startDistance = max(startDistance, 0.0);
+        if (endDistance <= startDistance) discard;
+
+        float stepLength = uStepLength;
+        int stepCount = min(192, int(ceil((endDistance - startDistance) / stepLength)));
+        vec4 accumulated = vec4(0.0);
         for (int index = 0; index < 192; index++) {
-          float distance = float(index) * stepLength;
-          vec3 point = vLocalPosition + direction * distance;
-          if (any(greaterThan(abs(point), halfSize))) break;
+          if (index >= stepCount) break;
+          float distance = startDistance + (float(index) + 0.5) * stepLength;
+          vec3 point = rayOrigin + direction * distance;
           vec3 roomCoordinate = point / uVolumeSize + 0.5;
           vec3 textureCoordinate = vec3(roomCoordinate.x, roomCoordinate.z, roomCoordinate.y);
           vec4 field = texture(uField, textureCoordinate);
@@ -203,6 +228,10 @@ export function createFieldVolume(result, mode) {
   volume.position.y = grid.height / 2;
   volume.renderOrder = 1;
   volume.userData.voxelCount = grid.nx * grid.ny * grid.nz;
+  // World-space bounds of the marched volume, so the viewport can tell when the
+  // camera is inside it and drop depth testing for the overlay.
+  volume.userData.boundsCenter = new THREE.Vector3(0, grid.height / 2, 0);
+  volume.userData.boundsHalfSize = new THREE.Vector3(grid.width / 2, grid.height / 2, grid.depth / 2);
   return volume;
 }
 
