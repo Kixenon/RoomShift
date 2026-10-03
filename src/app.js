@@ -9,8 +9,10 @@ import {
   resizeRoom,
   rotateObject,
   setObjectModel,
+  setObjectIntensity,
+  setFanEnabled,
+  setWindowFlow,
   setWindowOpen,
-  setWindowWall,
 } from './model/room-scene.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
@@ -107,25 +109,26 @@ function renderFieldState({ mode, loading, result, error }) {
   const cellSize = result.grid.cellSize ?? Math.max(result.grid.dx, result.grid.dy, result.grid.dz);
   const resolution = cellSize < 0.1 ? `${Math.round(cellSize * 100)} cm` : `${cellSize.toFixed(2)} m`;
   const backend = result.backend === 'webgpu' ? 'GPU' : result.backend === 'cpu-preview' ? 'CPU preview' : 'CPU';
-  fieldControls.status.textContent = `${backend} · ${resolution}`;
-  fieldControls.status.title = result.backend === 'cpu-preview'
-    ? 'WebGPU is unavailable; this lower-resolution CPU preview can miss fine details.'
-    : result.assumptions?.model ?? '';
+  const duration = `${result.durationSeconds.toFixed(1)} s`;
+  fieldControls.status.textContent = `${backend} · ${resolution} · ${duration}`;
+  const previewNote = result.backend === 'cpu-preview'
+    ? ' WebGPU is unavailable, so this lower-resolution CPU preview may miss fine details.'
+    : '';
+  fieldControls.status.title = `${result.assumptions?.model ?? 'Room field estimate'}. Simulated ${duration}; peak airflow ${result.stats.maxSpeed.toFixed(2)} m/s; peak temperature ${result.stats.maxTemperature.toFixed(1)} °C.${previewNote}`;
 
   fieldControls.gradient.dataset.mode = mode;
   let legend;
   if (mode === 'airflow') {
     legend = {
-      title: 'Airflow · estimate',
+      title: 'Airflow · advected gas',
       minimum: '0 m/s',
-      maximum: `${result.stats.maxSpeed.toFixed(2)} m/s`,
+      maximum: '1.2+ m/s',
     };
   } else if (mode === 'temperature') {
-    const precision = result.stats.maxTemperature - result.ambientTemperature >= 1 ? 1 : 2;
     legend = {
-      title: 'Temperature · estimate',
-      minimum: `${result.ambientTemperature.toFixed(precision)} °C`,
-      maximum: `${result.stats.maxTemperature.toFixed(precision)} °C`,
+      title: 'Infrared · air temperature estimate',
+      minimum: `${(result.ambientTemperature - 4).toFixed(1)} °C`,
+      maximum: `${(result.ambientTemperature + 8).toFixed(1)}+ °C`,
     };
   } else {
     legend = {
@@ -195,6 +198,9 @@ function propertyField(label, axis, value, kind, limits = {}) {
 function renderProperties() {
   const object = selectedObject();
   const isWindow = object?.model === 'window';
+  const sourceLabels = { fan: 'Fan output', heater: 'Heat output', lamp: 'Lamp brightness' };
+  const sourceLabel = sourceLabels[object?.model];
+  const intensity = object?.intensity ?? 1;
   $('#delete-object').disabled = !object;
   if (!object) {
     properties.innerHTML = '<div class="empty-properties">Select an object</div>';
@@ -214,10 +220,14 @@ function renderProperties() {
     <div class="properties-form">
       <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
       ${isWindow ? `
-        <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="Window wall">
-          <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
+        <label class="window-open-toggle"><input type="checkbox" data-window-open ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
+        <label class="property-field"><span>Window flow</span><select class="property-input" data-window-flow-direction aria-label="Window airflow direction">
+          <option value="exchange">Exchange · in low, out high</option><option value="inlet">Inlet · source</option><option value="outlet">Outlet · sink</option>
         </select></label>
-        <label class="window-open-toggle"><input type="checkbox" data-window-open ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow can escape' : 'Closed'}</span></label>
+        <div class="property-group">
+          <div class="range-heading"><span>Flow speed</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
+          <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Window airflow speed in meters per second" />
+        </div>
       ` : `<label class="property-field"><span>Model</span><select class="property-input" data-object-model aria-label="Box model">${modelOptions}</select></label>`}
       <div class="property-group">
         <div class="property-label">Position · m</div>
@@ -227,6 +237,11 @@ function renderProperties() {
           ${propertyField('Z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
         </div>
       </div>
+      ${sourceLabel ? `<div class="property-group">
+        ${object.model === 'fan' ? `<label class="window-open-toggle"><input type="checkbox" data-fan-enabled ${object.enabled !== false ? 'checked' : ''} /><span>${object.enabled !== false ? 'Fan running' : 'Fan off'}</span></label>` : ''}
+        <div class="range-heading"><span>${sourceLabel}</span><output data-range-output>${Math.round(intensity * 100)}%</output></div>
+        <input class="property-slider" type="range" min="0" max="2" step="0.05" value="${intensity}" data-source-intensity aria-label="${sourceLabel}" />
+      </div>` : ''}
       <div class="property-group">
         <div class="property-label">Size · m</div>
         <div class="property-fields">
@@ -243,11 +258,13 @@ function renderProperties() {
           ${propertyField('Z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
         </div>
       </div>`}
-      <div class="properties-note">${isWindow ? 'Open windows exhaust airflow and heat from the room.' : 'Drag the gizmo to move or rotate.'}</div>
+      <div class="properties-note">${isWindow ? 'Drag the window toward a wall to snap it into place.' : 'Drag the gizmo to move or rotate.'}</div>
     </div>
   `;
   properties.querySelector('[data-object-name]').value = object.name;
-  if (isWindow) properties.querySelector('[data-window-wall]').value = object.wall;
+  if (isWindow) {
+    properties.querySelector('[data-window-flow-direction]').value = object.flowDirection ?? 'exchange';
+  }
   else properties.querySelector('[data-object-model]').value = object.model;
 }
 
@@ -342,8 +359,14 @@ properties.addEventListener('change', (event) => {
       updateScene(result.scene);
     } else if (input.matches('[data-window-open]')) {
       updateScene(setWindowOpen(roomScene, object.id, input.checked).scene);
-    } else if (input.matches('[data-window-wall]')) {
-      updateScene(setWindowWall(roomScene, object.id, input.value).scene);
+    } else if (input.matches('[data-fan-enabled]')) {
+      updateScene(setFanEnabled(roomScene, object.id, input.checked).scene);
+    } else if (input.matches('[data-window-flow-direction]')) {
+      updateScene(setWindowFlow(roomScene, object.id, input.value, object.flowRate ?? 0.35).scene);
+    } else if (input.matches('[data-window-flow-rate]')) {
+      updateScene(setWindowFlow(roomScene, object.id, object.flowDirection ?? 'exchange', Number(input.value)).scene);
+    } else if (input.matches('[data-source-intensity]')) {
+      updateScene(setObjectIntensity(roomScene, object.id, Number(input.value)).scene);
     } else if (input.type === 'number' && input.dataset.position) {
       const value = Number(input.value);
       if (!Number.isFinite(value)) return renderProperties();
@@ -366,6 +389,16 @@ properties.addEventListener('change', (event) => {
   } catch {
     renderProperties();
   }
+});
+
+properties.addEventListener('input', (event) => {
+  const input = event.target;
+  if (!input.matches('[data-window-flow-rate], [data-source-intensity]')) return;
+  const output = input.closest('.property-group')?.querySelector('[data-range-output]');
+  if (!output) return;
+  output.textContent = input.matches('[data-window-flow-rate]')
+    ? `${Number(input.value).toFixed(2)} m/s`
+    : `${Math.round(Number(input.value) * 100)}%`;
 });
 
 $('#delete-object').addEventListener('click', () => {
