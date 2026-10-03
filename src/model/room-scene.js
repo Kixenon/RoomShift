@@ -1,0 +1,295 @@
+export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7 });
+
+export const DEFAULT_BOX_DIMENSIONS = Object.freeze({ width: 1, height: 1, depth: 1 });
+
+const preset = (label, icon, dimensions) => Object.freeze({
+  label,
+  icon,
+  dimensions: Object.freeze(dimensions),
+});
+
+export const MODEL_PRESETS = Object.freeze({
+  box: preset('Box', '□', DEFAULT_BOX_DIMENSIONS),
+  fan: preset('Fan', '✳', { width: 0.42, height: 1.35, depth: 0.42 }),
+  sofa: preset('Sofa', '▰', { width: 1.55, height: 0.78, depth: 0.84 }),
+  bed: preset('Bed', '▰', { width: 1.6, height: 0.55, depth: 2 }),
+  desk: preset('Desk', '▤', { width: 1.18, height: 0.74, depth: 0.62 }),
+  table: preset('Table', '▱', { width: 0.92, height: 0.38, depth: 0.62 }),
+  lamp: preset('Lamp', '◉', { width: 0.32, height: 1.55, depth: 0.32 }),
+  heater: preset('Heater', '▥', { width: 0.9, height: 0.56, depth: 0.18 }),
+  window: preset('Window', '▣', { width: 1.4, height: 1, depth: 0.06 }),
+});
+
+const INITIAL_OBJECTS = Object.freeze([
+  { id: 'fan-1', primitive: 'box', model: 'fan', name: 'Pedestal fan', position: { x: 0.82, y: 0, z: 3.15 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
+  { id: 'sofa-2', primitive: 'box', model: 'sofa', name: 'Sofa', position: { x: 4.18, y: 0, z: 3.04 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.55, height: 0.78, depth: 0.84 } },
+  { id: 'desk-3', primitive: 'box', model: 'desk', name: 'Desk', position: { x: 4.18, y: 0, z: 0.86 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.18, height: 0.74, depth: 0.62 } },
+  { id: 'table-4', primitive: 'box', model: 'table', name: 'Coffee table', position: { x: 2.62, y: 0, z: 2.12 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.92, height: 0.38, depth: 0.62 } },
+  { id: 'lamp-1', primitive: 'box', model: 'lamp', name: 'Floor lamp', position: { x: 1.2, y: 0, z: 0.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
+  { id: 'heater-1', primitive: 'box', model: 'heater', name: 'Panel heater', position: { x: 0.55, y: 0, z: 1.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
+]);
+
+export function createRoomScene() {
+  return {
+    room: { ...DEFAULT_ROOM },
+    objects: INITIAL_OBJECTS.map((object) => structuredClone(object)),
+    nextObjectId: 5,
+    nextWindowId: 1,
+  };
+}
+
+function anchoredWindowPosition(object, position, room) {
+  const wall = object.wall ?? 'back';
+  const alongX = wall === 'back' || wall === 'front';
+  const span = alongX ? room.width : room.depth;
+  const dimensions = {
+    ...object.dimensions,
+    width: Math.min(object.dimensions.width, span - 0.2),
+    height: Math.min(object.dimensions.height, room.height - 0.2),
+  };
+  const halfWidth = dimensions.width / 2;
+  const depthOffset = dimensions.depth / 2;
+  const widthPosition = clampAndRound(position.x ?? object.position.x, halfWidth + (alongX ? 0 : depthOffset), span - halfWidth - (alongX ? 0 : depthOffset));
+  const depthPosition = clampAndRound(position.z ?? object.position.z, halfWidth, room.depth - halfWidth);
+  return {
+    ...object,
+    dimensions,
+    position: {
+      x: alongX
+        ? widthPosition
+        : wall === 'left' ? depthOffset : room.width - depthOffset,
+      y: clampAndRound(position.y ?? object.position.y, 0.1, room.height - dimensions.height - 0.1),
+      z: alongX
+        ? wall === 'front' ? depthOffset : room.depth - depthOffset
+        : depthPosition,
+    },
+    rotation: { x: 0, y: wall === 'left' ? 90 : wall === 'right' ? -90 : wall === 'back' ? 180 : 0, z: 0 },
+  };
+}
+
+export function addWindow(scene, wall = 'back') {
+  if (!['back', 'front', 'left', 'right'].includes(wall)) throw new RangeError(`Unsupported window wall: ${wall}`);
+  const idNumber = scene.nextWindowId ?? 1;
+  const dimensions = { ...MODEL_PRESETS.window.dimensions };
+  const object = anchoredWindowPosition({
+    id: `window-${idNumber}`,
+    primitive: 'box',
+    model: 'window',
+    name: `Window ${idNumber}`,
+    wall,
+    open: false,
+    dimensions,
+    position: { x: scene.room.width / 2, y: 0.9, z: scene.room.depth - dimensions.depth / 2 },
+    rotation: { x: 0, y: 0, z: 0 },
+  }, {}, scene.room);
+  return {
+    object,
+    scene: { ...scene, nextWindowId: idNumber + 1, objects: [...scene.objects, object] },
+  };
+}
+
+export function setWindowOpen(scene, objectId, open) {
+  const existing = scene.objects.find((object) => object.id === objectId);
+  if (!existing || existing.model !== 'window') throw new RangeError(`Unknown window: ${objectId}`);
+  const updated = { ...existing, open: Boolean(open) };
+  return {
+    object: updated,
+    scene: { ...scene, objects: scene.objects.map((object) => object.id === objectId ? updated : object) },
+  };
+}
+
+export function setWindowWall(scene, objectId, wall) {
+  const existing = scene.objects.find((object) => object.id === objectId);
+  if (!existing || existing.model !== 'window') throw new RangeError(`Unknown window: ${objectId}`);
+  if (!['back', 'front', 'left', 'right'].includes(wall)) throw new RangeError(`Unsupported window wall: ${wall}`);
+  const wasAlongX = existing.wall === 'back' || existing.wall === 'front';
+  const isAlongX = wall === 'back' || wall === 'front';
+  const position = wasAlongX === isAlongX ? existing.position : {
+    ...existing.position,
+    x: scene.room.width / 2,
+    z: scene.room.depth / 2,
+  };
+  const updated = anchoredWindowPosition({ ...existing, wall }, position, scene.room);
+  return {
+    object: updated,
+    scene: { ...scene, objects: scene.objects.map((object) => object.id === objectId ? updated : object) },
+  };
+}
+
+export function addObject(scene, options = {}) {
+  const { model = 'box', name, dimensions = DEFAULT_BOX_DIMENSIONS } = options;
+  if (!MODEL_PRESETS[model]) throw new RangeError(`Unsupported object model: ${model}`);
+  if (model === 'window') throw new RangeError('Use addWindow to place a window on a room wall.');
+
+  const idNumber = scene.nextObjectId;
+  const boxDimensions = { ...dimensions };
+  const object = {
+    id: `box-${idNumber}`,
+    primitive: 'box',
+    model,
+    name: normalizeObjectName(name ?? `Box ${idNumber}`),
+    dimensions: boxDimensions,
+    position: {
+      x: clampAndRound(scene.room.width / 2 + ((idNumber % 3) - 1) * 0.52, boxDimensions.width / 2, scene.room.width - boxDimensions.width / 2),
+      y: 0,
+      z: clampAndRound(scene.room.depth / 2 + (idNumber % 2 ? 0.56 : -0.56), boxDimensions.depth / 2, scene.room.depth - boxDimensions.depth / 2),
+    },
+    rotation: { x: 0, y: 0, z: 0 },
+  };
+  return { object, scene: { ...scene, nextObjectId: idNumber + 1, objects: [...scene.objects, object] } };
+}
+
+export function setObjectModel(scene, objectId, model) {
+  const existing = scene.objects.find((object) => object.id === objectId);
+  if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
+  if (!MODEL_PRESETS[model]) throw new RangeError(`Unsupported object model: ${model}`);
+  if (model === 'window') throw new RangeError('Use addWindow to place a window on a room wall.');
+  const updated = { ...existing, primitive: 'box', model };
+  const objects = scene.objects.map((object) => object.id === objectId ? updated : object);
+  return { scene: { ...scene, objects }, object: updated };
+}
+
+export function renameObject(scene, objectId, name) {
+  const existing = scene.objects.find((object) => object.id === objectId);
+  if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
+  const updated = { ...existing, name: normalizeObjectName(name) };
+  const objects = scene.objects.map((object) => object.id === objectId ? updated : object);
+  return { scene: { ...scene, objects }, object: updated };
+}
+
+function normalizeObjectName(name) {
+  if (typeof name !== 'string') throw new TypeError('Object name must be text.');
+  const normalized = name.trim();
+  if (!normalized || normalized.length > 80) throw new RangeError('Object name must contain 1–80 characters.');
+  return normalized;
+}
+
+export function rotationMatrixXYZ(rotation) {
+  const x = rotation.x * Math.PI / 180;
+  const y = rotation.y * Math.PI / 180;
+  const z = rotation.z * Math.PI / 180;
+  const cx = Math.cos(x);
+  const sx = Math.sin(x);
+  const cy = Math.cos(y);
+  const sy = Math.sin(y);
+  const cz = Math.cos(z);
+  const sz = Math.sin(z);
+
+  return [
+    [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
+    [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
+    [-sy, cy * sx, cy * cx],
+  ];
+}
+
+export function rotatedHalfExtents(dimensions, rotation) {
+  const matrix = rotationMatrixXYZ(rotation);
+  const half = [dimensions.width / 2, dimensions.height / 2, dimensions.depth / 2];
+  return matrix.map((row) => row.reduce((extent, coefficient, axis) => extent + Math.abs(coefficient) * half[axis], 0));
+}
+
+const normalizeDegrees = (degrees) => round((((degrees + 180) % 360 + 360) % 360) - 180);
+
+function boundedPosition(object, position, room) {
+  const [halfWidth, halfHeight, halfDepth] = rotatedHalfExtents(object.dimensions, object.rotation);
+  if (halfWidth * 2 > room.width || halfDepth * 2 > room.depth
+    || halfHeight * 2 > room.height) {
+    throw new RangeError(`Object ${object.id} does not fit inside the room at this rotation.`);
+  }
+  return {
+    x: clampAndRound(position.x ?? object.position.x, halfWidth, room.width - halfWidth),
+    y: clampAndRound(
+      position.y ?? object.position.y,
+      halfHeight - object.dimensions.height / 2,
+      room.height - halfHeight - object.dimensions.height / 2,
+    ),
+    z: clampAndRound(position.z ?? object.position.z, halfDepth, room.depth - halfDepth),
+  };
+}
+
+export function moveObject(scene, objectId, position) {
+  const existing = scene.objects.find((object) => object.id === objectId);
+  if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
+  const moved = { ...existing, position: boundedPosition(existing, position, scene.room) };
+  const anchored = existing.model === 'window' ? anchoredWindowPosition(existing, position, scene.room) : moved;
+  const objects = scene.objects.map((object) => object.id === objectId ? anchored : object);
+  return { scene: { ...scene, objects }, object: anchored };
+}
+
+export const ROOM_LIMITS = Object.freeze({
+  width: Object.freeze({ min: 2, max: 20 }),
+  depth: Object.freeze({ min: 2, max: 20 }),
+  height: Object.freeze({ min: 2, max: 6 }),
+});
+
+export function resizeRoom(scene, dimensions) {
+  const room = { ...scene.room, ...dimensions };
+  for (const [axis, limits] of Object.entries(ROOM_LIMITS)) {
+    if (!Number.isFinite(room[axis]) || room[axis] < limits.min || room[axis] > limits.max) {
+      throw new RangeError(`${axis} must be between ${limits.min} and ${limits.max} meters.`);
+    }
+  }
+  const objects = scene.objects.map((object) => object.model === 'window'
+    ? anchoredWindowPosition(object, object.position, room)
+    : { ...object, position: boundedPosition(object, object.position, room) });
+  return { ...scene, room, objects };
+}
+
+export function resizeObject(scene, objectId, dimensions) {
+  const existing = scene.objects.find((object) => object.id === objectId);
+  if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
+  if (existing.model === 'window') {
+    const alongX = existing.wall === 'back' || existing.wall === 'front';
+    const maxWidth = (alongX ? scene.room.width : scene.room.depth) - 0.2;
+    const nextDimensions = { ...existing.dimensions, ...dimensions, depth: existing.dimensions.depth };
+    if (nextDimensions.width < 0.4 || nextDimensions.width > maxWidth
+      || nextDimensions.height < 0.4 || nextDimensions.height > scene.room.height - 0.2) {
+      throw new RangeError('Window dimensions do not fit on this wall.');
+    }
+    const resized = anchoredWindowPosition({ ...existing, dimensions: nextDimensions }, existing.position, scene.room);
+    const objects = scene.objects.map((object) => object.id === objectId ? resized : object);
+    return { scene: { ...scene, objects }, object: resized };
+  }
+  const nextDimensions = { ...existing.dimensions, ...dimensions };
+  for (const axis of ['width', 'height', 'depth']) {
+    const roomLimit = axis === 'height' ? scene.room.height : axis === 'width' ? scene.room.width : scene.room.depth;
+    if (!Number.isFinite(nextDimensions[axis]) || nextDimensions[axis] < 0.1 || nextDimensions[axis] > roomLimit) {
+      throw new RangeError(`Object ${axis} must be between 0.1 and ${roomLimit} meters.`);
+    }
+  }
+  const resized = {
+    ...existing,
+    dimensions: nextDimensions,
+    position: boundedPosition({ ...existing, dimensions: nextDimensions }, existing.position, scene.room),
+  };
+  const objects = scene.objects.map((object) => object.id === objectId ? resized : object);
+  return { scene: { ...scene, objects }, object: resized };
+}
+
+export function rotateObject(scene, objectId, rotation) {
+  const existing = scene.objects.find((object) => object.id === objectId);
+  if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
+  if (existing.model === 'window') return { scene, object: existing };
+  const nextRotation = {};
+  for (const axis of ['x', 'y', 'z']) {
+    const degrees = rotation?.[axis] ?? existing.rotation[axis];
+    if (!Number.isFinite(degrees)) throw new RangeError(`Rotation ${axis.toUpperCase()} must be finite.`);
+    nextRotation[axis] = normalizeDegrees(degrees);
+  }
+  const rotated = {
+    ...existing,
+    rotation: nextRotation,
+    position: boundedPosition({ ...existing, rotation: nextRotation }, existing.position, scene.room),
+  };
+  const objects = scene.objects.map((object) => object.id === objectId ? rotated : object);
+  return { scene: { ...scene, objects }, object: rotated };
+}
+
+export function removeObject(scene, objectId) {
+  if (!scene.objects.some((object) => object.id === objectId)) throw new RangeError(`Unknown object: ${objectId}`);
+  return { ...scene, objects: scene.objects.filter((object) => object.id !== objectId) };
+}
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const round = (value) => Number(value.toFixed(2));
+const clampAndRound = (value, min, max) => clamp(round(clamp(value, min, max)), min, max);

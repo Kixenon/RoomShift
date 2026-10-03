@@ -1,378 +1,504 @@
-import { isPlacementClear, recommendPlacement, scoreZone } from './simulation.js';
-import { boundFanPosition, comparePlacements } from './planner.js';
-import { createScenario, DEFAULT_ROOM, ROOM_LIMITS } from './scenario.js';
+import {
+  MODEL_PRESETS,
+  addObject,
+  addWindow,
+  moveObject,
+  removeObject,
+  renameObject,
+  resizeObject,
+  resizeRoom,
+  rotateObject,
+  setObjectModel,
+  setWindowOpen,
+  setWindowWall,
+} from './model/room-scene.js';
+import { UndoHistory } from './model/undo-history.js';
+import { RoomFieldController } from './simulation/room-field-controller.js';
+import {
+  createEditorState,
+  resetEditorState,
+  selectObject as selectEditorObject,
+  setTransformMode as setEditorTransformMode,
+  setView as setEditorView,
+} from './model/editor-state.js';
+import { RoomViewport } from './scene/room-viewport.js';
 
-const MAP = Object.freeze({ width: 520, height: 400, edge: 32, maxWidth: 456, maxHeight: 348 });
-const SAMPLE_STEP = 0.42;
-const KEYBOARD_STEP = 0.2;
-
-let scenario = createScenario(DEFAULT_ROOM);
-let baselineFan = { ...scenario.baselineFan };
-let startingProposal = recommendPlacement({
-  room: scenario.room,
-  zones: scenario.zones,
-  obstacles: scenario.obstacles,
-  initialFan: baselineFan,
-}).fan;
-let proposedFan = { ...startingProposal };
-let proposalStatus = 'Suggested start';
-let draggingFan = false;
-
-const currentMap = document.querySelector('#current-map');
-const proposalMap = document.querySelector('#proposal-map');
-const zoneResults = document.querySelector('#zone-results');
 const $ = (selector) => document.querySelector(selector);
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+})[character]);
+const roomInputs = {
+  width: $('#room-width'),
+  depth: $('#room-depth'),
+  height: $('#room-height'),
+};
+const objectList = $('#object-list');
+const properties = $('#object-properties');
+const fieldControls = {
+  airflow: $('#show-airflow'),
+  temperature: $('#show-temperature'),
+  light: $('#show-light'),
+  status: $('#field-status'),
+  legend: $('#field-legend'),
+  legendTitle: $('#field-legend-title'),
+  gradient: $('#field-gradient'),
+  legendMin: $('#field-legend-min'),
+  legendMax: $('#field-legend-max'),
+};
 
-function roomFrame(room) {
-  const scale = Math.min(MAP.maxWidth / room.width, MAP.maxHeight / room.height);
-  const width = room.width * scale;
-  const height = room.height * scale;
-  return {
-    x: (MAP.width - width) / 2,
-    y: (MAP.height - height) / 2,
-    width,
-    height,
-    scale,
-  };
+let editorState = createEditorState();
+let roomScene = editorState.scene;
+let selectedId = editorState.selectedId;
+let transformMode = editorState.transformMode;
+let viewport;
+let fieldController;
+const history = new UndoHistory();
+let isDragging = false;
+let dragSnapshot = null;
+
+function currentSnapshot() {
+  return { scene: roomScene, selectedId };
 }
 
-function toMap(point, frame) {
-  return { x: frame.x + point.x * frame.scale, y: frame.y + point.y * frame.scale };
+function recordHistory() {
+  history.record(currentSnapshot());
 }
 
-function colorForScore(score) {
-  if (score < 32) return '#e4a17a';
-  if (score < 58) return '#e4c16c';
-  return '#62b294';
+function setPressed(button, pressed) {
+  button.classList.toggle('active', pressed);
+  button.setAttribute('aria-pressed', String(pressed));
 }
 
-function renderHeat(fan, frame) {
-  const cells = [];
-  const room = scenario.room;
-  const cellSize = SAMPLE_STEP * frame.scale;
-
-  for (let x = SAMPLE_STEP / 2; x < room.width; x += SAMPLE_STEP) {
-    for (let y = SAMPLE_STEP / 2; y < room.height; y += SAMPLE_STEP) {
-      const score = scoreZone({
-        fan,
-        zone: { x, y },
-        room,
-        obstacles: scenario.obstacles,
-      });
-      const point = toMap({ x, y }, frame);
-      const color = colorForScore(score);
-      const opacity = (0.08 + score / 100 * 0.16).toFixed(2);
-      const inset = Math.min(1.4, cellSize * 0.06);
-      cells.push(`<rect x="${(point.x - cellSize / 2 + inset).toFixed(1)}" y="${(point.y - cellSize / 2 + inset).toFixed(1)}" width="${(cellSize - inset * 2).toFixed(1)}" height="${(cellSize - inset * 2).toFixed(1)}" rx="${Math.min(6, cellSize * 0.16).toFixed(1)}" fill="${color}" fill-opacity="${opacity}" />`);
-    }
-  }
-
-  return cells.join('');
+function updateScene(scene, { record = !isDragging } = {}) {
+  if (JSON.stringify(scene) === JSON.stringify(roomScene)) return;
+  if (record) recordHistory();
+  roomScene = scene;
+  editorState = { ...editorState, scene };
+  fieldController?.setScene(scene);
 }
 
-function renderRoomGrid(frame) {
-  const lines = [];
-  const interval = 0.5;
-  for (let x = interval; x < scenario.room.width; x += interval) {
-    const px = (frame.x + x * frame.scale).toFixed(1);
-    lines.push(`<line x1="${px}" y1="${frame.y.toFixed(1)}" x2="${px}" y2="${(frame.y + frame.height).toFixed(1)}" />`);
-  }
-  for (let y = interval; y < scenario.room.height; y += interval) {
-    const py = (frame.y + y * frame.scale).toFixed(1);
-    lines.push(`<line x1="${frame.x.toFixed(1)}" y1="${py}" x2="${(frame.x + frame.width).toFixed(1)}" y2="${py}" />`);
-  }
-  return `<g aria-hidden="true" stroke="#dfe4dc" stroke-width=".65" stroke-dasharray="1.4 4" opacity=".72">${lines.join('')}</g>`;
-}
-
-function renderFurniture(frame) {
-  return scenario.furniture.map((item) => {
-    const { x, y } = toMap(item, frame);
-    const width = item.width * frame.scale;
-    const height = item.height * frame.scale;
-
-    if (item.type === 'desk') {
-      return `<g aria-hidden="true" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">
-        <rect x="3" y="2" width="${(width - 6).toFixed(1)}" height="${(height - 5).toFixed(1)}" rx="5" fill="#e3d6ba" stroke="#cbbd9f" stroke-width="1" />
-        <path d="M7 ${height.toFixed(1)}v5m${(width - 14).toFixed(1)}-5v5" stroke="#b9ab90" stroke-width="2" stroke-linecap="round" />
-        <rect x="${(width * .37).toFixed(1)}" y="${(height * .17).toFixed(1)}" width="${(width * .28).toFixed(1)}" height="${(height * .3).toFixed(1)}" rx="2" fill="#a9c0b6" stroke="#809d8d" stroke-width=".8" />
-        <path d="M${(width * .43).toFixed(1)} ${(height * .2).toFixed(1)}h${(width * .15).toFixed(1)}" stroke="#eef5ee" stroke-width=".8" />
-      </g>`;
-    }
-
-    if (item.type === 'sofa') {
-      return `<g aria-hidden="true" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">
-        <rect x="1" y="2" width="${(width - 2).toFixed(1)}" height="${(height - 3).toFixed(1)}" rx="9" fill="#d9e3d5" stroke="#b8cbbc" stroke-width="1.1" />
-        <rect x="5" y="5" width="${(width - 10).toFixed(1)}" height="${(height * .42).toFixed(1)}" rx="5" fill="#ecf0e6" stroke="#ccd8ca" stroke-width=".8" />
-        <path d="M${(width / 2).toFixed(1)} 7v${(height * .36).toFixed(1)}" stroke="#d1dccf" stroke-width=".8" />
-        <rect x="7" y="${(height * .62).toFixed(1)}" width="${(width - 14).toFixed(1)}" height="${(height * .23).toFixed(1)}" rx="4" fill="#c5d5c5" />
-        <path d="M7 ${height.toFixed(1)}v3m${(width - 14).toFixed(1)}-3v3" stroke="#91a994" stroke-width="2" stroke-linecap="round" />
-      </g>`;
-    }
-
-    return `<g aria-hidden="true" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">
-      <ellipse cx="${(width / 2).toFixed(1)}" cy="${(height / 2).toFixed(1)}" rx="${(width / 2 - 1).toFixed(1)}" ry="${(height / 2 - 1).toFixed(1)}" fill="#e7dfcf" stroke="#d3cab8" stroke-width="1" />
-      <ellipse cx="${(width / 2).toFixed(1)}" cy="${(height / 2).toFixed(1)}" rx="${(width / 2 - 6).toFixed(1)}" ry="${(height / 2 - 5).toFixed(1)}" fill="#f0eadb" stroke="#dcd3c1" stroke-width=".8" />
-    </g>`;
-  }).join('');
-}
-
-function renderOccupant(zone, frame) {
-  const point = toMap(zone, frame);
-  const label = zone.id === 'desk' ? 'WORK' : 'LOUNGE';
-  return `<g aria-hidden="true" transform="translate(${point.x.toFixed(1)} ${point.y.toFixed(1)})">
-    <circle r="11" fill="#fff" fill-opacity=".91" stroke="#92af9d" stroke-width="1" />
-    <circle cy="-3.1" r="2" fill="#477663" />
-    <path d="M-4 4c.3-2.8 1.7-4.2 4-4.2S3.8 1.2 4 4" fill="#6a9a7c" />
-    <text y="21" text-anchor="middle" fill="#708177" font-size="7" font-family="DM Sans, sans-serif" font-weight="700" letter-spacing=".5">${label}</text>
-  </g>`;
-}
-
-function renderFan(fan, frame, interactive) {
-  const point = toMap(fan, frame);
-  const roundedX = fan.x.toFixed(1);
-  const roundedY = fan.y.toFixed(1);
-  const roleAttrs = interactive
-    ? `tabindex="0" role="button" aria-label="Fan at ${roundedX} meters from the west wall and ${roundedY} meters from the north wall. Use arrow keys to move."`
-    : 'aria-hidden="true"';
-  const handleAttrs = interactive ? 'data-fan-handle="true"' : '';
-  return `<g transform="translate(${point.x.toFixed(1)} ${point.y.toFixed(1)})" ${handleAttrs} ${roleAttrs}>
-    <circle r="25" fill="transparent" />
-    <g transform="rotate(${fan.angle.toFixed(1)})" aria-hidden="true">
-      <path d="M13 -6 C58 -25 99 -27 139 -16 C149 -4 149 4 139 16 C99 27 58 25 13 6Z" fill="url(#air-beam)" />
-      <path d="M13 0h30m-6-5 6 5-6 5" fill="none" stroke="#3a9375" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".74" />
-    </g>
-    <path d="M0 14v16m-7 0h14" fill="none" stroke="#56796b" stroke-width="2.5" stroke-linecap="round" />
-    <circle r="16" fill="#e7f1e9" fill-opacity=".9" stroke="#3d866c" stroke-width="1.2" />
-    <g fill="#5b9b7d" aria-hidden="true">
-      <path d="M-2-3C-12-14-9-19-5-18 0-17 3-10 2-3Z" />
-      <path d="M-2-3C-12-14-9-19-5-18 0-17 3-10 2-3Z" transform="rotate(120)" />
-      <path d="M-2-3C-12-14-9-19-5-18 0-17 3-10 2-3Z" transform="rotate(240)" />
-    </g>
-    <circle r="3" fill="#f7fff8" stroke="#317459" stroke-width="1.2" />
-  </g>`;
-}
-
-function renderMap(svg, fan, interactive) {
-  const room = scenario.room;
-  const frame = roomFrame(room);
-  const roomRight = frame.x + frame.width;
-  const roomBottom = frame.y + frame.height;
-  const windowStart = frame.x + frame.width * 0.33;
-  const windowEnd = frame.x + frame.width * 0.67;
-  const doorY = frame.y + frame.height * 0.81;
-  const mapId = svg.id;
-
-  svg.innerHTML = `
-    <defs>
-      <pattern id="${mapId}-floor" width="24" height="24" patternUnits="userSpaceOnUse">
-        <circle cx="1" cy="1" r=".55" fill="#9caa9c" opacity=".16" />
-      </pattern>
-      <linearGradient id="air-beam" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0" stop-color="#65b699" stop-opacity=".26" />
-        <stop offset="1" stop-color="#65b699" stop-opacity="0" />
-      </linearGradient>
-      <clipPath id="${mapId}-clip"><rect x="${frame.x}" y="${frame.y}" width="${frame.width}" height="${frame.height}" rx="4" /></clipPath>
-    </defs>
-    <rect x="${(frame.x + 3).toFixed(1)}" y="${(frame.y + 3).toFixed(1)}" width="${frame.width.toFixed(1)}" height="${frame.height.toFixed(1)}" rx="4" fill="#e7ebe4" />
-    <rect x="${frame.x.toFixed(1)}" y="${frame.y.toFixed(1)}" width="${frame.width.toFixed(1)}" height="${frame.height.toFixed(1)}" rx="4" fill="#f6f5ee" stroke="#ccd7ce" stroke-width="1.4" />
-    <g clip-path="url(#${mapId}-clip)">
-      <rect x="${frame.x.toFixed(1)}" y="${frame.y.toFixed(1)}" width="${frame.width.toFixed(1)}" height="${frame.height.toFixed(1)}" fill="url(#${mapId}-floor)" />
-      ${renderHeat(fan, frame)}
-      ${renderRoomGrid(frame)}
-      ${renderFurniture(frame)}
-      ${scenario.zones.map((zone) => renderOccupant(zone, frame)).join('')}
-    </g>
-    <g aria-hidden="true">
-      <path d="M${windowStart.toFixed(1)} ${frame.y.toFixed(1)}v7m${(windowEnd - windowStart).toFixed(1)}-7v7M${windowStart.toFixed(1)} ${(frame.y + 5).toFixed(1)}h${(windowEnd - windowStart).toFixed(1)}" fill="none" stroke="#92b7b1" stroke-width="2" stroke-linecap="round" />
-      <path d="M${roomRight.toFixed(1)} ${doorY.toFixed(1)}v${(roomBottom - doorY - 22).toFixed(1)}M${roomRight.toFixed(1)} ${(roomBottom - 22).toFixed(1)}h-22" fill="none" stroke="#f6f5ee" stroke-width="3.5" />
-      <path d="M${roomRight.toFixed(1)} ${(roomBottom - 22).toFixed(1)}a22 22 0 0 0-22-22" fill="none" stroke="#a7b4a8" stroke-width=".9" stroke-dasharray="2 2" />
-      <text x="${(frame.x + frame.width / 2).toFixed(1)}" y="${(frame.y - 8).toFixed(1)}" text-anchor="middle" fill="#91a19a" font-size="7" font-family="DM Sans, sans-serif" letter-spacing=".7">WINDOW</text>
-      <text x="${(frame.x - 11).toFixed(1)}" y="${(frame.y + frame.height / 2).toFixed(1)}" text-anchor="middle" fill="#9aa69d" font-size="7" font-family="DM Sans, sans-serif" transform="rotate(-90 ${frame.x - 11} ${frame.y + frame.height / 2})">${room.height.toFixed(1)} m</text>
-      <text x="${(frame.x + frame.width / 2).toFixed(1)}" y="${(roomBottom + 14).toFixed(1)}" text-anchor="middle" fill="#9aa69d" font-size="7" font-family="DM Sans, sans-serif">${room.width.toFixed(1)} m</text>
-    </g>
-    ${renderFan(fan, frame, interactive)}
-  `;
-}
-
-function locationText(fan) {
-  return `Fan · ${fan.x.toFixed(1)} m from west / ${fan.y.toFixed(1)} m from north`;
-}
-
-function formatDelta(value, suffix = '') {
-  const rounded = Math.round(value);
-  if (rounded === 0) return `0${suffix}`;
-  return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded)}${suffix}`;
-}
-
-function barLine(label, score, variant) {
-  return `<div class="zone-bar-line">
-    <span class="zone-bar-label">${label}</span>
-    <span class="zone-bar"><span class="zone-bar-fill ${variant}" style="width:${Math.max(3, score)}%"></span></span>
-    <span class="zone-bar-value">${score}</span>
-  </div>`;
-}
-
-function renderResults(comparison) {
-  const before = comparison.before.average;
-  const after = comparison.after.average;
-  const change = comparison.delta;
-  $('#before-average').textContent = before;
-  $('#after-average').textContent = after;
-  $('#after-average-label').textContent = after;
-  $('#average-change').textContent = formatDelta(change);
-  $('#average-change').classList.toggle('down', change < -0.5);
-  $('#average-change').classList.toggle('neutral', Math.abs(change) <= 0.5);
-  $('#before-track').style.width = `${before}%`;
-  $('#after-track').style.width = `${after}%`;
-
-  zoneResults.innerHTML = comparison.changes.map((zone) => {
-    const deltaClass = Math.abs(zone.delta) < 0.5 ? 'neutral' : zone.delta > 0 ? '' : 'down';
-    return `<div class="zone-row">
-      <div class="zone-row-heading">
-        <span class="zone-title"><i class="seat-symbol" aria-hidden="true">${zone.id === 'desk' ? '▤' : '⌂'}</i>${zone.label}</span>
-        <span class="zone-delta ${deltaClass}">${formatDelta(zone.delta)}</span>
-      </div>
-      <div class="zone-bars" aria-label="${zone.label}: current ${zone.before}, test ${zone.score} out of 100">
-        ${barLine('NOW', zone.before, 'before')}
-        ${barLine('TEST', zone.score, 'after')}
-      </div>
-    </div>`;
-  }).join('');
-
-  $('#tradeoff-message').textContent = comparison.message;
-}
-
-function render() {
-  renderMap(currentMap, baselineFan, false);
-  renderMap(proposalMap, proposedFan, true);
-  $('#current-location').textContent = locationText(baselineFan);
-  $('#proposal-location').textContent = locationText(proposedFan);
-  $('#proposal-status').textContent = proposalStatus;
-  const comparison = comparePlacements({
-    baselineFan,
-    proposedFan,
-    zones: scenario.zones,
-    room: scenario.room,
-    obstacles: scenario.obstacles,
-  });
-  renderResults(comparison);
-}
-
-function eventPoint(svg, event) {
-  const matrix = svg.getScreenCTM();
-  if (!matrix) return null;
-  const point = svg.createSVGPoint();
-  point.x = event.clientX;
-  point.y = event.clientY;
-  const local = point.matrixTransform(matrix.inverse());
-  const frame = roomFrame(scenario.room);
-  return {
-    x: (local.x - frame.x) / frame.scale,
-    y: (local.y - frame.y) / frame.scale,
-  };
-}
-
-function moveProposal(point, status = 'Manual test') {
-  const candidate = boundFanPosition({ ...proposedFan, ...point }, scenario.room);
-  if (!isPlacementClear(candidate, scenario.zones, scenario.obstacles)) {
-    proposalStatus = 'Keep clear of furniture';
-    $('#proposal-status').textContent = proposalStatus;
+function renderFieldState({ mode, loading, result, error }) {
+  const viewportElement = $('#viewport');
+  for (const [name, button] of Object.entries({
+    airflow: fieldControls.airflow,
+    temperature: fieldControls.temperature,
+    light: fieldControls.light,
+  })) setPressed(button, mode === name);
+  viewportElement.classList.toggle('field-active', Boolean(mode));
+  viewportElement.setAttribute('aria-busy', String(loading));
+  fieldControls.legend.hidden = !mode || (mode !== 'light' && !result);
+  fieldControls.status.textContent = loading ? 'Solving…' : error ? 'Unavailable' : '';
+  fieldControls.status.title = error?.message ?? '';
+  if (mode === 'light') {
+    fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : 'Realtime shadows';
+    fieldControls.status.title = error?.message ?? 'Monochrome room render with lamp point lights and cast shadows.';
+    fieldControls.gradient.dataset.mode = 'light';
+    fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
+    fieldControls.legendMin.textContent = 'shadow';
+    fieldControls.legendMax.textContent = 'lit';
     return;
   }
-  proposedFan = candidate;
-  proposalStatus = status;
-  render();
-}
+  if (!result) return;
 
-function installMapControls(svg) {
-  svg.addEventListener('pointerdown', (event) => {
-    const point = eventPoint(svg, event);
-    if (!point) return;
-    draggingFan = Boolean(event.target.closest('[data-fan-handle]'));
-    if (draggingFan && svg.setPointerCapture) svg.setPointerCapture(event.pointerId);
-    if (!draggingFan && point.x >= 0 && point.x <= scenario.room.width && point.y >= 0 && point.y <= scenario.room.height) {
-      moveProposal(point);
-    }
-    event.preventDefault();
-  });
+  const cellSize = result.grid.cellSize ?? Math.max(result.grid.dx, result.grid.dy, result.grid.dz);
+  const resolution = cellSize < 0.1 ? `${Math.round(cellSize * 100)} cm` : `${cellSize.toFixed(2)} m`;
+  const backend = result.backend === 'webgpu' ? 'GPU' : result.backend === 'cpu-preview' ? 'CPU preview' : 'CPU';
+  fieldControls.status.textContent = `${backend} · ${resolution}`;
+  fieldControls.status.title = result.backend === 'cpu-preview'
+    ? 'WebGPU is unavailable; this lower-resolution CPU preview can miss fine details.'
+    : result.assumptions?.model ?? '';
 
-  svg.addEventListener('pointermove', (event) => {
-    if (!draggingFan || (event.buttons !== 1 && event.pointerType !== 'touch')) return;
-    const point = eventPoint(svg, event);
-    if (point) moveProposal(point);
-  });
-
-  svg.addEventListener('pointerup', () => { draggingFan = false; });
-  svg.addEventListener('pointercancel', () => { draggingFan = false; });
-  svg.addEventListener('keydown', (event) => {
-    const steps = {
-      ArrowLeft: { x: -KEYBOARD_STEP, y: 0 },
-      ArrowRight: { x: KEYBOARD_STEP, y: 0 },
-      ArrowUp: { x: 0, y: -KEYBOARD_STEP },
-      ArrowDown: { x: 0, y: KEYBOARD_STEP },
+  fieldControls.gradient.dataset.mode = mode;
+  let legend;
+  if (mode === 'airflow') {
+    legend = {
+      title: 'Airflow · estimate',
+      minimum: '0 m/s',
+      maximum: `${result.stats.maxSpeed.toFixed(2)} m/s`,
     };
-    const change = steps[event.key];
-    if (!change || !event.target.closest('[data-fan-handle]')) return;
-    event.preventDefault();
-    moveProposal({ x: proposedFan.x + change.x, y: proposedFan.y + change.y });
-    proposalMap.querySelector('[data-fan-handle]')?.focus();
-  });
+  } else if (mode === 'temperature') {
+    const precision = result.stats.maxTemperature - result.ambientTemperature >= 1 ? 1 : 2;
+    legend = {
+      title: 'Temperature · estimate',
+      minimum: `${result.ambientTemperature.toFixed(precision)} °C`,
+      maximum: `${result.stats.maxTemperature.toFixed(precision)} °C`,
+    };
+  } else {
+    legend = {
+      title: 'Lighting · shadow preview',
+      minimum: 'shadow',
+      maximum: 'lit',
+    };
+  }
+  fieldControls.legendTitle.textContent = legend.title;
+  fieldControls.legendMin.textContent = legend.minimum;
+  fieldControls.legendMax.textContent = legend.maximum;
 }
 
-installMapControls(proposalMap);
+function updateSelection(objectId) {
+  selectedId = objectId;
+  editorState = selectEditorObject(editorState, objectId);
+}
 
-$('#rotate-fan').addEventListener('click', () => {
-  proposedFan = { ...proposedFan, angle: ((proposedFan.angle + 15 + 180) % 360) - 180 };
-  proposalStatus = 'Manual test';
-  render();
-});
+function selectedObject() {
+  return roomScene.objects.find((object) => object.id === selectedId) ?? null;
+}
 
-$('#find-best').addEventListener('click', () => {
-  const recommendation = recommendPlacement({
-    room: scenario.room,
-    zones: scenario.zones,
-    obstacles: scenario.obstacles,
-    initialFan: proposedFan,
-  });
-  proposedFan = { ...recommendation.fan };
-  proposalStatus = 'Suggested spot';
-  render();
-});
+function restoreSnapshot(snapshot) {
+  roomScene = structuredClone(snapshot.scene);
+  selectedId = snapshot.selectedId && roomScene.objects.some((object) => object.id === snapshot.selectedId)
+    ? snapshot.selectedId
+    : null;
+  editorState = { ...editorState, scene: roomScene, selectedId };
+  fieldController?.setScene(roomScene);
+  refreshScene();
+  viewport.setMode(transformMode);
+}
 
-$('#reset-test').addEventListener('click', () => {
-  proposedFan = { ...startingProposal };
-  proposalStatus = 'Suggested start';
-  render();
-});
+function undo() {
+  const snapshot = history.undo(currentSnapshot());
+  if (snapshot) restoreSnapshot(snapshot);
+}
 
-$('#room-size-form').addEventListener('submit', (event) => {
-  event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  const width = Number(form.get('width'));
-  const height = Number(form.get('height'));
-  const isInRange = [width, height].every((value) => (
-    Number.isFinite(value) && value >= ROOM_LIMITS.minimum && value <= ROOM_LIMITS.maximum
-  ));
-  if (!isInRange) {
-    $('#room-width').reportValidity();
-    $('#room-height').reportValidity();
+function redo() {
+  const snapshot = history.redo(currentSnapshot());
+  if (snapshot) restoreSnapshot(snapshot);
+}
+
+function updateRoomSummary() {
+  const { width, depth, height } = roomScene.room;
+  $('#room-summary').textContent = `${width.toFixed(1)} × ${depth.toFixed(1)} × ${height.toFixed(1)} m`;
+  for (const [dimension, input] of Object.entries(roomInputs)) input.value = roomScene.room[dimension];
+}
+
+function renderObjectList() {
+  objectList.innerHTML = roomScene.objects.map((object) => {
+    const model = MODEL_PRESETS[object.model] ?? MODEL_PRESETS.box;
+    return `
+      <button class="object-row ${object.id === selectedId ? 'selected' : ''}" type="button" data-select-object="${escapeHtml(object.id)}" aria-pressed="${object.id === selectedId}">
+        <span class="object-row-icon" aria-hidden="true">${escapeHtml(model.icon)}</span>
+        <span class="object-row-name">${escapeHtml(object.name)}</span>
+        <span class="object-type">${escapeHtml(model.label)}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function propertyField(label, axis, value, kind, limits = {}) {
+  return `<label class="property-field"><span>${label}</span><input class="property-input" type="number" step="0.05" value="${value.toFixed(2)}" data-${kind}="${axis}" aria-label="${kind === 'position' ? 'Position' : 'Dimensions'} ${label}" ${limits.min === undefined ? '' : `min="${limits.min}"`} ${limits.max === undefined ? '' : `max="${limits.max}"`} /></label>`;
+}
+
+function renderProperties() {
+  const object = selectedObject();
+  const isWindow = object?.model === 'window';
+  $('#delete-object').disabled = !object;
+  if (!object) {
+    properties.innerHTML = '<div class="empty-properties">Select an object</div>';
     return;
   }
 
-  scenario = createScenario({ width, height });
-  baselineFan = { ...scenario.baselineFan };
-  startingProposal = recommendPlacement({
-    room: scenario.room,
-    zones: scenario.zones,
-    obstacles: scenario.obstacles,
-    initialFan: baselineFan,
-  }).fan;
-  proposedFan = { ...startingProposal };
-  proposalStatus = 'Suggested start';
-  $('#room-size-label').textContent = `${width.toFixed(1)} × ${height.toFixed(1)} m`;
-  $('#panel-room-dimensions').textContent = `${width.toFixed(1)} × ${height.toFixed(1)} m`;
-  $('#room-editor').open = false;
-  render();
+  const maxWindowWidth = object.wall === 'back' || object.wall === 'front' ? roomScene.room.width - 0.2 : roomScene.room.depth - 0.2;
+  const dimensionLimits = {
+    width: { min: 0.1, max: roomScene.room.width },
+    height: { min: 0.1, max: roomScene.room.height },
+    depth: { min: 0.1, max: roomScene.room.depth },
+  };
+  const modelOptions = Object.entries(MODEL_PRESETS).filter(([key]) => key !== 'window').map(([key, model]) => (
+    `<option value="${escapeHtml(key)}">${escapeHtml(model.label)}</option>`
+  )).join('');
+  properties.innerHTML = `
+    <div class="properties-form">
+      <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
+      ${isWindow ? `
+        <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="Window wall">
+          <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
+        </select></label>
+        <label class="window-open-toggle"><input type="checkbox" data-window-open ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow can escape' : 'Closed'}</span></label>
+      ` : `<label class="property-field"><span>Model</span><select class="property-input" data-object-model aria-label="Box model">${modelOptions}</select></label>`}
+      <div class="property-group">
+        <div class="property-label">Position · m</div>
+        <div class="property-fields">
+          ${propertyField('X', 'x', object.position.x, 'position', { min: 0, max: roomScene.room.width })}
+          ${propertyField('Y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height })}
+          ${propertyField('Z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
+        </div>
+      </div>
+      <div class="property-group">
+        <div class="property-label">Size · m</div>
+        <div class="property-fields">
+          ${propertyField('W', 'width', object.dimensions.width, 'dimension', isWindow ? { min: 0.4, max: maxWindowWidth } : dimensionLimits.width)}
+          ${propertyField('H', 'height', object.dimensions.height, 'dimension', isWindow ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
+          ${isWindow ? '' : propertyField('D', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
+        </div>
+      </div>
+      ${isWindow ? '' : `<div class="property-group">
+        <div class="property-label">Rotation · °</div>
+        <div class="property-fields rotation-fields">
+          ${propertyField('X', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
+          ${propertyField('Y', 'y', object.rotation.y, 'rotation', { min: -180, max: 180 })}
+          ${propertyField('Z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
+        </div>
+      </div>`}
+      <div class="properties-note">${isWindow ? 'Open windows exhaust airflow and heat from the room.' : 'Drag the gizmo to move or rotate.'}</div>
+    </div>
+  `;
+  properties.querySelector('[data-object-name]').value = object.name;
+  if (isWindow) properties.querySelector('[data-window-wall]').value = object.wall;
+  else properties.querySelector('[data-object-model]').value = object.model;
+}
+
+function renderInspector() {
+  updateRoomSummary();
+  renderObjectList();
+  renderProperties();
+}
+
+function handleTransform(objectId, position, rotation) {
+  const result = transformMode === 'rotate'
+    ? rotateObject(roomScene, objectId, rotation)
+    : moveObject(roomScene, objectId, position);
+  updateScene(result.scene, { record: false });
+  updateRoomSummary();
+  syncPropertyInputs(result.object);
+  return result;
+}
+
+function syncPropertyInputs(object) {
+  for (const input of properties.querySelectorAll('[data-position]')) {
+    input.value = object.position[input.dataset.position].toFixed(2);
+  }
+  for (const input of properties.querySelectorAll('[data-rotation]')) {
+    input.value = object.rotation[input.dataset.rotation].toFixed(1);
+  }
+}
+
+function refreshScene() {
+  viewport.setScene(roomScene, selectedId);
+  renderInspector();
+}
+
+function addBox() {
+  const result = addObject(roomScene);
+  updateScene(result.scene);
+  updateSelection(result.object.id);
+  refreshScene();
+}
+
+function addRoomWindow() {
+  const result = addWindow(roomScene);
+  updateScene(result.scene);
+  updateSelection(result.object.id);
+  refreshScene();
+}
+
+function toggleFieldMode(mode) {
+  fieldController.setMode(fieldController.mode === mode ? null : mode);
+}
+
+$('#add-box').addEventListener('click', addBox);
+$('#add-window').addEventListener('click', addRoomWindow);
+fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
+fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
+fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
+
+objectList.addEventListener('click', (event) => {
+  const row = event.target.closest('[data-select-object]');
+  if (!row) return;
+  updateSelection(row.dataset.selectObject);
+  viewport.select(selectedId);
+  renderInspector();
 });
 
-render();
+for (const [dimension, input] of Object.entries(roomInputs)) {
+  input.addEventListener('change', () => {
+    const dimensions = Object.fromEntries(Object.entries(roomInputs).map(([axis, field]) => [axis, Number(field.value)]));
+    try {
+      updateScene(resizeRoom(roomScene, dimensions));
+      refreshScene();
+    } catch {
+      input.value = roomScene.room[dimension];
+      input.setCustomValidity('Enter a room dimension within the allowed range.');
+      input.reportValidity();
+      input.setCustomValidity('');
+    }
+  });
+}
+
+properties.addEventListener('change', (event) => {
+  const input = event.target;
+  const object = selectedObject();
+  if (!object) return;
+
+  try {
+    if (input.matches('[data-object-name]')) {
+      const result = renameObject(roomScene, object.id, input.value);
+      updateScene(result.scene);
+    } else if (input.matches('[data-object-model]')) {
+      const result = setObjectModel(roomScene, object.id, input.value);
+      updateScene(result.scene);
+    } else if (input.matches('[data-window-open]')) {
+      updateScene(setWindowOpen(roomScene, object.id, input.checked).scene);
+    } else if (input.matches('[data-window-wall]')) {
+      updateScene(setWindowWall(roomScene, object.id, input.value).scene);
+    } else if (input.type === 'number' && input.dataset.position) {
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return renderProperties();
+      const result = moveObject(roomScene, object.id, { [input.dataset.position]: value });
+      updateScene(result.scene);
+    } else if (input.type === 'number' && input.dataset.dimension) {
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return renderProperties();
+      const result = resizeObject(roomScene, object.id, { [input.dataset.dimension]: value });
+      updateScene(result.scene);
+    } else if (input.type === 'number' && input.dataset.rotation) {
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return renderProperties();
+      const result = rotateObject(roomScene, object.id, { [input.dataset.rotation]: value });
+      updateScene(result.scene);
+    } else {
+      return;
+    }
+    refreshScene();
+  } catch {
+    renderProperties();
+  }
+});
+
+$('#delete-object').addEventListener('click', () => {
+  if (!selectedId) return;
+  updateScene(removeObject(roomScene, selectedId));
+  updateSelection(null);
+  refreshScene();
+});
+
+$('#reset-scene').addEventListener('click', () => {
+  recordHistory();
+  fieldController.setMode(null);
+  editorState = resetEditorState();
+  roomScene = editorState.scene;
+  selectedId = editorState.selectedId;
+  transformMode = editorState.transformMode;
+  $('#mode-move').classList.add('active');
+  $('#mode-rotate').classList.remove('active');
+  viewport.fitRoom(true);
+  viewport.setProjection('perspective');
+  setCameraView('3d');
+  refreshScene();
+  viewport.setMode(transformMode);
+});
+
+$('#mode-move').addEventListener('click', () => {
+  transformMode = 'translate';
+  editorState = setEditorTransformMode(editorState, transformMode);
+  viewport.setMode(transformMode);
+  $('#mode-move').classList.add('active');
+  $('#mode-rotate').classList.remove('active');
+});
+
+$('#mode-rotate').addEventListener('click', () => {
+  transformMode = 'rotate';
+  editorState = setEditorTransformMode(editorState, transformMode);
+  viewport.setMode(transformMode);
+  $('#mode-rotate').classList.add('active');
+  $('#mode-move').classList.remove('active');
+});
+
+function setCameraView(view) {
+  editorState = setEditorView(editorState, view);
+  viewport.setView(view);
+  $('#view-3d').classList.toggle('active', view === '3d');
+  $('#view-top').classList.toggle('active', view === 'top');
+  $('#projection-perspective').classList.toggle('active', viewport.projection === 'perspective');
+  $('#projection-orthographic').classList.toggle('active', viewport.projection === 'orthographic');
+  $('#view-3d').setAttribute('aria-pressed', String(view === '3d'));
+  $('#view-top').setAttribute('aria-pressed', String(view === 'top'));
+  $('#projection-perspective').setAttribute('aria-pressed', String(viewport.projection === 'perspective'));
+  $('#projection-orthographic').setAttribute('aria-pressed', String(viewport.projection === 'orthographic'));
+}
+
+$('#view-3d').addEventListener('click', () => setCameraView('3d'));
+$('#view-top').addEventListener('click', () => setCameraView('top'));
+$('#projection-perspective').addEventListener('click', () => {
+  viewport.setProjection('perspective');
+  setCameraView(editorState.view);
+});
+$('#projection-orthographic').addEventListener('click', () => {
+  viewport.setProjection('orthographic');
+  setCameraView(editorState.view);
+});
+
+$('#view-home').addEventListener('click', () => {
+  viewport.setProjection('perspective');
+  viewport.fitRoom(true);
+  setCameraView('3d');
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.target.matches('input, textarea, select, [contenteditable="true"]')) return;
+  const key = event.key.toLowerCase();
+  if ((event.metaKey || event.ctrlKey) && key === 'z') {
+    event.preventDefault();
+    event.shiftKey ? redo() : undo();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && key === 'y') {
+    event.preventDefault();
+    redo();
+    return;
+  }
+  if (key === 'g') $('#mode-move').click();
+  if (key === 'r') $('#mode-rotate').click();
+  if (key === 'o') $('#projection-orthographic').click();
+  if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) $('#delete-object').click();
+});
+
+const shortcutHelp = $('#shortcut-help');
+$('#show-shortcuts').addEventListener('click', () => {
+  shortcutHelp.hidden = !shortcutHelp.hidden;
+  $('#show-shortcuts').setAttribute('aria-expanded', String(!shortcutHelp.hidden));
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!event.target.closest('.viewport-info')) {
+    shortcutHelp.hidden = true;
+    $('#show-shortcuts').setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    shortcutHelp.hidden = true;
+    $('#show-shortcuts').setAttribute('aria-expanded', 'false');
+  }
+});
+
+viewport = new RoomViewport($('#viewport'), {
+  onSelect(objectId) {
+    updateSelection(objectId);
+    renderInspector();
+  },
+  onTransform: handleTransform,
+  onDragChange(dragging) {
+    isDragging = dragging;
+    if (dragging) {
+      dragSnapshot = currentSnapshot();
+    } else if (dragSnapshot) {
+      if (JSON.stringify(dragSnapshot) !== JSON.stringify(currentSnapshot())) history.record(dragSnapshot);
+      dragSnapshot = null;
+    }
+  },
+});
+viewport.setScene(roomScene, selectedId);
+renderInspector();
+fieldController = new RoomFieldController({
+  worker: new Worker(new URL('./simulation/room-field-worker.js', import.meta.url), { type: 'module' }),
+  viewport,
+  onState: renderFieldState,
+});
+fieldController.setScene(roomScene);
+window.addEventListener('pagehide', () => {
+  fieldController.dispose();
+  viewport.dispose();
+}, { once: true });
