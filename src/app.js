@@ -2,6 +2,7 @@ import {
   MODEL_PRESETS,
   addObject,
   addWindow,
+  addDoor,
   moveObject,
   removeObject,
   renameObject,
@@ -15,6 +16,7 @@ import {
   setWindowOpen,
   setWindowWall,
 } from './model/room-scene.js';
+import { isOpeningObject } from './model/openings.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
 import { temperatureDisplayRange } from './simulation/room-field-display.js';
@@ -285,7 +287,8 @@ function propertyField(label, axis, value, kind, limits = {}) {
 
 function renderProperties() {
   const object = selectedObject();
-  const isWindow = object?.model === 'window';
+  const isOpening = isOpeningObject(object);
+  const openingLabel = object?.model === 'door' ? 'Door' : 'Window';
   const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative' };
   const sourceLabel = sourceLabels[object?.model];
   const intensity = object?.intensity ?? 1;
@@ -295,24 +298,24 @@ function renderProperties() {
     return;
   }
 
-  const maxWindowWidth = object.wall === 'back' || object.wall === 'front' ? roomScene.room.width - 0.2 : roomScene.room.depth - 0.2;
+  const maxOpeningWidth = object.wall === 'back' || object.wall === 'front' ? roomScene.room.width - 0.2 : roomScene.room.depth - 0.2;
   const dimensionLimits = {
     width: { min: 0.1, max: roomScene.room.width },
     height: { min: 0.1, max: roomScene.room.height },
     depth: { min: 0.1, max: roomScene.room.depth },
   };
-  const modelOptions = Object.entries(MODEL_PRESETS).filter(([key]) => key !== 'window').map(([key, model]) => (
+  const modelOptions = Object.entries(MODEL_PRESETS).filter(([key]) => !['window', 'door'].includes(key)).map(([key, model]) => (
     `<option value="${escapeHtml(key)}">${escapeHtml(model.label)}</option>`
   )).join('');
   properties.innerHTML = `
     <div class="properties-form">
       <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
-      ${isWindow ? `
-        <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="Window wall">
+      ${isOpening ? `
+        <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="${openingLabel} wall">
           <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
         </select></label>
-        <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="Window open" ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
-        <label class="property-field"><span>Window pressure</span><select class="property-input" data-window-flow-direction aria-label="Window exterior pressure direction">
+        <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="${openingLabel} open" ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
+        <label class="property-field"><span>Exterior pressure</span><select class="property-input" data-window-flow-direction aria-label="Opening exterior pressure direction">
           <option value="exchange">Stack exchange · two-way</option><option value="inlet">Positive pressure · intake bias</option><option value="outlet">Negative pressure · exhaust bias</option>
         </select></label>
         <div class="property-group">
@@ -336,12 +339,12 @@ function renderProperties() {
       <div class="property-group">
         <div class="property-label">Size · m</div>
         <div class="property-fields">
-          ${propertyField('w', 'width', object.dimensions.width, 'dimension', isWindow ? { min: 0.4, max: maxWindowWidth } : dimensionLimits.width)}
-          ${propertyField('h', 'height', object.dimensions.height, 'dimension', isWindow ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
-          ${isWindow ? '' : propertyField('d', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
+          ${propertyField('w', 'width', object.dimensions.width, 'dimension', isOpening ? { min: 0.4, max: maxOpeningWidth } : dimensionLimits.width)}
+          ${propertyField('h', 'height', object.dimensions.height, 'dimension', isOpening ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
+          ${isOpening ? '' : propertyField('d', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
         </div>
       </div>
-      ${isWindow ? '' : `<div class="property-group">
+      ${isOpening ? '' : `<div class="property-group">
         <div class="property-label">Rotation · °</div>
         <div class="property-fields rotation-fields">
           ${propertyField('x', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
@@ -349,11 +352,11 @@ function renderProperties() {
           ${propertyField('z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
         </div>
       </div>`}
-      ${isWindow ? '<div class="properties-note">Drag the window toward a wall to snap it into place.</div>' : ''}
+      ${isOpening ? `<div class="properties-note">${openingLabel} opening · ${object.open ? 'direct light and airflow pass through' : 'closed'}</div>` : ''}
     </div>
   `;
   properties.querySelector('[data-object-name]').value = object.name;
-  if (isWindow) {
+  if (isOpening) {
     properties.querySelector('[data-window-wall]').value = object.wall ?? 'back';
     properties.querySelector('[data-window-flow-direction]').value = object.flowDirection ?? 'exchange';
   }
@@ -414,12 +417,25 @@ function addRoomWindow() {
   }
 }
 
+function addRoomDoor() {
+  try {
+    const result = addDoor(roomScene);
+    updateScene(result.scene);
+    updateSelection(result.object.id);
+    setEditorStatus('');
+    refreshScene();
+  } catch (error) {
+    setEditorStatus(error.message);
+  }
+}
+
 function toggleFieldMode(mode) {
   fieldController.setMode(fieldController.mode === mode ? null : mode);
 }
 
 $('#add-box').addEventListener('click', addBox);
 $('#add-window').addEventListener('click', addRoomWindow);
+$('#add-door').addEventListener('click', addRoomDoor);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));

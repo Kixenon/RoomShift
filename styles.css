@@ -71,7 +71,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .field-status:empty { display: none; }
 .tool-button { width: 27px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #7b8c84; cursor: pointer; }
 .tool-button svg { width: 16px; height: 16px; }
-.camera-button { width: 28px; }
+.camera-button { position: relative; isolation: isolate; width: 32px; height: 32px; padding: 0; }
+.camera-button::before { position: absolute; z-index: -1; top: 50%; left: 50%; width: 26px; height: 26px; border-radius: 8px; background: #e9f2eb; content: ''; opacity: 0; pointer-events: none; transform: translate(-50%, -50%); transition: opacity .14s ease; }
 .camera-button svg { width: 18px; height: 18px; }
 .move-mode-icon { display: inline; }
 .rotate-mode-icon { display: none; }
@@ -81,6 +82,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 #toggle-projection[data-projection="orthographic"] .projection-perspective-icon { display: none; }
 #toggle-projection[data-projection="orthographic"] .projection-orthographic-icon { display: inline; }
 .tool-button:hover { background: #e9f2eb; color: #2c775f; }
+.camera-button:hover { background: transparent; color: #2c775f; }
+.camera-button:hover::before { opacity: 1; }
 .tool-separator { width: 1px; height: 16px; margin: 0 2px; background: #e6ebe6; }
 .camera-view-picker { position: relative; display: flex; }
 .camera-view-picker > summary { list-style: none; }

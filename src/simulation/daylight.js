@@ -1,4 +1,5 @@
 import { solarPosition, dayEvents, SITE, DEFAULT_DATE, formatClock } from './sun-position.js';
+import { isOpeningObject } from '../model/openings.js';
 
 // Daylight state for the light preview, driven by the real solar position at a
 // fixed site (Hong Kong by default).
@@ -141,7 +142,7 @@ export function sunPatches(scene, { direction, daylight }) {
   const floor = { minX: 0, maxX: scene.room.width, minY: 0, maxY: scene.room.depth };
 
   for (const object of scene.objects) {
-    if (object.model !== 'window' || object.open !== true) continue;
+    if (!isOpeningObject(object) || object.open !== true) continue;
     const normal = wallInwardNormal(object.wall);
     // The sun must be shining onto the outward face of this wall.
     const incidence = -(direction.x * normal.x + direction.z * normal.z);

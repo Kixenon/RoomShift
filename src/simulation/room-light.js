@@ -1,4 +1,5 @@
 import { rotationMatrixXYZ } from '../model/room-scene.js';
+import { isOpeningObject } from '../model/openings.js';
 import { createSimulationGrid, DEFAULT_CELL_SIZE, MAX_SIMULATION_CELLS } from './room-grid.js';
 import { buildSolidMask } from './room-fields-3d.js';
 
@@ -92,7 +93,7 @@ function createLightState(scene, options) {
       id: lamp.id,
     };
   });
-  const blockers = scene.objects.filter((object) => object.model !== 'window').map((object) => ({
+  const blockers = scene.objects.filter((object) => !isOpeningObject(object)).map((object) => ({
     id: object.id,
     center: { x: object.position.x, y: object.position.y + object.dimensions.height / 2, z: object.position.z },
     halfExtents: {

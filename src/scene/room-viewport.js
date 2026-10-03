@@ -4,6 +4,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
+import { isOpeningObject } from '../model/openings.js';
 
 // Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
 // light preview used before there was a time of day, so an unchanged scene looks
@@ -149,22 +150,31 @@ function createHeater(group, dimensions) {
   }
 }
 
-function createWindow(group, dimensions, open) {
+function createOpening(group, dimensions, open, model) {
   const { width, height, depth } = dimensions;
   const frame = 0.045;
   const rail = (size, position) => box(group, size, position, COLORS.windowFrame);
   rail({ width: frame, height, depth }, { x: -width / 2 + frame / 2, y: 0, z: 0 });
   rail({ width: frame, height, depth }, { x: width / 2 - frame / 2, y: 0, z: 0 });
-  rail({ width, height: frame, depth }, { x: 0, y: -height / 2 + frame / 2, z: 0 });
   rail({ width, height: frame, depth }, { x: 0, y: height / 2 - frame / 2, z: 0 });
-  rail({ width: frame * 0.55, height: height - frame * 2, depth }, { x: 0, y: 0, z: 0 });
+  if (model === 'window') {
+    rail({ width, height: frame, depth }, { x: 0, y: -height / 2 + frame / 2, z: 0 });
+    rail({ width: frame * 0.55, height: height - frame * 2, depth }, { x: 0, y: 0, z: 0 });
+  }
   if (!open) {
-    box(group, { width: width - frame * 2, height: height - frame * 2, depth: 0.012 }, { x: 0, y: 0, z: 0 }, COLORS.windowGlass, {
-      transparent: true,
-      opacity: 0.34,
-      roughness: 0.18,
-      depthWrite: false,
-    }).castShadow = false;
+    if (model === 'door') {
+      box(group, { width: width - frame * 2, height: height - frame, depth: depth * 0.65 }, { x: 0, y: -frame / 2, z: 0 }, 0x9a795c);
+      const handle = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), material(0xc5a86e, { metalness: 0.55, roughness: 0.34 }));
+      handle.position.set(width * 0.34, -0.02, depth * 0.4);
+      group.add(handle);
+    } else {
+      box(group, { width: width - frame * 2, height: height - frame * 2, depth: 0.012 }, { x: 0, y: 0, z: 0 }, COLORS.windowGlass, {
+        transparent: true,
+        opacity: 0.34,
+        roughness: 0.18,
+        depthWrite: false,
+      }).castShadow = false;
+    }
   }
 }
 
@@ -190,7 +200,7 @@ function createWallGeometry(width, height, windows, wall, room) {
   shape.lineTo(width / 2, height);
   shape.lineTo(-width / 2, height);
   shape.closePath();
-  for (const window of windows.filter((item) => item.wall === wall)) {
+  for (const window of windows.filter((item) => item.wall === wall && item.open)) {
     const center = wall === 'front'
       ? window.position.x - room.width / 2
       : wall === 'back'
@@ -273,6 +283,10 @@ export class RoomViewport {
 
     this.hemisphereLight = new THREE.HemisphereLight(0xeaf3ed, 0x97a38f, 2.1);
     this.keyLight = new THREE.DirectionalLight(0xfff7e9, 2.6);
+    this.keyLight.shadow.mapSize.set(2048, 2048);
+    this.keyLight.shadow.camera.near = 0.1;
+    this.keyLight.shadow.camera.far = 50;
+    this.keyLight.shadow.bias = -0.0002;
     this.keyLight.position.set(-4, 8, 6);
     this.scene.add(this.hemisphereLight, this.keyLight);
     this.setupControls(this.camera, new THREE.Vector3(0, 1.1, 0));
@@ -403,6 +417,16 @@ export class RoomViewport {
     this.sceneRoot.add(grid);
 
     for (const wall of wallLayouts(this.roomScene.room)) this.createWall(wall);
+    const ceiling = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, colorWrite: false, depthWrite: false }),
+    );
+    ceiling.name = 'daylight-ceiling-occluder';
+    ceiling.rotation.x = -Math.PI / 2;
+    ceiling.position.y = height;
+    ceiling.castShadow = true;
+    ceiling.raycast = () => {};
+    this.sceneRoot.add(ceiling);
     const outline = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(width, height, depth)),
       new THREE.LineBasicMaterial({ color: 0x8fa198, transparent: true, opacity: 0.75 }),
@@ -414,15 +438,15 @@ export class RoomViewport {
   createWall(wall) {
     const { width, height, depth } = this.roomScene.room;
     const span = wall.side === 'left' || wall.side === 'right' ? depth : width;
-    const windows = this.roomScene.objects.filter((object) => object.model === 'window');
+    const openings = this.roomScene.objects.filter(isOpeningObject);
     const mesh = new THREE.Mesh(
-      createWallGeometry(span, height, windows, wall.side, this.roomScene.room),
+      createWallGeometry(span, height, openings, wall.side, this.roomScene.room),
       material(0xf9fbf6, { transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false }),
     );
     mesh.name = `room-wall-${wall.side}`;
     mesh.position.set(...wall.position);
     mesh.rotation.set(...wall.rotation);
-    mesh.castShadow = false;
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.sceneRoot.add(mesh);
     if (this.lightingPreview) {
@@ -449,7 +473,7 @@ export class RoomViewport {
     group.userData.primitive = object.primitive;
     group.userData.model = object.model;
     const builder = BUILDERS[object.model];
-    if (object.model === 'window') createWindow(group, object.dimensions, object.open);
+    if (isOpeningObject(object)) createOpening(group, object.dimensions, object.open, object.model);
     else if (builder) builder(group, object.dimensions);
     else box(group, object.dimensions, { x: 0, y: 0, z: 0 }, COLORS.metal);
     group.userData.open = object.open;
@@ -653,6 +677,14 @@ export class RoomViewport {
     // Park the sun far enough out that its shadow camera covers the room.
     const reach = Math.max(this.roomScene?.room.width ?? 5, this.roomScene?.room.depth ?? 4) + 6;
     this.keyLight.position.set(direction.x * reach, Math.max(direction.y, 0.05) * reach, direction.z * reach);
+    const shadowRadius = Math.max(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
+    Object.assign(this.keyLight.shadow.camera, {
+      left: -shadowRadius,
+      right: shadowRadius,
+      top: shadowRadius,
+      bottom: -shadowRadius,
+    });
+    this.keyLight.shadow.camera.updateProjectionMatrix();
     this.keyLight.target.position.set(
       (this.roomScene?.room.width ?? 5) / 2,
       0,
@@ -662,8 +694,10 @@ export class RoomViewport {
     this.keyLight.castShadow = state.sun.daylight > 0.02;
     this.keyLight.visible = state.sun.daylight > 0;
 
-    this.hemisphereLight.color.setRGB(state.sky.colour.r, state.sky.colour.g, state.sky.colour.b);
-    this.hemisphereLight.intensity = state.sky.intensity;
+    // Keep only a small neutral fill for readability. Exterior light comes from
+    // the shadow-casting sun, which the room shell blocks except at open apertures.
+    this.hemisphereLight.color.setHex(0xeaf3ed);
+    this.hemisphereLight.intensity = 0.06;
 
     this.scene.background.setRGB(state.background.r, state.background.g, state.background.b);
     this.renderer.toneMappingExposure = state.exposure;
@@ -935,7 +969,7 @@ export class RoomViewport {
       return;
     }
     this.roomScene = updated.scene;
-    if (source.model === 'window') this.rebuildWalls([source.wall, updated.object.wall]);
+    if (isOpeningObject(source)) this.rebuildWalls([source.wall, updated.object.wall]);
     this.onPlacementError('');
     if (this.selectionBox) this.selectionBox.material.color.set(0x23836c);
     this.applyObjectTransform(group, updated.object);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { rotationMatrixXYZ } from '../model/room-scene.js';
+import { isOpeningObject } from '../model/openings.js';
 import { temperatureDisplayRange } from '../simulation/room-field-display.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -357,7 +358,7 @@ function getAirEmitters(result, roomScene) {
   }
 
   for (const window of roomScene?.objects ?? []) {
-    if (window.model !== 'window' || !window.open) continue;
+    if (!isOpeningObject(window) || !window.open) continue;
     const alongX = window.wall === 'back' || window.wall === 'front';
     const outward = {
       front: new THREE.Vector3(0, 0, -1),
@@ -453,7 +454,7 @@ function windowCorridor(x, y, z, roomScene, margin, spread) {
   if (!roomScene) return null;
   const { room } = roomScene;
   for (const window of roomScene.objects) {
-    if (window.model !== 'window' || !window.open) continue;
+    if (!isOpeningObject(window) || !window.open) continue;
     const wall = WINDOW_WALLS[window.wall];
     if (!wall) continue;
     const boundary = wall.boundary(room);
@@ -918,7 +919,7 @@ function createInfraredPlane(result, scene, wall) {
   const point = new THREE.Vector3();
   const color = new THREE.Color();
   const colors = new Float32Array(geometry.attributes.position.count * 4);
-  const openings = scene?.objects?.filter((object) => object.model === 'window' && object.wall === wall) ?? [];
+  const openings = scene?.objects?.filter((object) => isOpeningObject(object) && object.open && object.wall === wall) ?? [];
   const positions = geometry.attributes.position;
   for (let index = 0; index < positions.count; index += 1) {
     point.fromBufferAttribute(positions, index).applyMatrix4(mesh.matrixWorld);
