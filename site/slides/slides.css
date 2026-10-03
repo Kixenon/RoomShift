@@ -231,3 +231,30 @@ kbd { font: 600 .85em 'Archivo', sans-serif; padding: 2px 10px; border-radius: 8
 .deck-exit:hover, .deck-exit:focus-visible { opacity: 1; background: rgb(10 14 20 / 80%); }
 .deck-hint { position: fixed; z-index: 60; left: 50%; top: 18px; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: rgb(10 14 20 / 70%); color: #fff; font: 500 13px/1 Archivo, system-ui, sans-serif; pointer-events: none; animation: deck-hint 5s ease forwards; }
 @keyframes deck-hint { 0%, 70% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
+
+/* ── Presenter chrome: chapter bar, slide navigator ────────────────── */
+.deck-chapters { position: fixed; z-index: 55; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgb(8 12 16 / 62%); backdrop-filter: blur(14px); transition: opacity .4s ease; }
+.deck-ui.is-idle ~ .deck-chapters, body:has(.deck-ui.is-idle) .deck-chapters { opacity: 0; }
+.deck-chapters button { position: relative; display: grid; gap: 5px; padding: 7px 16px 8px; border: 0; border-radius: 999px; background: none; color: rgb(255 255 255 / 60%); font: 600 13px/1 Archivo, system-ui, sans-serif; letter-spacing: .02em; cursor: pointer; }
+.deck-chapters button:hover { color: #fff; }
+.deck-chapters button.is-current { color: #fff; background: rgb(255 255 255 / 10%); }
+.deck-chapters i { display: block; height: 2px; border-radius: 1px; background: rgb(255 255 255 / 18%); overflow: hidden; }
+.deck-chapters i::after { content: ''; display: block; height: 100%; width: calc(var(--fill) * 100%); background: var(--air); transition: width .5s cubic-bezier(.2, .8, .2, 1); }
+.deck-hint { top: 64px; }
+.deck-nav { position: fixed; inset: 0; z-index: 70; display: grid; place-items: end center; background: rgb(4 8 10 / 55%); backdrop-filter: blur(6px); animation: deck-nav-fade .2s ease; }
+@keyframes deck-nav-fade { from { opacity: 0; } }
+.deck-nav-inner { width: min(1180px, calc(100vw - 48px)); max-height: 78vh; overflow-y: auto; margin-bottom: 28px; padding: 22px 26px 28px; border-radius: 24px; background: #0e1418; color: #e9efee; box-shadow: 0 40px 120px rgb(0 0 0 / 60%); animation: deck-nav-rise .3s cubic-bezier(.2, .8, .2, 1); font-family: Archivo, system-ui, sans-serif; }
+@keyframes deck-nav-rise { from { transform: translateY(24px); opacity: 0; } }
+.deck-nav-inner header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.deck-nav-inner header strong { font-size: 20px; }
+.deck-nav-inner header span { color: rgb(233 239 238 / 50%); font-size: 13px; }
+.deck-nav-inner h3 { margin: 18px 0 8px; color: var(--air); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.deck-nav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+.deck-nav-grid button { display: grid; gap: 4px; align-content: start; min-height: 96px; padding: 14px 16px; border: 1px solid rgb(255 255 255 / 8%); border-radius: 14px; background: rgb(255 255 255 / 4%); color: inherit; text-align: left; cursor: pointer; font: inherit; transition: background-color .15s, border-color .15s, transform .2s; }
+.deck-nav-grid button:hover, .deck-nav-grid button:focus-visible { background: rgb(255 255 255 / 9%); transform: translateY(-2px); outline: none; }
+.deck-nav-grid button.is-active { border-color: var(--air); background: rgb(43 196 220 / 12%); }
+.deck-nav-grid b { color: rgb(233 239 238 / 45%); font: 600 12px ui-monospace, monospace; }
+.deck-nav-grid strong { font-size: 16px; }
+.deck-nav-grid span { color: rgb(233 239 238 / 60%); font-size: 13px; line-height: 1.4; }
+.deck-count { font-variant-numeric: tabular-nums; min-width: 64px; }
+.deck-nav[hidden] { display: none; }

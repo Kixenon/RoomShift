@@ -224,7 +224,8 @@ stage.querySelector('[data-demo-load]')?.addEventListener('click', (event) => { 
 // ───────── Navigation ─────────
 function updateChrome() {
   progress.style.transform = `scaleX(${(index + 1) / slides.length})`;
-  countLabel.textContent = `${index + 1} / ${slides.length}`;
+  countLabel.textContent = `${String(index + 1).padStart(2, '0')} / ${slides.length}`;
+  renderChapters();
   notesPanel.textContent = slides[index].dataset.notes ?? '';
   history.replaceState(null, '', `#${index + 1}`);
 }
@@ -276,11 +277,13 @@ const prev = () => go(index - 1);
 document.addEventListener('keydown', (event) => {
   if (event.target.closest('iframe, input, textarea')) return;
   const key = event.key;
-  if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(key)) { event.preventDefault(); if (overview) toggleOverview(false); else next(); }
+  if (overview && key === 'Escape') { toggleOverview(false); return; }
+  if (overview) return;
+  if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(key)) { event.preventDefault(); next(); }
   else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(key)) { event.preventDefault(); prev(); }
   else if (key === 'Home') go(0);
   else if (key === 'End') go(slides.length - 1);
-  else if (key === 'o' || key === 'O' || (key === 'Escape' && overview)) toggleOverview();
+  else if (key === 'o' || key === 'O' || key === 'g' || key === 'G') toggleOverview();
   else if (key === 'Escape' && !document.fullscreenElement) window.location.href = '../';
   else if (key === 'n' || key === 'N') toggleNotes();
   else if (key === 'f' || key === 'F') toggleFullscreen();
@@ -290,11 +293,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 stage.addEventListener('click', (event) => {
-  if (overview) {
-    const slide = event.target.closest('.slide');
-    if (slide) { toggleOverview(false); go(slides.indexOf(slide), { instant: true }); }
-    return;
-  }
+  if (overview) return;
   if (event.target.closest('a, button, iframe, video, .chart, [role="button"]')) return;
   const bounds = deck.getBoundingClientRect();
   if (event.clientX < bounds.width * 0.3) prev(); else next();
@@ -315,14 +314,49 @@ document.querySelector('[data-overview]').addEventListener('click', () => toggle
 notesToggle.addEventListener('click', () => toggleNotes());
 document.querySelector('[data-fullscreen]').addEventListener('click', () => toggleFullscreen());
 
+// ───────── Navigator: every slide by chapter; replaces the zoomed-out grid ─────────
+const navigator = document.querySelector('[data-navigator]');
+const chaptersBar = document.querySelector('[data-chapters]');
+const chapterOf = (slide) => slide.dataset.chapter ?? '';
+const chapterNames = [...new Set(slides.map(chapterOf))].filter((name) => name && name !== 'Open' && name !== 'Close');
+const slideTitle = (slide) => slide.getAttribute('aria-label') ?? '';
+const slideLine = (slide) => (slide.querySelector('h1, h2, .statement')?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
+
+function renderChapters() {
+  if (!chaptersBar) return;
+  const current = chapterOf(slides[index] ?? slides[0]);
+  chaptersBar.innerHTML = chapterNames.map((name) => {
+    const members = slides.map((slide, position) => [slide, position]).filter(([slide]) => chapterOf(slide) === name);
+    const done = members.filter(([, position]) => position <= index).length;
+    return `<button type="button" class="${name === current ? 'is-current' : ''}" data-jump="${members[0][1]}"><span>${name}</span><i style="--fill:${done / members.length}"></i></button>`;
+  }).join('');
+}
+chaptersBar?.addEventListener('click', (event) => {
+  const jump = event.target.closest('[data-jump]');
+  if (jump) go(Number(jump.dataset.jump));
+});
+
+function renderNavigator() {
+  const groups = [...new Set(slides.map(chapterOf))];
+  navigator.querySelector('.deck-nav-inner').innerHTML = `<header><strong>All slides</strong><span>Click to jump · Esc to close</span></header>${groups.map((group) => `
+    <section><h3>${group || 'Slides'}</h3><div class="deck-nav-grid">${slides.map((slide, position) => [slide, position]).filter(([slide]) => chapterOf(slide) === group).map(([slide, position]) => `
+      <button type="button" class="${position === index ? 'is-active' : ''}" data-goto="${position}"><b>${String(position + 1).padStart(2, '0')}</b><strong>${slideTitle(slide)}</strong><span>${slideLine(slide)}</span></button>`).join('')}</div></section>`).join('')}`;
+}
 function toggleOverview(force = !overview) {
   overview = force;
-  deck.classList.toggle('is-overview', overview);
-  if (overview) for (const slide of slides) slide.style.visibility = 'visible';
-  else for (const slide of slides) slide.style.visibility = '';
-  fit();
-  if (overview) slides[index].scrollIntoView({ block: 'center' });
+  navigator.hidden = !overview;
+  if (overview) {
+    renderNavigator();
+    navigator.querySelector('.is-active')?.focus();
+  }
 }
+navigator.addEventListener('click', (event) => {
+  const target = event.target.closest('[data-goto]');
+  if (target) {
+    toggleOverview(false);
+    go(Number(target.dataset.goto));
+  } else if (event.target === navigator) toggleOverview(false);
+});
 function toggleNotes(force = notesPanel.hidden) {
   notesPanel.hidden = !force;
   notesToggle.setAttribute('aria-pressed', String(force));
