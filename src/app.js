@@ -22,6 +22,7 @@ import {
   setView as setEditorView,
 } from './model/editor-state.js';
 import { RoomViewport } from './scene/room-viewport.js';
+import { createRoomPhotoPanel } from './scene/room-photo-panel.js';
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
@@ -280,6 +281,25 @@ function refreshScene() {
   viewport.setScene(roomScene, selectedId);
   renderInspector();
 }
+
+// Estimated dimensions arrive as a suggestion, so they land in the same place a
+// typed dimension would: one undoable step, then the ordinary refresh path.
+const photoPanel = createRoomPhotoPanel({
+  mount: document.querySelector('.asset-rail'),
+  onApply(dimensions) {
+    try {
+      updateScene(resizeRoom(roomScene, dimensions));
+      refreshScene();
+      photoPanel.close();
+    } catch {
+      for (const [axis, input] of Object.entries(roomInputs)) {
+        input.value = roomScene.room[axis];
+      }
+    }
+  },
+});
+
+$('#from-photo').addEventListener('click', () => photoPanel.open());
 
 function addBox() {
   const result = addObject(roomScene);

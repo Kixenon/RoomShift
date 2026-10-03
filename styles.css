@@ -163,3 +163,49 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .view-button#projection-orthographic { min-width: 43px; }
 .window-open-toggle { display: flex; align-items: center; gap: 7px; min-height: 29px; color: #60766b; font-size: 9px; }
 .window-open-toggle input { accent-color: #27816d; }
+
+/* Room photograph estimator. Kept visually distinct from the simulation views:
+   this is an input tool, not a rendered field. */
+.photo-panel {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 20;
+  max-height: 78%;
+  overflow: auto;
+  padding: 14px 16px 16px;
+  background: #171b22;
+  border-top: 1px solid #2b323d;
+  box-shadow: 0 -12px 28px rgb(0 0 0 / 45%);
+  color: #e7ecf3;
+}
+.photo-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.photo-panel-title { margin: 0; font-size: 0.95rem; font-weight: 600; }
+.photo-panel-note { margin: 8px 0 12px; font-size: 0.78rem; line-height: 1.45; color: #9aa6b6; }
+.photo-panel-body { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.photo-stage { position: relative; flex: 1 1 320px; min-width: 260px; }
+.photo-canvas {
+  display: block;
+  /* auto on both axes with max constraints keeps the intrinsic aspect ratio;
+     a fixed width plus max-height would letterbox the drawing instead. */
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 46vh;
+  background: #0e1116;
+  border: 1px solid #2b323d;
+  border-radius: 6px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.photo-prompt { margin: 8px 0 0; font-size: 0.78rem; color: #9aa6b6; }
+.photo-controls { flex: 0 1 240px; display: flex; flex-direction: column; gap: 10px; }
+.photo-hint { margin: 0; font-size: 0.72rem; color: #7f8b9c; }
+.photo-readout { display: flex; flex-direction: column; gap: 6px; }
+.photo-readout-row { display: flex; justify-content: space-between; font-size: 0.85rem; }
+.photo-readout-row strong { font-variant-numeric: tabular-nums; }
+.photo-warnings { margin: 4px 0; padding-left: 18px; font-size: 0.72rem; color: #d9b36a; }
+.photo-error { margin: 0; font-size: 0.78rem; color: #f0a08c; }
+@media (max-width: 720px) {
+  .photo-panel-body { flex-direction: column; }
+  .photo-controls { flex: 1 1 auto; width: 100%; }
+}

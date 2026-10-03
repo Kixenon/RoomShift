@@ -26,6 +26,7 @@ The browser interaction tests use Playwright and a local Chromium-compatible bro
 - Add windows on room walls and toggle them open to exhaust air and heat. Drag the canvas to orbit in **3D**; **Top** locks the camera vertically; **Ortho** switches the 3D view to orthographic projection.
 - Undo with **⌘Z / Ctrl+Z**; redo with **⌘⇧Z / Ctrl+Y**. Use the **i** button in the viewport toolbar for the full shortcut list. A gizmo drag is one undo step.
 - **Air** and **Heat** update continuously in the background while selected. Geometry or model edits trigger a fresh estimate; **Light** switches immediately to a real-time shadow preview.
+- **From photo** opens an estimator that fills in the room's W/D/H from a photograph. See below.
 
 ## Simulation scope and limits
 
@@ -39,9 +40,25 @@ RoomShift includes bounded **3D estimates** to visualize airflow and temperature
 
 The scene model is solver-independent (`src/model/room-scene.js`); rendering and field solving consume the same scene without mixing simulation state into object geometry. Scene persistence and schema migration are not implemented.
 
+## Room dimensions from a photograph
+
+**From photo** in the asset rail estimates the room shell (width, depth, height) from a single photograph and prefills the W/D/H fields. It places no objects; the layout is still yours to arrange.
+
+This is single-view metrology, and it is an **estimate, not a measurement**. What it can and cannot do:
+
+- **Scale comes from you.** The geometry recovers proportions only. Absolute metres require a scale reference, so the panel asks for the camera height, and every dimension is wrong by the same factor if that number is wrong. There is no second reference to cross-check it against.
+- **The photo must be taken from outside the room looking in**, with all four floor corners visible — typically from the doorway. A photo taken from inside the room cannot show the fourth corner, and the estimator needs a closed floor rectangle.
+- **The horizon is estimated, not detected.** The strongest pair of horizontal junctions is bisected, which is exact only when the ceiling is at twice the camera height. Drag the horizon line to correct it; every dimension inherits its error.
+- **One ceiling click cannot identify its wall.** All four readings are geometrically valid, so the panel offers each with its implied height and picks one by assuming a typical ceiling. Choose explicitly if the result looks wrong.
+- **Focal length needs converging edges.** A dead-on shot makes opposing edges parallel, the vanishing points vanish, and the focal length falls back to an assumed 65° field of view. That assumption distorts the footprint rather than shifting it uniformly, and the panel says so.
+- Rectangular rooms, level camera, no tilt or roll. It will struggle with fisheye lenses, strongly tilted shots, open-plan spaces, and non-rectangular rooms.
+
+It does not detect furniture or build a layout, and it is no help with real-world performance claims.
+
 ## Structure
 
 - `src/model/room-scene.js` — room objects and windows, naming, transformations, and geometry bounds.
+- `src/model/room-photo-metrics.js` — single-view room metrology: horizon estimation, vanishing points, focal length, floor footprint, and ceiling height. Pure, with no DOM.
 - `src/model/undo-history.js` — bounded undo/redo history.
 - `src/model/editor-state.js` — editor selection, view, transform mode, and reset state.
 - `src/simulation/room-fields-webgpu.js` — WebGPU 3D airflow and temperature estimates.
@@ -50,5 +67,6 @@ The scene model is solver-independent (`src/model/room-scene.js`); rendering and
 - `src/simulation/room-field-worker.js` and `src/simulation/room-field-controller.js` — background solving and coalesced live updates.
 - `src/scene/room-field-layer-3d.js` and `src/scene/room-field-renderer.js` — volumetric field rendering, animated airflow streamlines, and tracers.
 - `src/scene/room-viewport.js` — Three.js room, model meshes, camera, selection, and transform controls.
+- `src/scene/room-photo-panel.js` — the photograph estimator panel: image loading, row edge energy, point placement, and the live readout.
 - `src/app.js` — editor and simulation controls.
 - `tests/` — model/solver tests plus Playwright browser interaction, geometry, and map checks.
