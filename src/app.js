@@ -127,7 +127,16 @@ function renderFieldState({ mode, loading, result, error, stale }) {
   viewportElement.setAttribute('aria-busy', String(loading));
   fieldControls.legend.hidden = !mode || (!result && !(mode === 'light' && displayStyle === 'preview'));
   fieldControls.status.textContent = loading ? (mode === 'light' ? 'Estimating…' : 'Solving…') : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
-  fieldControls.status.title = error?.message ?? result?.gpuFallbackReason ?? result?.assumptions?.model ?? '';
+  const solveDiagnostics = result?.stats && (mode === 'airflow' || mode === 'temperature') ? [
+    `Post-projection face-flux divergence (RMS): ${result.stats.rmsDivergence} s⁻¹`,
+    `Net window flow: ${result.stats.netBoundaryFlowM3s} m³/s (${result.stats.boundaryFlowImbalancePercent}% imbalance)`,
+  ] : [];
+  fieldControls.status.title = error?.message ?? [
+    result?.gpuFallbackReason,
+    result?.assumptions?.model,
+    result?.assumptions?.pressureSolver,
+    ...solveDiagnostics,
+  ].filter(Boolean).join('\n');
   if (mode === 'light' && displayStyle === 'preview') {
     if (!loading && !error) fieldControls.status.textContent = 'Realtime shadows';
     fieldControls.status.title = error?.message ?? 'Monochrome room render with lamp point lights and cast shadows.';
@@ -259,12 +268,12 @@ function renderProperties() {
       <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
       ${isWindow ? `
         <label class="window-open-toggle"><input type="checkbox" data-window-open ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
-        <label class="property-field"><span>Window flow</span><select class="property-input" data-window-flow-direction aria-label="Window airflow direction">
-          <option value="exchange">Exchange · two-way</option><option value="inlet">Inlet · source</option><option value="outlet">Outlet · sink</option>
+        <label class="property-field"><span>Window pressure</span><select class="property-input" data-window-flow-direction aria-label="Window exterior pressure direction">
+          <option value="exchange">Stack exchange · two-way</option><option value="inlet">Positive pressure · intake bias</option><option value="outlet">Negative pressure · exhaust bias</option>
         </select></label>
         <div class="property-group">
-          <div class="range-heading"><span>Flow speed</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
-          <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Window airflow speed in meters per second" />
+          <div class="range-heading"><span>Outside wind</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
+          <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Exterior wind speed in meters per second" />
         </div>
       ` : `<label class="property-field"><span>Model</span><select class="property-input" data-object-model aria-label="Box model">${modelOptions}</select></label>`}
       <div class="property-group">

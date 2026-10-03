@@ -299,7 +299,7 @@ function makeEmitter(position, direction, axis, radius, kind = 'flow') {
 
 function findWindowExit(start, end, roomScene, result, targetVelocity) {
   if (!roomScene) return null;
-  const { grid } = result;
+  const { grid, fields } = result;
   const walls = {
     front: { axis: 'z', boundary: 0, along: 'x', normal: new THREE.Vector3(0, 0, -1) },
     back: { axis: 'z', boundary: roomScene.room.depth, along: 'x', normal: new THREE.Vector3(0, 0, 1) },
@@ -317,16 +317,26 @@ function findWindowExit(start, end, roomScene, result, targetVelocity) {
     if (point.y < window.position.y || point.y > window.position.y + window.dimensions.height
       || Math.abs(point[wall.along] - window.position[wall.along]) > window.dimensions.width / 2) continue;
 
+    const i = clamp(Math.floor(point.x / grid.dx), 0, grid.nx - 1);
+    const j = clamp(Math.floor(point.y / grid.dy), 0, grid.ny - 1);
+    const k = clamp(Math.floor(point.z / grid.dz), 0, grid.nz - 1);
+    const index = indexOf(i, j, k, grid);
+    const side = window.wall === 'left' ? 1 : window.wall === 'right' ? 2
+      : window.wall === 'front' ? 16 : 32;
+    if (!(fields.outlets[index] & side)) continue;
+    const outwardSpeed = fields.windowFlow[index] * wall.normal[wall.axis];
+    if (outwardSpeed <= 0.02) continue;
+
     const interiorPoint = point.clone().addScaledVector(wall.normal, -Math.min(grid.dx, grid.dy, grid.dz) * 0.25);
     sampleVelocity(result, interiorPoint, targetVelocity);
-    const outwardSpeed = targetVelocity.dot(wall.normal);
-    if (outwardSpeed <= 0.02) continue;
+    targetVelocity.addScaledVector(wall.normal, outwardSpeed - targetVelocity.dot(wall.normal));
     return { point, velocity: targetVelocity.clone() };
   }
   return null;
 }
 
 function getAirEmitters(result, roomScene) {
+  const { grid, fields } = result;
   const emitters = [];
   for (const fan of roomScene?.objects ?? []) {
     if (fan.model !== 'fan' || fan.enabled === false || (fan.intensity ?? 1) <= 0) continue;
@@ -365,12 +375,8 @@ function getAirEmitters(result, roomScene) {
   }
 
   for (const window of roomScene?.objects ?? []) {
-    if (window.model !== 'window' || !window.open || (window.flowRate ?? 0.35) <= 0) continue;
+    if (window.model !== 'window' || !window.open) continue;
     const alongX = window.wall === 'back' || window.wall === 'front';
-    const flowDirection = window.flowDirection ?? 'exchange';
-    const outdoorAirIsWarmer = (roomScene.room.outdoorTemperature ?? result.outdoorTemperature ?? result.ambientTemperature)
-      > result.ambientTemperature;
-    const inletFraction = outdoorAirIsWarmer ? 0.75 : 0.25;
     const outward = {
       front: new THREE.Vector3(0, 0, -1),
       back: new THREE.Vector3(0, 0, 1),
@@ -378,19 +384,51 @@ function getAirEmitters(result, roomScene) {
       right: new THREE.Vector3(1, 0, 0),
     }[window.wall];
     const axis = alongX ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
-    const addWindowEmitter = (fraction, direction) => emitters.push(makeEmitter(
-      new THREE.Vector3(window.position.x, window.position.y + window.dimensions.height * fraction, window.position.z),
-      direction,
-      axis,
-      Math.max(0.08, window.dimensions.width * 0.36),
-      'window',
-    ));
-    if (flowDirection !== 'outlet') addWindowEmitter(inletFraction, outward.clone().negate());
-    if (flowDirection !== 'inlet') addWindowEmitter(1 - inletFraction, outward);
+    const side = window.wall === 'left' ? 1 : window.wall === 'right' ? 2
+      : window.wall === 'front' ? 16 : 32;
+    const alongSpacing = alongX ? grid.dx : grid.dz;
+    const alongCells = alongX ? grid.nx : grid.nz;
+    const alongPosition = alongX ? window.position.x : window.position.z;
+    const firstAlong = clamp(Math.floor((alongPosition - window.dimensions.width / 2) / alongSpacing), 0, alongCells - 1);
+    const lastAlong = clamp(Math.floor((alongPosition + window.dimensions.width / 2) / alongSpacing), 0, alongCells - 1);
+    const firstJ = clamp(Math.floor(window.position.y / grid.dy), 0, grid.ny - 1);
+    const lastJ = clamp(Math.floor((window.position.y + window.dimensions.height) / grid.dy), 0, grid.ny - 1);
+    const middleJ = Math.floor((firstJ + lastJ) / 2);
+    const inflow = [0, 1].map(() => ({ weight: 0, position: new THREE.Vector3() }));
+    for (let j = firstJ; j <= lastJ; j += 1) {
+      for (let along = firstAlong; along <= lastAlong; along += 1) {
+        const i = alongX ? along : window.wall === 'left' ? 0 : grid.nx - 1;
+        const k = alongX ? window.wall === 'front' ? 0 : grid.nz - 1 : along;
+        const index = indexOf(i, j, k, grid);
+        if (!(fields.outlets[index] & side)) continue;
+        const outwardSpeed = fields.windowFlow[index] * outward.x
+          + fields.windowFlow[index] * outward.z;
+        if (outwardSpeed >= -0.01) continue;
+        const band = j <= middleJ ? 0 : 1;
+        const weight = -outwardSpeed;
+        inflow[band].weight += weight;
+        inflow[band].position.add(new THREE.Vector3(
+          (i + 0.5) * grid.dx,
+          (j + 0.5) * grid.dy,
+          (k + 0.5) * grid.dz,
+        ).multiplyScalar(weight));
+      }
+    }
+    for (const opening of inflow) {
+      if (opening.weight <= 0.01) continue;
+      const position = opening.position.multiplyScalar(1 / opening.weight)
+        .addScaledVector(outward, -0.02);
+      emitters.push(makeEmitter(
+        position,
+        outward.clone().negate(),
+        axis,
+        Math.max(0.08, window.dimensions.width * 0.36),
+        'window',
+      ));
+    }
   }
 
   if (emitters.length) return emitters;
-  const { grid, fields } = result;
   const candidates = [];
   for (let j = 1; j < grid.ny - 1; j += 2) {
     for (let k = 1; k < grid.nz - 1; k += 2) {

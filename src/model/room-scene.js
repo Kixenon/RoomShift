@@ -129,7 +129,7 @@ export function setWindowFlow(scene, objectId, flowDirection, flowRate) {
   if (!existing || existing.model !== 'window') throw new RangeError(`Unknown window: ${objectId}`);
   if (!['exchange', 'inlet', 'outlet'].includes(flowDirection)) throw new RangeError(`Unsupported window flow direction: ${flowDirection}`);
   if (!Number.isFinite(flowRate) || flowRate < 0 || flowRate > 1.5) {
-    throw new RangeError('Window flow speed must be between 0 and 1.5 m/s.');
+    throw new RangeError('Exterior wind speed must be between 0 and 1.5 m/s.');
   }
   const updated = { ...existing, flowDirection, flowRate: round(flowRate) };
   return {

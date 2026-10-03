@@ -25,8 +25,7 @@ export const FIELD_PHYSICS_DEFAULTS = Object.freeze({
   kinematicViscosity: 0.018,
   effectiveThermalDiffusivity: 0.018,
   coolingRate: 0.02,
-  fanAcceleration: 4.5,
-  fanRange: 3.8,
+  fanOutletSpeed: 1.2,
   heaterRate: 0.8,
   heaterRadius: 0.45,
 });
@@ -40,17 +39,18 @@ const DEFAULTS = Object.freeze({
 const FAN_SOURCE_GRID_CELLS = 1.25;
 
 export const FIELD_ASSUMPTIONS = Object.freeze({
-  model: 'simplified 3D transient advection-diffusion estimate',
+  model: '3D planning preview with finite-volume face-flux pressure projection; not validated CFD',
   defaultCellSizeMeters: DEFAULTS.cellSize,
   defaultDurationSeconds: DEFAULTS.steps * DEFAULTS.timeStep,
   maximumGridDimensions: Object.freeze([LIMITS.maxGridX, LIMITS.maxGridY, LIMITS.maxGridZ]),
   maximumGridCells: LIMITS.maxGridX * LIMITS.maxGridY * LIMITS.maxGridZ,
   maximumSteps: LIMITS.maxSteps,
   maximumPressureIterations: LIMITS.maxPressureIterations,
+  pressureSolver: 'fixed-count red/black successive over-relaxation; no residual-convergence stop',
   maximumSpeedMetersPerSecond: LIMITS.maxSpeed,
   thermalSourceUnits: 'estimated degrees Celsius per second',
   thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
-  boundaries: 'closed walls with prescribed window flow and outdoor-temperature inflow',
+  boundaries: 'no-penetration voxel walls and pressure-driven open windows with exterior pressure head from wind settings; no-slip walls are not modeled',
 });
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -139,8 +139,7 @@ function validateOptions(options, room) {
     ['kinematicViscosity', 0, 0.05],
     ['effectiveThermalDiffusivity', 0, 0.05],
     ['coolingRate', 0, 1],
-    ['fanAcceleration', 0, 10],
-    ['fanRange', 0.05, roomReach],
+    ['fanOutletSpeed', 0, 3],
     ['heaterRate', 0, 10],
     ['heaterRadius', 0.05, roomReach],
   ];
@@ -224,7 +223,7 @@ export function buildOutletMask(scene, grid, settings = {}) {
 export function buildWindowBoundary(scene, grid, settings = {}) {
   const count = grid.nx * grid.ny * grid.nz;
   const outlets = new Uint8Array(count);
-  const flow = new Float32Array(count);
+  const pressure = new Float32Array(count);
   for (const window of scene.objects) {
     if (window.model !== 'window' || !window.open) continue;
     const alongX = window.wall === 'back' || window.wall === 'front';
@@ -234,7 +233,6 @@ export function buildWindowBoundary(scene, grid, settings = {}) {
     const firstJ = clamp(Math.floor(window.position.y / grid.dy), 0, grid.ny - 1);
     const lastJ = clamp(Math.floor((window.position.y + window.dimensions.height) / grid.dy), 0, grid.ny - 1);
     const direction = window.flowDirection ?? 'exchange';
-    const wallSign = window.wall === 'left' || window.wall === 'front' ? -1 : 1;
     const speed = window.flowRate ?? 0.35;
     const alongCells = alongX ? grid.nx : grid.nz;
     const alongSpacing = alongX ? grid.dx : grid.dz;
@@ -250,34 +248,23 @@ export function buildWindowBoundary(scene, grid, settings = {}) {
       }
     }
 
-    let inlets = [];
-    let exits = [];
+    const pressureHead = 0.5 * speed ** 2;
+    for (const { index } of cells) outlets[index] |= sideBit;
     if (direction === 'exchange') {
       const outdoorAirIsWarmer = (settings.outdoorTemperature ?? scene.room.outdoorTemperature ?? DEFAULTS.outdoorTemperature)
         > (settings.ambientTemperature ?? DEFAULTS.ambientTemperature);
       cells.sort((a, b) => outdoorAirIsWarmer ? b.j - a.j || a.along - b.along : a.j - b.j || a.along - b.along);
       const split = Math.floor(cells.length / 2);
       if (split === 0) continue;
-      inlets = cells.slice(0, split);
-      exits = cells.slice(split);
+      for (const { index } of cells.slice(0, split)) pressure[index] = pressureHead;
+      for (const { index } of cells.slice(split)) pressure[index] = -pressureHead;
     } else if (direction === 'inlet') {
-      inlets = cells;
-    } else {
-      exits = cells;
-    }
-
-    const exchangeSpeed = direction === 'exchange' ? speed * cells.length / (2 * inlets.length) : speed;
-    for (const { index } of inlets) {
-      outlets[index] |= sideBit;
-      flow[index] = -wallSign * exchangeSpeed;
-    }
-    const exitSpeed = direction === 'exchange' ? speed * cells.length / (2 * exits.length) : speed;
-    for (const { index } of exits) {
-      outlets[index] |= sideBit;
-      flow[index] = wallSign * exitSpeed;
+      for (const { index } of cells) pressure[index] = pressureHead;
+    } else if (direction === 'outlet') {
+      for (const { index } of cells) pressure[index] = -pressureHead;
     }
   }
-  return { outlets, flow };
+  return { outlets, pressure };
 }
 
 function sampleField(field, x, y, z, grid, solid, fallback, skipSolid = false) {
@@ -370,6 +357,124 @@ function neighborValue(field, i, j, k, di, dj, dk, center, grid, solid) {
   return solid[index] ? center : field[index];
 }
 
+function boundaryFlow(index, side, outlets, windowFlow) {
+  return outlets[index] & side ? windowFlow[index] : 0;
+}
+
+function buildFaceVelocities(u, v, w, grid, solid, outlets, windowFlow, target, useWindowFlow = true) {
+  const count = u.length;
+  const x = target?.x ?? new Float32Array(count);
+  const y = target?.y ?? new Float32Array(count);
+  const z = target?.z ?? new Float32Array(count);
+  const xLow = target?.xLow ?? new Float32Array(count);
+  const zLow = target?.zLow ?? new Float32Array(count);
+  x.fill(0);
+  y.fill(0);
+  z.fill(0);
+  xLow.fill(0);
+  zLow.fill(0);
+  for (let j = 0; j < grid.ny; j += 1) {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        const index = indexOf(i, j, k, grid);
+        if (solid[index]) continue;
+        if (i === 0 && (outlets[index] & 1)) xLow[index] = useWindowFlow ? windowFlow[index] : u[index];
+        if (k === 0 && (outlets[index] & 16)) zLow[index] = useWindowFlow ? windowFlow[index] : w[index];
+        if (i + 1 < grid.nx) {
+          const right = indexOf(i + 1, j, k, grid);
+          if (!solid[right]) x[index] = (u[index] + u[right]) * 0.5;
+        } else {
+          if (outlets[index] & 2) x[index] = useWindowFlow ? windowFlow[index] : u[index];
+        }
+        if (j + 1 < grid.ny) {
+          const above = indexOf(i, j + 1, k, grid);
+          if (!solid[above]) y[index] = (v[index] + v[above]) * 0.5;
+        }
+        if (k + 1 < grid.nz) {
+          const far = indexOf(i, j, k + 1, grid);
+          if (!solid[far]) z[index] = (w[index] + w[far]) * 0.5;
+        } else {
+          if (outlets[index] & 32) z[index] = useWindowFlow ? windowFlow[index] : w[index];
+        }
+      }
+    }
+  }
+  return { x, y, z, xLow, zLow };
+}
+
+function faceDivergence(faces, i, j, k, grid) {
+  const index = indexOf(i, j, k, grid);
+  const west = i > 0 ? faces.x[indexOf(i - 1, j, k, grid)] : faces.xLow[index];
+  const below = j > 0 ? faces.y[indexOf(i, j - 1, k, grid)] : 0;
+  const near = k > 0 ? faces.z[indexOf(i, j, k - 1, grid)] : faces.zLow[index];
+  return (faces.x[index] - west) / grid.dx
+    + (faces.y[index] - below) / grid.dy
+    + (faces.z[index] - near) / grid.dz;
+}
+
+function buildPressureStencil(grid, solid, outlets, windowPressure) {
+  const count = solid.length;
+  const neighbors = new Int32Array(count * 6).fill(-1);
+  const diagonal = new Float32Array(count);
+  const boundarySource = new Float32Array(count);
+  const xWeight = 1 / grid.dx ** 2;
+  const yWeight = 1 / grid.dy ** 2;
+  const zWeight = 1 / grid.dz ** 2;
+  const weights = [xWeight, xWeight, yWeight, yWeight, zWeight, zWeight];
+  const offsets = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
+  for (let j = 0; j < grid.ny; j += 1) {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        const index = indexOf(i, j, k, grid);
+        if (solid[index]) continue;
+        for (let direction = 0; direction < offsets.length; direction += 1) {
+          const [di, dj, dk] = offsets[direction];
+          const ni = i + di;
+          const nj = j + dj;
+          const nk = k + dk;
+          if (ni < 0 || ni >= grid.nx || nj < 0 || nj >= grid.ny || nk < 0 || nk >= grid.nz) continue;
+          const neighbor = indexOf(ni, nj, nk, grid);
+          if (solid[neighbor]) continue;
+          neighbors[index * 6 + direction] = neighbor;
+          diagonal[index] += weights[direction];
+        }
+        if (i === 0 && (outlets[index] & 1)) {
+          diagonal[index] += 2 * xWeight;
+          boundarySource[index] += 2 * xWeight * windowPressure[index];
+        }
+        if (i + 1 === grid.nx && (outlets[index] & 2)) {
+          diagonal[index] += 2 * xWeight;
+          boundarySource[index] += 2 * xWeight * windowPressure[index];
+        }
+        if (k === 0 && (outlets[index] & 16)) {
+          diagonal[index] += 2 * zWeight;
+          boundarySource[index] += 2 * zWeight * windowPressure[index];
+        }
+        if (k + 1 === grid.nz && (outlets[index] & 32)) {
+          diagonal[index] += 2 * zWeight;
+          boundarySource[index] += 2 * zWeight * windowPressure[index];
+        }
+      }
+    }
+  }
+  return { neighbors, diagonal, weights, boundarySource };
+}
+
+function buildPressureWorkspace(count) {
+  return {
+    pressure: new Float32Array(count),
+    divergence: new Float32Array(count),
+    projectedDivergence: new Float32Array(count),
+    faces: {
+      x: new Float32Array(count),
+      y: new Float32Array(count),
+      z: new Float32Array(count),
+      xLow: new Float32Array(count),
+      zLow: new Float32Array(count),
+    },
+  };
+}
+
 function laplacian(field, i, j, k, grid, solid) {
   const center = field[indexOf(i, j, k, grid)];
   return (neighborValue(field, i, j, k, -1, 0, 0, center, grid, solid)
@@ -378,33 +483,6 @@ function laplacian(field, i, j, k, grid, solid) {
       - 2 * center + neighborValue(field, i, j, k, 0, 1, 0, center, grid, solid)) / (grid.dy ** 2)
     + (neighborValue(field, i, j, k, 0, 0, -1, center, grid, solid)
       - 2 * center + neighborValue(field, i, j, k, 0, 0, 1, center, grid, solid)) / (grid.dz ** 2);
-}
-
-function applyVelocityBoundaries(u, v, w, grid, solid, outlets, windowFlow) {
-  for (let j = 0; j < grid.ny; j += 1) {
-    for (let k = 0; k < grid.nz; k += 1) {
-      for (let i = 0; i < grid.nx; i += 1) {
-        const index = indexOf(i, j, k, grid);
-        if (solid[index]) {
-          u[index] = 0;
-          v[index] = 0;
-          w[index] = 0;
-          continue;
-        }
-        if (i === 0) u[index] = outlets[index] & 1 ? windowFlow[index] : 0;
-        if (i === grid.nx - 1) u[index] = outlets[index] & 2 ? windowFlow[index] : 0;
-        if (j === 0 || j === grid.ny - 1) v[index] = 0;
-        if (k === 0) w[index] = outlets[index] & 16 ? windowFlow[index] : 0;
-        if (k === grid.nz - 1) w[index] = outlets[index] & 32 ? windowFlow[index] : 0;
-        if ((i > 0 && solid[indexOf(i - 1, j, k, grid)] && u[index] < 0)
-          || (i + 1 < grid.nx && solid[indexOf(i + 1, j, k, grid)] && u[index] > 0)) u[index] = 0;
-        if ((j > 0 && solid[indexOf(i, j - 1, k, grid)] && v[index] < 0)
-          || (j + 1 < grid.ny && solid[indexOf(i, j + 1, k, grid)] && v[index] > 0)) v[index] = 0;
-        if ((k > 0 && solid[indexOf(i, j, k - 1, grid)] && w[index] < 0)
-          || (k + 1 < grid.nz && solid[indexOf(i, j, k + 1, grid)] && w[index] > 0)) w[index] = 0;
-      }
-    }
-  }
 }
 
 function rayIntersectsBox(start, endX, endY, endZ, box) {
@@ -484,6 +562,10 @@ export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULT
       grid.dy * direction[1],
       grid.dz * direction[2],
     );
+    const radius = Math.max(0.08, Math.min(fan.dimensions.width * 0.4, fan.dimensions.height * 0.22));
+    const speed = settings.fanOutletSpeed * (fan.intensity ?? 1);
+    // Spread the target grille speed over a source slab measured in grid cells.
+    const sourceAcceleration = speed ** 2 / Math.max(4 * sourceReach, 1e-6);
     for (let j = 0; j < grid.ny; j += 1) {
       for (let k = 0; k < grid.nz; k += 1) {
         for (let i = 0; i < grid.nx; i += 1) {
@@ -495,16 +577,12 @@ export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULT
           const dx = x - source.x;
           const dy = y - source.y;
           const dz = z - source.z;
-          const forward = dx * direction[0] + dy * direction[1] + dz * direction[2];
-          if (forward < -sourceReach || forward > settings.fanRange) continue;
-          const lateralSquared = Math.max(0, dx ** 2 + dy ** 2 + dz ** 2 - forward ** 2);
-          const spread = Math.max(0.12, fan.dimensions.width * 0.32) + Math.max(0, forward) * 0.28;
-          if (lateralSquared > 9 * spread ** 2 || !rayIsClear(source, x, y, z, blockers)) continue;
-          const upstreamFade = Math.exp(-0.5 * (Math.min(0, forward) / sourceReach) ** 2);
-          const beam = Math.exp(-lateralSquared / (2 * spread ** 2))
-            * Math.exp(-Math.max(0, forward) / settings.fanRange)
-            * upstreamFade;
-          const magnitude = settings.fanAcceleration * (fan.intensity ?? 1) * beam;
+          const local = inverseRotate(dx, dy, dz, matrix);
+          if (Math.abs(local.z) > sourceReach || local.x ** 2 + local.y ** 2 > 9 * radius ** 2
+            || !rayIsClear(source, x, y, z, blockers)) continue;
+          const disk = Math.exp(-(local.x ** 2 + local.y ** 2) / (2 * radius ** 2))
+            * Math.exp(-0.5 * (local.z / sourceReach) ** 2);
+          const magnitude = sourceAcceleration * disk;
           const offset = index * 4;
           acceleration[offset] += direction[0] * magnitude;
           acceleration[offset + 1] += direction[1] * magnitude;
@@ -534,53 +612,44 @@ function applyBuoyancy(v, temperature, solid, timeStep, ambientTemperature) {
   }
 }
 
-function projectVelocity(u, v, w, grid, solid, outlets, windowFlow, iterations) {
-  let pressure = new Float32Array(u.length);
-  let nextPressure = new Float32Array(u.length);
-  const divergence = new Float32Array(u.length);
-  const ix = 1 / (grid.dx ** 2);
-  const iy = 1 / (grid.dy ** 2);
-  const iz = 1 / (grid.dz ** 2);
-  const denominator = 2 * (ix + iy + iz);
+function projectVelocity(u, v, w, grid, solid, outlets, windowPressure, windowFlow, pressureStencil, workspace, timeStep, iterations) {
+  const { pressure } = workspace;
+  const { divergence } = workspace;
+  const { neighbors, diagonal, weights, boundarySource } = pressureStencil;
+  const faces = buildFaceVelocities(u, v, w, grid, solid, outlets, windowFlow, workspace.faces, false);
+  pressure.fill(0);
 
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
       for (let i = 0; i < grid.nx; i += 1) {
         const index = indexOf(i, j, k, grid);
         if (solid[index]) continue;
-        const leftU = neighborValue(u, i, j, k, -1, 0, 0, 0, grid, solid);
-        const rightU = neighborValue(u, i, j, k, 1, 0, 0, 0, grid, solid);
-        const belowV = neighborValue(v, i, j, k, 0, -1, 0, 0, grid, solid);
-        const aboveV = neighborValue(v, i, j, k, 0, 1, 0, 0, grid, solid);
-        const nearW = neighborValue(w, i, j, k, 0, 0, -1, 0, grid, solid);
-        const farW = neighborValue(w, i, j, k, 0, 0, 1, 0, grid, solid);
-        divergence[index] = (rightU - leftU) / (2 * grid.dx)
-          + (aboveV - belowV) / (2 * grid.dy)
-          + (farW - nearW) / (2 * grid.dz);
+        divergence[index] = faceDivergence(faces, i, j, k, grid);
       }
     }
   }
 
+  const relaxation = 1.7;
   for (let iteration = 0; iteration < iterations; iteration += 1) {
-    nextPressure.fill(0);
-    for (let j = 0; j < grid.ny; j += 1) {
-      for (let k = 0; k < grid.nz; k += 1) {
-        for (let i = 0; i < grid.nx; i += 1) {
-          const index = indexOf(i, j, k, grid);
-          if (solid[index]) continue;
-          const center = pressure[index];
-          const left = neighborValue(pressure, i, j, k, -1, 0, 0, center, grid, solid);
-          const right = neighborValue(pressure, i, j, k, 1, 0, 0, center, grid, solid);
-          const below = neighborValue(pressure, i, j, k, 0, -1, 0, center, grid, solid);
-          const above = neighborValue(pressure, i, j, k, 0, 1, 0, center, grid, solid);
-          const near = neighborValue(pressure, i, j, k, 0, 0, -1, center, grid, solid);
-          const far = neighborValue(pressure, i, j, k, 0, 0, 1, center, grid, solid);
-          nextPressure[index] = (ix * (left + right) + iy * (below + above)
-            + iz * (near + far) - divergence[index]) / denominator;
+    for (let color = 0; color < 2; color += 1) {
+      for (let j = 0; j < grid.ny; j += 1) {
+        for (let k = 0; k < grid.nz; k += 1) {
+          const firstI = (color + j + k) & 1;
+          for (let i = firstI; i < grid.nx; i += 2) {
+            const index = indexOf(i, j, k, grid);
+            if (solid[index] || diagonal[index] === 0) continue;
+            const base = index * 6;
+            let sum = 0;
+            for (let direction = 0; direction < 6; direction += 1) {
+              const neighbor = neighbors[base + direction];
+              if (neighbor >= 0) sum += pressure[neighbor] * weights[direction];
+            }
+            const target = (sum + boundarySource[index] - divergence[index] / timeStep) / diagonal[index];
+            pressure[index] += relaxation * (target - pressure[index]);
+          }
         }
       }
     }
-    [pressure, nextPressure] = [nextPressure, pressure];
   }
 
   for (let j = 0; j < grid.ny; j += 1) {
@@ -588,20 +657,61 @@ function projectVelocity(u, v, w, grid, solid, outlets, windowFlow, iterations) 
       for (let i = 0; i < grid.nx; i += 1) {
         const index = indexOf(i, j, k, grid);
         if (solid[index]) continue;
-        const center = pressure[index];
-        const left = neighborValue(pressure, i, j, k, -1, 0, 0, center, grid, solid);
-        const right = neighborValue(pressure, i, j, k, 1, 0, 0, center, grid, solid);
-        const below = neighborValue(pressure, i, j, k, 0, -1, 0, center, grid, solid);
-        const above = neighborValue(pressure, i, j, k, 0, 1, 0, center, grid, solid);
-        const near = neighborValue(pressure, i, j, k, 0, 0, -1, center, grid, solid);
-        const far = neighborValue(pressure, i, j, k, 0, 0, 1, center, grid, solid);
-        u[index] -= (right - left) / (2 * grid.dx);
-        v[index] -= (above - below) / (2 * grid.dy);
-        w[index] -= (far - near) / (2 * grid.dz);
+        if (i + 1 < grid.nx) {
+          const right = indexOf(i + 1, j, k, grid);
+          if (!solid[right]) faces.x[index] -= timeStep * (pressure[right] - pressure[index]) / grid.dx;
+        } else if (outlets[index] & 2) {
+          faces.x[index] -= 2 * timeStep * (windowPressure[index] - pressure[index]) / grid.dx;
+        }
+        if (i === 0 && (outlets[index] & 1)) {
+          faces.xLow[index] -= 2 * timeStep * (pressure[index] - windowPressure[index]) / grid.dx;
+        }
+        if (j + 1 < grid.ny) {
+          const above = indexOf(i, j + 1, k, grid);
+          if (!solid[above]) faces.y[index] -= timeStep * (pressure[above] - pressure[index]) / grid.dy;
+        }
+        if (k + 1 < grid.nz) {
+          const far = indexOf(i, j, k + 1, grid);
+          if (!solid[far]) faces.z[index] -= timeStep * (pressure[far] - pressure[index]) / grid.dz;
+        } else if (outlets[index] & 32) {
+          faces.z[index] -= 2 * timeStep * (windowPressure[index] - pressure[index]) / grid.dz;
+        }
+        if (k === 0 && (outlets[index] & 16)) {
+          faces.zLow[index] -= 2 * timeStep * (pressure[index] - windowPressure[index]) / grid.dz;
+        }
       }
     }
   }
-  applyVelocityBoundaries(u, v, w, grid, solid, outlets, windowFlow);
+
+  for (let j = 0; j < grid.ny; j += 1) {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        const index = indexOf(i, j, k, grid);
+        if (solid[index]) {
+          u[index] = 0;
+          v[index] = 0;
+          w[index] = 0;
+          windowFlow[index] = 0;
+          workspace.projectedDivergence[index] = 0;
+          continue;
+        }
+        workspace.projectedDivergence[index] = faceDivergence(faces, i, j, k, grid);
+        const west = i > 0 ? faces.x[indexOf(i - 1, j, k, grid)] : faces.xLow[index];
+        const below = j > 0 ? faces.y[indexOf(i, j - 1, k, grid)] : 0;
+        const near = k > 0 ? faces.z[indexOf(i, j, k - 1, grid)] : faces.zLow[index];
+        u[index] = (faces.x[index] + west) * 0.5;
+        v[index] = (faces.y[index] + below) * 0.5;
+        w[index] = (faces.z[index] + near) * 0.5;
+        let boundaryVelocityTotal = 0;
+        let boundaryFaceCount = 0;
+        if (outlets[index] & 1) { boundaryVelocityTotal += faces.xLow[index]; boundaryFaceCount += 1; }
+        if (outlets[index] & 2) { boundaryVelocityTotal += faces.x[index]; boundaryFaceCount += 1; }
+        if (outlets[index] & 16) { boundaryVelocityTotal += faces.zLow[index]; boundaryFaceCount += 1; }
+        if (outlets[index] & 32) { boundaryVelocityTotal += faces.z[index]; boundaryFaceCount += 1; }
+        windowFlow[index] = boundaryFaceCount ? boundaryVelocityTotal / boundaryFaceCount : 0;
+      }
+    }
+  }
 }
 
 function diffuse(field, coefficient, timeStep, grid, solid, clampMin, clampMax) {
@@ -638,13 +748,15 @@ function addHeatSources(temperature, heaters, grid, solid, settings, timeStep) {
   }
 }
 
-function calculateStats(u, v, w, temperature, solid, grid, ambientTemperature) {
+function calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid, ambientTemperature, projectedDivergence) {
   let maxSpeed = 0;
   let divergenceSquared = 0;
   let fluidCells = 0;
   let totalTemperature = 0;
   let maxTemperature = -Infinity;
   let solidCells = 0;
+  let netBoundaryFlow = 0;
+  let totalBoundaryFlow = 0;
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
       for (let i = 0; i < grid.nx; i += 1) {
@@ -655,26 +767,42 @@ function calculateStats(u, v, w, temperature, solid, grid, ambientTemperature) {
         }
         const speed = Math.hypot(u[index], v[index], w[index]);
         maxSpeed = Math.max(maxSpeed, speed);
-        const divergence = (
-          neighborValue(u, i, j, k, 1, 0, 0, 0, grid, solid)
-          - neighborValue(u, i, j, k, -1, 0, 0, 0, grid, solid)
-        ) / (2 * grid.dx) + (
-          neighborValue(v, i, j, k, 0, 1, 0, 0, grid, solid)
-          - neighborValue(v, i, j, k, 0, -1, 0, 0, grid, solid)
-        ) / (2 * grid.dy) + (
-          neighborValue(w, i, j, k, 0, 0, 1, 0, grid, solid)
-          - neighborValue(w, i, j, k, 0, 0, -1, 0, grid, solid)
-        ) / (2 * grid.dz);
+        const divergence = projectedDivergence?.[index] ?? 0;
         divergenceSquared += divergence ** 2;
         totalTemperature += temperature[index];
         maxTemperature = Math.max(maxTemperature, temperature[index]);
         fluidCells += 1;
+        if (outlets[index] & 1) {
+          const flux = -windowFlow[index] * grid.dy * grid.dz;
+          netBoundaryFlow += flux;
+          totalBoundaryFlow += Math.abs(flux);
+        }
+        if (outlets[index] & 2) {
+          const flux = windowFlow[index] * grid.dy * grid.dz;
+          netBoundaryFlow += flux;
+          totalBoundaryFlow += Math.abs(flux);
+        }
+        if (outlets[index] & 16) {
+          const flux = -windowFlow[index] * grid.dx * grid.dy;
+          netBoundaryFlow += flux;
+          totalBoundaryFlow += Math.abs(flux);
+        }
+        if (outlets[index] & 32) {
+          const flux = windowFlow[index] * grid.dx * grid.dy;
+          netBoundaryFlow += flux;
+          totalBoundaryFlow += Math.abs(flux);
+        }
       }
     }
   }
+  const rmsDivergence = fluidCells ? Number(Math.sqrt(divergenceSquared / fluidCells).toFixed(4)) : 0;
   return {
     maxSpeed: Number(maxSpeed.toFixed(4)),
-    rmsDivergence: fluidCells ? Number(Math.sqrt(divergenceSquared / fluidCells).toFixed(4)) : 0,
+    rmsDivergence,
+    postProjectionRmsDivergence: rmsDivergence,
+    netBoundaryFlowM3s: Number(netBoundaryFlow.toFixed(5)),
+    boundaryFlowImbalancePercent: totalBoundaryFlow
+      ? Number((Math.abs(netBoundaryFlow) / totalBoundaryFlow * 100).toFixed(2)) : 0,
     meanTemperature: fluidCells ? Number((totalTemperature / fluidCells).toFixed(2)) : ambientTemperature,
     maxTemperature: fluidCells ? Number(maxTemperature.toFixed(2)) : ambientTemperature,
     solidCells,
@@ -687,15 +815,20 @@ function createSimulationState(scene, options) {
   const settings = validateOptions(options, scene.room);
   const grid = buildGrid(scene.room, settings.cellSize);
   const solid = buildSolidMask(scene, grid);
-  const { outlets, flow: windowFlow } = buildWindowBoundary(scene, grid, settings);
+  const { outlets, pressure: windowPressure } = buildWindowBoundary(scene, grid, settings);
   const count = grid.nx * grid.ny * grid.nz;
+  const windowFlow = new Float32Array(count);
+  const pressureStencil = buildPressureStencil(grid, solid, outlets, windowPressure);
   return {
     scene,
     settings,
     grid,
     solid,
     outlets,
+    windowPressure,
     windowFlow,
+    pressureStencil,
+    pressureWorkspace: buildPressureWorkspace(count),
     fanAcceleration: buildFanAccelerationField(scene, grid, solid, settings),
     heaters: scene.objects.filter((object) => object.model === 'heater'),
     u: new Float32Array(count),
@@ -706,7 +839,7 @@ function createSimulationState(scene, options) {
 }
 
 function advanceSimulation(state) {
-  const { settings, grid, solid, outlets, windowFlow, fanAcceleration, heaters } = state;
+  const { settings, grid, solid, outlets, windowPressure, windowFlow, pressureStencil, pressureWorkspace, fanAcceleration, heaters } = state;
   let { u, v, w, temperature } = state;
   const previousU = u;
   const previousV = v;
@@ -723,12 +856,6 @@ function advanceSimulation(state) {
     u[index] = clamp(u[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
     v[index] = clamp(v[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
     w[index] = clamp(w[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-  }
-  u = diffuse(u, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-  v = diffuse(v, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-  w = diffuse(w, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-  projectVelocity(u, v, w, grid, solid, outlets, windowFlow, settings.pressureIterations);
-  for (let index = 0; index < u.length; index += 1) {
     const speed = Math.hypot(u[index], v[index], w[index]);
     if (speed > LIMITS.maxSpeed) {
       const scale = LIMITS.maxSpeed / speed;
@@ -737,6 +864,11 @@ function advanceSimulation(state) {
       w[index] *= scale;
     }
   }
+  u = diffuse(u, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+  v = diffuse(v, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+  w = diffuse(w, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+  projectVelocity(u, v, w, grid, solid, outlets, windowPressure, windowFlow,
+    pressureStencil, pressureWorkspace, settings.timeStep, settings.pressureIterations);
 
   temperature = advect(temperature, previousU, previousV, previousW, grid, solid, settings.timeStep, settings.outdoorTemperature, true);
   temperature = diffuse(temperature, settings.effectiveThermalDiffusivity, settings.timeStep, grid, solid, 0, LIMITS.maxTemperature);
@@ -765,16 +897,20 @@ function advanceSimulation(state) {
 }
 
 function finishSimulation(state) {
-  const { settings, grid, solid, outlets, windowFlow, u, v, w, temperature } = state;
-  const stats = calculateStats(u, v, w, temperature, solid, grid, settings.ambientTemperature);
+  const { settings, grid, solid, outlets, windowPressure, windowFlow, u, v, w, temperature } = state;
+  const stats = calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid,
+    settings.ambientTemperature, state.pressureWorkspace.projectedDivergence);
   return {
     grid: { ...grid, cellSize: settings.cellSize },
-    fields: { u, v, w, temperature, solid, outlets, windowFlow },
+    fields: { u, v, w, temperature, solid, outlets, windowPressure, windowFlow },
     backend: 'cpu-preview',
     ambientTemperature: settings.ambientTemperature,
     outdoorTemperature: settings.outdoorTemperature,
     durationSeconds: settings.steps * settings.timeStep,
-    assumptions: FIELD_ASSUMPTIONS,
+    assumptions: Object.freeze({
+      ...FIELD_ASSUMPTIONS,
+      pressureSolver: `${settings.pressureIterations} red/black over-relaxation sweeps per step; no residual-convergence stop`,
+    }),
     stats,
   };
 }
