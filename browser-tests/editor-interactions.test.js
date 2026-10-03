@@ -6,8 +6,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const browserExecutable = process.env.ROOMSHIFT_BROWSER
-  ?? '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser';
+const browserExecutable = process.env.ROOMSHIFT_BROWSER || undefined;
 
 let server;
 let browser;

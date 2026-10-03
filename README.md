@@ -16,7 +16,14 @@ npm test
 npm run build
 ```
 
-The browser interaction tests use Playwright and a local Chromium-compatible browser. On this machine they default to Brave at `/Applications/Brave Browser.app/Contents/MacOS/Brave Browser`; set `ROOMSHIFT_BROWSER` to another browser executable if needed.
+`npm test` runs the headless-safe unit and model tests. The Playwright browser tests live in `browser-tests/` and are excluded from it, because they need a real GPU: two of them assert a WebGPU backend that headless Chromium does not expose (`navigator.gpu` is undefined), and the whole file renders through WebGL. Run them separately:
+
+```sh
+npx playwright install chromium
+npm run test:browser     # or: npm run test:all to run everything
+```
+
+They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a browser executable path to use a different one.
 
 ## Editor
 
@@ -51,4 +58,5 @@ The scene model is solver-independent (`src/model/room-scene.js`); rendering and
 - `src/scene/room-field-layer-3d.js` and `src/scene/room-field-renderer.js` — advected gas particles, infrared surface mapping, and optional volumetric field rendering.
 - `src/scene/room-viewport.js` — Three.js room, model meshes, camera, selection, and transform controls.
 - `src/app.js` — editor and simulation controls.
-- `tests/` — model/solver tests plus Playwright browser interaction, geometry, and map checks.
+- `tests/` — headless-safe model, solver, and scene-graph tests, run by `npm test`.
+- `browser-tests/` — Playwright browser interaction tests, run separately by `npm run test:browser`.

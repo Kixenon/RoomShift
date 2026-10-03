@@ -40,6 +40,7 @@ test('viewport frames advance the airflow layer animation clock', () => {
   globalThis.requestAnimationFrame = () => 1;
   const viewport = {
     animate: RoomViewport.prototype.animate,
+    updateFieldVolumeDepthTest: RoomViewport.prototype.updateFieldVolumeDepthTest,
     orbit: { update() {} },
     selectionBox: null,
     hoverBox: null,
