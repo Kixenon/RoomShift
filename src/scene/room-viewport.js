@@ -706,12 +706,27 @@ export class RoomViewport {
     this.selectionBox?.update();
   }
 
+  updateFieldVolumeDepthTest() {
+    const volume = this.fieldLayer?.children?.find((child) => child.userData?.boundsHalfSize);
+    if (!volume) return;
+    const { boundsCenter, boundsHalfSize } = volume.userData;
+    const position = this.camera.position;
+    const cameraInside = Math.abs(position.x - boundsCenter.x) < boundsHalfSize.x
+      && Math.abs(position.y - boundsCenter.y) < boundsHalfSize.y
+      && Math.abs(position.z - boundsCenter.z) < boundsHalfSize.z;
+    const material = volume.material;
+    if (material.depthTest === !cameraInside) return;
+    material.depthTest = !cameraInside;
+    material.needsUpdate = true;
+  }
+
   animate(time = 0) {
     this.frameRequest = requestAnimationFrame(this.animate);
     this.orbit.update();
     this.fieldLayer?.userData.animate?.(this.prefersReducedMotion ? 0 : time / 1000);
     this.selectionBox?.update();
     this.hoverBox?.update();
+    this.updateFieldVolumeDepthTest();
     this.renderer.render(this.scene, this.camera);
   }
 

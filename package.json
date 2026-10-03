@@ -7,7 +7,9 @@
     "dev": "vite --host 127.0.0.1 --port 4173",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
-    "test": "node --test"
+    "test": "node --test tests/",
+    "test:browser": "node --test browser-tests/",
+    "test:all": "node --test"
   },
   "dependencies": {
     "three": "^0.186.1"

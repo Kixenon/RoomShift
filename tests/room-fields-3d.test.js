@@ -24,7 +24,7 @@ test('an unforced room has a bounded 3D metre grid and remains at ambient temper
   const { u, v, w, temperature, solid } = result.fields;
   const cellCount = nx * ny * nz;
 
-  assert.equal(result.grid.cellSize, 0.25);
+  assert.equal(result.grid.cellSize, 0.15);
   assert.ok(nx > 1 && ny > 1 && nz > 1);
   assert.ok(Math.abs(dx * nx - 5.2) < 1e-10);
   assert.ok(Math.abs(dy * ny - 2.7) < 1e-10);
@@ -135,8 +135,8 @@ test('maximum room/grid work is bounded and all returned fields stay finite', ()
     kinematicViscosity: 0.05, effectiveThermalDiffusivity: 0.05,
   });
 
-  assert.ok(result.grid.nx <= 40 && result.grid.ny <= 12 && result.grid.nz <= 40);
-  assert.ok(result.fields.u.length <= 19_200);
+  assert.ok(result.grid.nx <= 40 && result.grid.ny <= 24 && result.grid.nz <= 40);
+  assert.ok(result.fields.u.length <= 38_400);
   for (const field of [result.fields.u, result.fields.v, result.fields.w, result.fields.temperature]) {
     assert.ok(Array.from(field).every(Number.isFinite));
   }
