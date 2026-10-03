@@ -51,7 +51,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 
 .viewport-wrap { min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; background: #f6f8f6; }
 .viewport-topline { position: absolute; z-index: 2; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; pointer-events: none; }
-.camera-controls { position: absolute; z-index: 2; right: 14px; bottom: 14px; height: 34px; display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid rgba(218, 225, 218, .92); border-radius: 9px; background: rgba(255, 255, 255, .91); box-shadow: 0 3px 10px rgba(35, 57, 48, .045); backdrop-filter: blur(12px); pointer-events: auto; }
+.camera-controls { position: absolute; z-index: 2; right: 14px; bottom: 14px; height: 34px; display: inline-flex; align-items: center; gap: 3px; pointer-events: auto; }
 .field-controls { height: 34px; display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid rgba(218, 225, 218, .92); border-radius: 9px; background: rgba(255, 255, 255, .94); box-shadow: 0 3px 10px rgba(35, 57, 48, .045); backdrop-filter: blur(12px); pointer-events: auto; }
 .field-button { height: 26px; border: 0; border-radius: 6px; cursor: pointer; font-size: 9px; }
 .field-button { min-width: 33px; padding: 0 6px; background: transparent; color: #82918a; }
