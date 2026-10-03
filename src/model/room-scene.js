@@ -1,4 +1,9 @@
-export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7 });
+import { assertPlacementClear, findObjectCollision } from './room-collision.js';
+import { rotationMatrixXYZ } from './room-transform.js';
+
+export { rotationMatrixXYZ } from './room-transform.js';
+
+export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
 
 export const DEFAULT_BOX_DIMENSIONS = Object.freeze({ width: 1, height: 1, depth: 1 });
 export const SOURCE_MODELS = Object.freeze(['fan', 'heater', 'lamp']);
@@ -74,7 +79,7 @@ export function addWindow(scene, wall = 'back') {
   if (!['back', 'front', 'left', 'right'].includes(wall)) throw new RangeError(`Unsupported window wall: ${wall}`);
   const idNumber = scene.nextWindowId ?? 1;
   const dimensions = { ...MODEL_PRESETS.window.dimensions };
-  const object = anchoredWindowPosition({
+  const template = {
     id: `window-${idNumber}`,
     primitive: 'box',
     model: 'window',
@@ -86,7 +91,23 @@ export function addWindow(scene, wall = 'back') {
     dimensions,
     position: { x: scene.room.width / 2, y: 0.9, z: scene.room.depth / 2 },
     rotation: { x: 0, y: 0, z: 0 },
-  }, {}, scene.room);
+  };
+  const alongX = wall === 'back' || wall === 'front';
+  const span = alongX ? scene.room.width : scene.room.depth;
+  const alongAxis = alongX ? 'x' : 'z';
+  const center = span / 2;
+  let object;
+  for (let step = 0; step <= Math.ceil(span / 0.1); step += 1) {
+    for (const sign of step === 0 ? [0] : [-1, 1]) {
+      const position = anchoredWindowPosition(template, { [alongAxis]: center + step * 0.1 * sign }, scene.room);
+      if (!findObjectCollision(scene.objects, position)) {
+        object = position;
+        break;
+      }
+    }
+    if (object) break;
+  }
+  if (!object) throw new RangeError(`No clear space remains for a window on the ${wall} wall.`);
   return {
     object,
     scene: { ...scene, nextWindowId: idNumber + 1, objects: [...scene.objects, object] },
@@ -108,7 +129,7 @@ export function setWindowFlow(scene, objectId, flowDirection, flowRate) {
   if (!existing || existing.model !== 'window') throw new RangeError(`Unknown window: ${objectId}`);
   if (!['exchange', 'inlet', 'outlet'].includes(flowDirection)) throw new RangeError(`Unsupported window flow direction: ${flowDirection}`);
   if (!Number.isFinite(flowRate) || flowRate < 0 || flowRate > 1.5) {
-    throw new RangeError('Window flow speed must be between 0 and 1.5 m/s.');
+    throw new RangeError('Exterior wind speed must be between 0 and 1.5 m/s.');
   }
   const updated = { ...existing, flowDirection, flowRate: round(flowRate) };
   return {
@@ -129,6 +150,7 @@ export function setWindowWall(scene, objectId, wall) {
     z: scene.room.depth / 2,
   };
   const updated = anchoredWindowPosition({ ...existing, wall }, position, scene.room);
+  assertPlacementClear(scene.objects, updated, objectId);
   return {
     object: updated,
     scene: { ...scene, objects: scene.objects.map((object) => object.id === objectId ? updated : object) },
@@ -142,20 +164,44 @@ export function addObject(scene, options = {}) {
 
   const idNumber = scene.nextObjectId;
   const boxDimensions = { ...dimensions };
-  const object = {
+  if (!['width', 'height', 'depth'].every((axis) => Number.isFinite(boxDimensions[axis]) && boxDimensions[axis] > 0)) {
+    throw new RangeError('Object dimensions must be positive finite values.');
+  }
+  if (boxDimensions.width > scene.room.width || boxDimensions.height > scene.room.height
+    || boxDimensions.depth > scene.room.depth) {
+    throw new RangeError('Object does not fit inside the room.');
+  }
+  const template = {
     id: `box-${idNumber}`,
     primitive: 'box',
     model,
     name: normalizeObjectName(name ?? `Box ${idNumber}`),
     ...(SOURCE_MODELS.includes(model) ? { intensity: 1 } : {}),
     dimensions: boxDimensions,
-    position: {
-      x: clampAndRound(scene.room.width / 2 + ((idNumber % 3) - 1) * 0.52, boxDimensions.width / 2, scene.room.width - boxDimensions.width / 2),
-      y: 0,
-      z: clampAndRound(scene.room.depth / 2 + (idNumber % 2 ? 0.56 : -0.56), boxDimensions.depth / 2, scene.room.depth - boxDimensions.depth / 2),
-    },
+    position: { x: scene.room.width / 2, y: 0, z: scene.room.depth / 2 },
     rotation: { x: 0, y: 0, z: 0 },
   };
+  let object = null;
+  const step = 0.25;
+  const xCount = Math.floor(scene.room.width / step);
+  const zCount = Math.floor(scene.room.depth / step);
+  const candidates = [];
+  for (let xi = 0; xi <= xCount; xi += 1) {
+    for (let zi = 0; zi <= zCount; zi += 1) {
+      const x = clampAndRound(xi * step, boxDimensions.width / 2, scene.room.width - boxDimensions.width / 2);
+      const z = clampAndRound(zi * step, boxDimensions.depth / 2, scene.room.depth - boxDimensions.depth / 2);
+      candidates.push({ x, z, distance: (x - scene.room.width / 2) ** 2 + (z - scene.room.depth / 2) ** 2 });
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  for (const candidate of candidates) {
+    const attempt = { ...template, position: { x: candidate.x, y: 0, z: candidate.z } };
+    if (!findObjectCollision(scene.objects, attempt)) {
+      object = attempt;
+      break;
+    }
+  }
+  if (!object) throw new RangeError('No clear floor space remains for this object.');
   return { object, scene: { ...scene, nextObjectId: idNumber + 1, objects: [...scene.objects, object] } };
 }
 
@@ -212,24 +258,6 @@ function normalizeObjectName(name) {
   return normalized;
 }
 
-export function rotationMatrixXYZ(rotation) {
-  const x = rotation.x * Math.PI / 180;
-  const y = rotation.y * Math.PI / 180;
-  const z = rotation.z * Math.PI / 180;
-  const cx = Math.cos(x);
-  const sx = Math.sin(x);
-  const cy = Math.cos(y);
-  const sy = Math.sin(y);
-  const cz = Math.cos(z);
-  const sz = Math.sin(z);
-
-  return [
-    [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
-    [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
-    [-sy, cy * sx, cy * cx],
-  ];
-}
-
 export function rotatedHalfExtents(dimensions, rotation) {
   const matrix = rotationMatrixXYZ(rotation);
   const half = [dimensions.width / 2, dimensions.height / 2, dimensions.depth / 2];
@@ -278,6 +306,7 @@ export function moveObject(scene, objectId, position) {
     anchored = anchoredWindowPosition({ ...existing, wall }, candidate, scene.room);
   }
   const objects = scene.objects.map((object) => object.id === objectId ? anchored : object);
+  assertPlacementClear(scene.objects, anchored, objectId);
   return { scene: { ...scene, objects }, object: anchored };
 }
 
@@ -297,6 +326,9 @@ export function resizeRoom(scene, dimensions) {
   const objects = scene.objects.map((object) => object.model === 'window'
     ? anchoredWindowPosition(object, object.position, room)
     : { ...object, position: boundedPosition(object, object.position, room) });
+  for (let index = 0; index < objects.length; index += 1) {
+    assertPlacementClear(objects.slice(0, index), objects[index]);
+  }
   return { ...scene, room, objects };
 }
 
@@ -312,6 +344,7 @@ export function resizeObject(scene, objectId, dimensions) {
       throw new RangeError('Window dimensions do not fit on this wall.');
     }
     const resized = anchoredWindowPosition({ ...existing, dimensions: nextDimensions }, existing.position, scene.room);
+    assertPlacementClear(scene.objects, resized, objectId);
     const objects = scene.objects.map((object) => object.id === objectId ? resized : object);
     return { scene: { ...scene, objects }, object: resized };
   }
@@ -328,6 +361,7 @@ export function resizeObject(scene, objectId, dimensions) {
     position: boundedPosition({ ...existing, dimensions: nextDimensions }, existing.position, scene.room),
   };
   const objects = scene.objects.map((object) => object.id === objectId ? resized : object);
+  assertPlacementClear(scene.objects, resized, objectId);
   return { scene: { ...scene, objects }, object: resized };
 }
 
@@ -347,6 +381,7 @@ export function rotateObject(scene, objectId, rotation) {
     position: boundedPosition({ ...existing, rotation: nextRotation }, existing.position, scene.room),
   };
   const objects = scene.objects.map((object) => object.id === objectId ? rotated : object);
+  assertPlacementClear(scene.objects, rotated, objectId);
   return { scene: { ...scene, objects }, object: rotated };
 }
 

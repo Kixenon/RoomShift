@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   createAirflowLayers,
   createFieldVolume,
+  createScalarSliceLayer,
   createTemperatureObjectLayer,
   createTemperatureSurfaceLayer,
   getAirflowColor,
@@ -32,35 +33,54 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
     throw new RangeError(`Unsupported room field mode: ${mode}`);
   }
   validateResult(result, mode);
+  const { grid } = result;
   const layer = new THREE.Group();
   layer.name = `room-field-${mode}`;
   layer.userData.fieldMode = mode;
   layer.userData.volumeVoxelCount = 0;
+  const displayStyle = options.displayStyle ?? (options.volumetric ? 'volume' : mode === 'airflow' ? 'gas' : 'surfaces');
   if (mode === 'temperature') {
-    if (options.volumetric) {
+    if (displayStyle === 'volume') {
       const volume = createFieldVolume(result, mode);
       layer.add(volume);
       layer.userData.volumeVoxelCount = volume.userData.voxelCount;
+    } else if (displayStyle === 'slice') {
+      layer.add(createScalarSliceLayer(result, mode, options.sliceHeight ?? grid.height / 2));
     } else {
       layer.add(createTemperatureSurfaceLayer(result, roomScene));
     }
     layer.add(createTemperatureObjectLayer(result, options.objectGroups));
   } else if (mode === 'airflow') {
-    if (options.volumetric) {
+    if (displayStyle === 'volume') {
       const volume = createFieldVolume(result, mode);
       layer.add(volume);
       layer.userData.volumeVoxelCount = volume.userData.voxelCount;
       layer.userData.airflowVisualization = 'volume';
       return layer;
     }
+    if (displayStyle === 'slice') {
+      layer.add(createScalarSliceLayer(result, mode, options.sliceHeight ?? grid.height / 2));
+      layer.userData.airflowVisualization = 'speed-slice';
+      return layer;
+    }
     const airflow = createAirflowLayers(result, roomScene);
-    if (airflow.streamlines) layer.add(airflow.streamlines);
-    if (airflow.tracers) layer.add(airflow.tracers);
-    layer.userData.streamlineVertexCount = airflow.streamlines?.geometry.getAttribute('position').count ?? 0;
-    layer.userData.gasParticleCount = airflow.particleCount;
-    layer.userData.airflowVisualization = 'gas';
-    layer.userData.animate = airflow.update;
-  } else {
+    layer.add(airflow.volume);
+    layer.userData.volumeVoxelCount = airflow.gasVoxelCount;
+    layer.userData.gasVoxelCount = airflow.gasVoxelCount;
+    layer.userData.gasSourceCounts = airflow.sourceCounts;
+    layer.userData.airflowVisualization = 'advected-density';
+    layer.userData.maxDensity = airflow.volume.userData.maxDensity ?? 0;
+    layer.userData.occupiedVoxels = airflow.volume.userData.occupiedVoxels ?? 0;
+    layer.userData.tracerVolumeM3 = airflow.volume.userData.tracerVolumeM3 ?? 0;
+    layer.userData.exteriorTracerVolumeM3 = airflow.volume.userData.exteriorTracerVolumeM3 ?? 0;
+    layer.userData.animate = (time) => {
+      airflow.update(time);
+      layer.userData.maxDensity = airflow.volume.userData.maxDensity ?? 0;
+      layer.userData.occupiedVoxels = airflow.volume.userData.occupiedVoxels ?? 0;
+      layer.userData.tracerVolumeM3 = airflow.volume.userData.tracerVolumeM3 ?? 0;
+      layer.userData.exteriorTracerVolumeM3 = airflow.volume.userData.exteriorTracerVolumeM3 ?? 0;
+    };
+  } else if (displayStyle === 'map') {
     const volume = createFieldVolume(result, mode);
     layer.add(volume);
     layer.userData.volumeVoxelCount = volume.userData.voxelCount;

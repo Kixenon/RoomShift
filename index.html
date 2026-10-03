@@ -28,12 +28,33 @@
 
       <section class="viewport-wrap" aria-label="3D room">
         <div class="viewport-topline">
-          <div class="field-controls" role="group" aria-label="Simulation and lighting views">
-            <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false">Air</button>
-            <button id="show-volume" class="field-button" type="button" aria-label="Show static 3D volume" aria-pressed="false" title="Show the active field as a static 3D volume">Vol</button>
-            <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false">Heat</button>
-            <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false">Light</button>
-            <span id="field-status" class="field-status" aria-live="polite"></span>
+          <div class="simulation-controls">
+            <div class="field-controls" role="group" aria-label="Simulation and lighting views">
+              <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false">Air</button>
+              <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false">Heat</button>
+              <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false">Light</button>
+              <span class="time-controls" id="time-controls" hidden>
+                <span class="time-clock" id="clock-label">13:30</span>
+                <input id="time-of-day" type="range" min="0" max="1439" step="5" value="810" aria-label="Time of day" />
+                <button id="lamps-toggle" class="tool-button" type="button" aria-pressed="false" aria-label="Switch the lamps on">Lamps</button>
+              </span>
+              <span id="field-status" class="field-status" aria-live="polite"></span>
+            </div>
+            <div id="field-display-controls" class="display-controls" role="group" aria-label="Field display" hidden>
+              <span class="display-label">Display</span>
+              <button class="display-button" data-display-style="gas" type="button" aria-pressed="false">Gas</button>
+              <button class="display-button" data-display-style="surfaces" type="button" aria-pressed="false">Surfaces</button>
+              <button class="display-button" data-display-style="volume" type="button" aria-pressed="false">Volume</button>
+              <button class="display-button" data-display-style="slice" type="button" aria-pressed="false">Slice</button>
+              <button class="display-button" data-display-style="preview" type="button" aria-pressed="false">Preview</button>
+              <button class="display-button" data-display-style="map" type="button" aria-pressed="false">Map</button>
+            </div>
+            <label id="slice-height-control" class="slice-height-control" hidden>
+              <span>Slice height</span>
+              <input id="slice-height" type="range" min="0" max="2.7" step="0.05" value="1.2" aria-label="Simulation slice height in meters" />
+              <output id="slice-height-value">1.20 m</output>
+            </label>
+            <span id="editor-status" class="editor-status" aria-live="polite"></span>
           </div>
           <div class="viewport-info">
             <button id="show-shortcuts" class="tool-button info-button" type="button" aria-label="Show keyboard shortcuts and help" aria-haspopup="true" aria-expanded="false" aria-controls="shortcut-help" title="Info">i</button>
@@ -99,6 +120,7 @@
             <label class="field"><span>Depth</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
             <label class="field"><span>Height</span><input id="room-height" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" value="2.7" /></label>
           </div>
+          <label class="field outdoor-temperature-field"><span>Outside</span><input id="outdoor-temperature" aria-label="Outdoor temperature in degrees Celsius" type="number" min="-20" max="50" step="1" value="10" required /><span>°C</span></label>
         </section>
 
         <section class="inspector-section object-list-section">
