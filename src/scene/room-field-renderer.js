@@ -74,6 +74,9 @@ function createFieldTexture(result, mode) {
       : mode === 'temperature' ? fields.temperature[index] : fields.light[index];
     data[index * 4] = Math.round(normalizeScalar(result, mode, value) * 255);
     data[index * 4 + 1] = fields.solid?.[index] ? 255 : 0;
+    if (mode === 'temperature') {
+      data[index * 4 + 2] = Math.round(clamp(Math.abs(value - result.ambientTemperature) / 8, 0, 1) * 255);
+    }
   }
 
   const texture = new THREE.Data3DTexture(data, grid.nx, grid.nz, grid.ny);
@@ -150,17 +153,10 @@ export function createFieldVolume(result, mode) {
         vec3 navy = vec3(0.015, 0.025, 0.11);
         vec3 blue = vec3(0.02, 0.22, 0.95);
         vec3 cyan = vec3(0.0, 0.86, 1.0);
-        vec3 green = vec3(0.12, 0.92, 0.46);
-        vec3 yellow = vec3(1.0, 0.78, 0.05);
-        vec3 red = vec3(1.0, 0.08, 0.018);
-        if (uFieldMode == 2) {
-          navy = vec3(0.08, 0.025, 0.2);
-          blue = vec3(0.28, 0.09, 0.85);
-          cyan = vec3(0.96, 0.08, 0.66);
-          green = vec3(1.0, 0.31, 0.18);
-          yellow = vec3(1.0, 0.82, 0.28);
-          red = vec3(1.0, 0.98, 0.77);
-        }
+      vec3 green = vec3(0.12, 0.92, 0.46);
+      vec3 yellow = vec3(1.0, 0.78, 0.05);
+      vec3 red = vec3(1.0, 0.08, 0.018);
+        if (uFieldMode == 2) return vec3(value);
         if (value < 0.25) return mix(navy, blue, value * 4.0);
         if (value < 0.5) return mix(blue, cyan, (value - 0.25) * 4.0);
         if (value < 0.72) return mix(cyan, green, (value - 0.5) * 4.545);
@@ -204,7 +200,7 @@ export function createFieldVolume(result, mode) {
           vec3 textureCoordinate = vec3(roomCoordinate.x, roomCoordinate.z, roomCoordinate.y);
           vec4 field = texture(uField, textureCoordinate);
           float density = smoothstep(0.006, 0.28, field.r);
-          if (uFieldMode == 1) { density = 0.065 + 0.16 * smoothstep(0.34, 0.95, field.r); }
+          if (uFieldMode == 1) { density = 0.24 * smoothstep(0.025, 0.58, field.b); }
           density *= 1.0 - step(0.5, field.g);
           float alpha = 1.0 - exp(-density * 2.35 * stepLength * uOpacity);
           float contribution = (1.0 - accumulated.a) * alpha;
@@ -227,6 +223,47 @@ export function createFieldVolume(result, mode) {
   volume.userData.boundsCenter = new THREE.Vector3(0, grid.height / 2, 0);
   volume.userData.boundsHalfSize = new THREE.Vector3(grid.width / 2, grid.height / 2, grid.depth / 2);
   return volume;
+}
+
+export function createScalarSliceLayer(result, mode, height) {
+  const { grid, fields } = result;
+  const geometry = new THREE.PlaneGeometry(grid.width, grid.depth, grid.nx - 1, grid.nz - 1);
+  const positions = geometry.attributes.position;
+  const colors = new Float32Array(positions.count * 4);
+  const point = new THREE.Vector3();
+  const color = new THREE.Color();
+
+  for (let index = 0; index < positions.count; index += 1) {
+    point.fromBufferAttribute(positions, index);
+    const x = point.x + grid.width / 2;
+    const z = grid.depth / 2 - point.y;
+    if (mode === 'airflow') {
+      const speed = Math.hypot(
+        sampleField(fields.u, x, height, z, grid, fields.solid),
+        sampleField(fields.v, x, height, z, grid, fields.solid),
+        sampleField(fields.w, x, height, z, grid, fields.solid),
+      );
+      getAirflowColor(speed, AIRFLOW_DISPLAY_RANGE).toArray(colors, index * 4);
+    } else {
+      const temperature = sampleField(fields.temperature, x, height, z, grid, fields.solid, result.ambientTemperature);
+      infraredColor(temperature, result.ambientTemperature, color).toArray(colors, index * 4);
+    }
+    colors[index * 4 + 3] = 0.82;
+  }
+
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  }));
+  mesh.name = `field-slice-${mode}`;
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = clamp(height, 0, grid.height);
+  mesh.renderOrder = 1;
+  return mesh;
 }
 
 function insideRoom(point, grid) {

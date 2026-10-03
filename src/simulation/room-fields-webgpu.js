@@ -1,50 +1,34 @@
-import { rotationMatrixXYZ } from '../model/room-scene.js';
-import { validateScene, buildWindowBoundary, buildSolidMask } from './room-fields-3d.js';
+import {
+  validateScene,
+  buildWindowBoundary,
+  buildSolidMask,
+  buildFanAccelerationField,
+  FIELD_PHYSICS_DEFAULTS,
+} from './room-fields-3d.js';
 import { createSimulationGrid, DEFAULT_CELL_SIZE } from './room-grid.js';
 
 const SETTINGS = Object.freeze({
+  ...FIELD_PHYSICS_DEFAULTS,
   cellSize: DEFAULT_CELL_SIZE,
   steps: 600,
   timeStep: 0.01,
   pressureIterations: 20,
-  ambientTemperature: 20,
-  kinematicViscosity: 0.018,
-  effectiveThermalDiffusivity: 0.018,
-  coolingRate: 0.02,
-  fanAcceleration: 4.5,
-  fanRange: 2.6,
-  heaterRate: 8,
-  heaterRadius: 0.45,
   maximumSpeed: 2.5,
 });
 
 const CONFIG_BYTES = 80;
 const WORKGROUP_SIZE = 128;
+const devicePromises = new WeakMap();
+const pipelinePromises = new WeakMap();
 
 export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
   const mask = buildSolidMask(scene, grid);
   const solid = Uint32Array.from(mask);
   const boundary = buildWindowBoundary(scene, grid);
   const outlets = Uint32Array.from(boundary.outlets);
-  const fans = scene.objects.filter((object) => object.model === 'fan' && object.enabled !== false);
   const heaters = scene.objects.filter((object) => object.model === 'heater');
-  const fanData = new Float32Array(Math.max(1, fans.length) * 12);
   const heaterData = new Float32Array(Math.max(1, heaters.length) * 8);
-
-  fans.forEach((fan, index) => {
-    const matrix = rotationMatrixXYZ(fan.rotation);
-    const local = { x: 0, y: fan.dimensions.height * 0.24, z: fan.dimensions.depth * 0.1 };
-    const offset = index * 12;
-    fanData.set([
-      fan.position.x + matrix[0][0] * local.x + matrix[0][1] * local.y + matrix[0][2] * local.z,
-      fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * local.x + matrix[1][1] * local.y + matrix[1][2] * local.z,
-      fan.position.z + matrix[2][0] * local.x + matrix[2][1] * local.y + matrix[2][2] * local.z,
-      settings.fanRange,
-      matrix[0][2], matrix[1][2], matrix[2][2], settings.fanAcceleration * (fan.intensity ?? 1),
-      1.25 * Math.hypot(grid.dx * matrix[0][2], grid.dy * matrix[1][2], grid.dz * matrix[2][2]),
-      0.12, 0.2, 0,
-    ], offset);
-  });
+  const fanForces = buildFanAccelerationField(scene, grid, solid, settings);
 
   heaters.forEach((heater, index) => {
     const offset = index * 8;
@@ -57,7 +41,7 @@ export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
     ], offset);
   });
 
-  return { solid, outlets, windowFlow: boundary.flow, fans: fanData, heaters: heaterData, fanCount: fans.length, heaterCount: heaters.length };
+  return { solid, outlets, windowFlow: boundary.flow, fanForces, heaters: heaterData, heaterCount: heaters.length };
 }
 
 const COMMON_CONFIG = `
@@ -80,11 +64,10 @@ fn inside(i: i32, j: i32, k: i32) -> bool {
 `;
 
 const PHYSICS_SHADER = `${COMMON_CONFIG}
-struct Fan { source: vec4<f32>, direction: vec4<f32>, shape: vec4<f32> };
 struct Heater { centerRadius: vec4<f32>, source: vec4<f32> };
 @group(0) @binding(1) var<storage, read> stateIn: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> solid: array<u32>;
-@group(0) @binding(3) var<storage, read> fans: array<Fan>;
+@group(0) @binding(3) var<storage, read> fanForce: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> heaters: array<Heater>;
 @group(0) @binding(5) var<storage, read_write> stateOut: array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read> outletMask: array<u32>;
@@ -96,13 +79,14 @@ fn fieldValue(i: i32, j: i32, k: i32, component: u32, fallback: f32) -> f32 {
   if (solid[id] != 0u) { return fallback; }
   return stateIn[id][component];
 }
-fn sampleField(component: u32, point: vec3<f32>, fallback: f32) -> f32 {
+fn sampleField(component: u32, point: vec3<f32>, fallback: f32, skipSolid: bool) -> f32 {
   if (any(point < vec3<f32>(0.0)) || any(point > vec3<f32>(cfg.dims.xyz) * cfg.spacing.xyz)) { return fallback; }
   let cell = clamp(point / cfg.spacing.xyz - vec3<f32>(0.5), vec3<f32>(0.0), vec3<f32>(cfg.dims.xyz - vec3<u32>(1u)));
   let low = vec3<u32>(floor(cell));
   let high = min(low + vec3<u32>(1u), cfg.dims.xyz - vec3<u32>(1u));
   let blend = cell - vec3<f32>(low);
   var value = 0.0;
+  var weightTotal = 0.0;
   for (var y = 0u; y < 2u; y += 1u) {
     for (var z = 0u; z < 2u; z += 1u) {
       for (var x = 0u; x < 2u; x += 1u) {
@@ -110,11 +94,30 @@ fn sampleField(component: u32, point: vec3<f32>, fallback: f32) -> f32 {
         let weight = select(1.0 - blend.x, blend.x, x == 1u)
           * select(1.0 - blend.y, blend.y, y == 1u)
           * select(1.0 - blend.z, blend.z, z == 1u);
+        let id = indexOf(c.x, c.y, c.z);
+        if (skipSolid && solid[id] != 0u) { continue; }
         value += fieldValue(i32(c.x), i32(c.y), i32(c.z), component, fallback) * weight;
+        weightTotal += weight;
       }
     }
   }
+  if (skipSolid) { return select(fallback, value / max(weightTotal, 1e-8), weightTotal > 1e-8); }
   return value;
+}
+fn clipBacktrace(start: vec3<f32>, end: vec3<f32>) -> vec3<f32> {
+  let delta = end - start;
+  let stepLength = 0.5 * min(cfg.spacing.x, min(cfg.spacing.y, cfg.spacing.z));
+  let steps = max(1u, u32(ceil(length(delta) / stepLength)));
+  let roomSize = vec3<f32>(cfg.dims.xyz) * cfg.spacing.xyz;
+  var lastFluidPoint = start;
+  for (var step = 1u; step <= steps; step += 1u) {
+    let point = start + delta * (f32(step) / f32(steps));
+    if (any(point < vec3<f32>(0.0)) || any(point > roomSize)) { continue; }
+    let cell = clamp(vec3<i32>(floor(point / cfg.spacing.xyz)), vec3<i32>(0), vec3<i32>(cfg.dims.xyz) - vec3<i32>(1));
+    if (solid[indexOf(u32(cell.x), u32(cell.y), u32(cell.z))] != 0u) { return lastFluidPoint; }
+    lastFluidPoint = point;
+  }
+  return end;
 }
 fn neighbor(i: i32, j: i32, k: i32, component: u32, center: f32) -> f32 {
   return fieldValue(i, j, k, component, center);
@@ -145,28 +148,16 @@ fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let j = id / (cfg.dims.x * cfg.dims.z);
   let current = stateIn[id];
   let position = (vec3<f32>(f32(i), f32(j), f32(k)) + vec3<f32>(0.5)) * cfg.spacing.xyz;
-  let back = position - current.xyz * cfg.spacing.w;
+  let back = clipBacktrace(position, position - current.xyz * cfg.spacing.w);
   let advected = vec4<f32>(
-    sampleField(0u, back, 0.0), sampleField(1u, back, 0.0),
-    sampleField(2u, back, 0.0), sampleField(3u, back, cfg.physics.x));
+    sampleField(0u, back, 0.0, false), sampleField(1u, back, 0.0, false),
+    sampleField(2u, back, 0.0, false), sampleField(3u, back, cfg.physics.x, true));
   let velocityDiffusion = vec3<f32>(
     laplacian(i32(i), i32(j), i32(k), 0u, current.x),
     laplacian(i32(i), i32(j), i32(k), 1u, current.y),
     laplacian(i32(i), i32(j), i32(k), 2u, current.z));
   let temperatureDiffusion = laplacian(i32(i), i32(j), i32(k), 3u, current.w);
-  var force = vec3<f32>(0.0);
-  for (var fanIndex = 0u; fanIndex < cfg.dims.w; fanIndex += 1u) {
-    let fan = fans[fanIndex];
-    let offset = position - fan.source.xyz;
-    let forward = dot(offset, fan.direction.xyz);
-    if (forward < -fan.shape.x || forward > fan.source.w) { continue; }
-    let lateralSquared = max(0.0, dot(offset, offset) - forward * forward);
-    let spread = fan.shape.y + max(0.0, forward) * fan.shape.z;
-    let upstreamFade = exp(-0.5 * pow(min(0.0, forward) / fan.shape.x, 2.0));
-    let beam = exp(-lateralSquared / (2.0 * spread * spread))
-      * exp(-max(0.0, forward) / fan.source.w) * upstreamFade;
-    force += fan.direction.xyz * fan.direction.w * beam;
-  }
+  let force = fanForce[id].xyz;
   var velocity = (advected.xyz + cfg.physics.y * cfg.spacing.w * velocityDiffusion + force * cfg.spacing.w) * exp(-0.08 * cfg.spacing.w);
   velocity.y += (advected.w - cfg.physics.x) * cfg.limits.y * cfg.spacing.w;
   velocity = clamp(velocity, vec3<f32>(-cfg.limits.x), vec3<f32>(cfg.limits.x));
@@ -308,10 +299,10 @@ fn project(@builtin(global_invocation_id) invocation: vec3<u32>) {
 }
 `;
 
-function makeConfig(grid, settings, fanCount, heaterCount) {
+function makeConfig(grid, settings, heaterCount) {
   const bytes = new ArrayBuffer(CONFIG_BYTES);
   const view = new DataView(bytes);
-  [grid.nx, grid.ny, grid.nz, fanCount, heaterCount, 0, 0, 0].forEach((value, index) => {
+  [grid.nx, grid.ny, grid.nz, 0, heaterCount, 0, 0, 0].forEach((value, index) => {
     view.setUint32(index * 4, value, true);
   });
   [grid.dx, grid.dy, grid.dz, settings.timeStep,
@@ -333,6 +324,52 @@ async function createPipeline(device, code, entryPoint) {
   const errors = compilation.messages.filter((message) => message.type === 'error');
   if (errors.length) throw new Error(`WebGPU shader error: ${errors.map((message) => message.message).join('; ')}`);
   return device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
+}
+
+async function getDevice(gpu) {
+  let promise = devicePromises.get(gpu);
+  if (!promise) {
+    promise = (async () => {
+      const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
+      if (!adapter) {
+        devicePromises.delete(gpu);
+        return null;
+      }
+      const device = await adapter.requestDevice();
+      device.lost?.then(() => {
+        devicePromises.delete(gpu);
+        pipelinePromises.delete(device);
+      });
+      return device;
+    })();
+    devicePromises.set(gpu, promise);
+  }
+  try {
+    return await promise;
+  } catch (error) {
+    devicePromises.delete(gpu);
+    throw error;
+  }
+}
+
+async function getPipelines(device) {
+  let promise = pipelinePromises.get(device);
+  if (!promise) {
+    promise = Promise.all([
+      createPipeline(device, PHYSICS_SHADER, 'integrate'),
+      createPipeline(device, DIVERGENCE_SHADER, 'calculate'),
+      createPipeline(device, RESET_PRESSURE_SHADER, 'clear'),
+      createPipeline(device, PRESSURE_SHADER, 'solve'),
+      createPipeline(device, PROJECT_SHADER, 'project'),
+    ]);
+    pipelinePromises.set(device, promise);
+  }
+  try {
+    return await promise;
+  } catch (error) {
+    pipelinePromises.delete(device);
+    throw error;
+  }
 }
 
 function bind(device, pipeline, buffers) {
@@ -404,9 +441,8 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
   validateScene(scene);
   const settings = { ...SETTINGS, ...options };
   if (!gpu) return null;
-  const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
-  if (!adapter) return null;
-  const device = await adapter.requestDevice();
+  const device = await getDevice(gpu);
+  if (!device) return null;
   const grid = createSimulationGrid(scene.room, settings.cellSize);
   const count = grid.nx * grid.ny * grid.nz;
   const byteLength = count * 16;
@@ -426,7 +462,7 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     const solid = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const outlets = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const windowFlow = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
-    const fans = allocate(inputs.fans.byteLength, usage.STORAGE | usage.COPY_DST);
+    const fanForces = allocate(inputs.fanForces.byteLength, usage.STORAGE | usage.COPY_DST);
     const heaters = allocate(inputs.heaters.byteLength, usage.STORAGE | usage.COPY_DST);
     const pressureA = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const pressureB = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
@@ -434,22 +470,16 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     const readBuffer = allocate(byteLength, usage.COPY_DST | usage.MAP_READ);
     const packedState = new Float32Array(count * 4);
     for (let id = 0; id < count; id += 1) packedState[id * 4 + 3] = settings.ambientTemperature;
-    device.queue.writeBuffer(config, 0, makeConfig(grid, settings, inputs.fanCount, inputs.heaterCount));
+    device.queue.writeBuffer(config, 0, makeConfig(grid, settings, inputs.heaterCount));
     device.queue.writeBuffer(state, 0, packedState);
     device.queue.writeBuffer(solid, 0, inputs.solid);
     device.queue.writeBuffer(outlets, 0, inputs.outlets);
     device.queue.writeBuffer(windowFlow, 0, inputs.windowFlow);
-    device.queue.writeBuffer(fans, 0, inputs.fans);
+    device.queue.writeBuffer(fanForces, 0, inputs.fanForces);
     device.queue.writeBuffer(heaters, 0, inputs.heaters);
 
-    const [integrate, calculate, clear, solve, project] = await Promise.all([
-      createPipeline(device, PHYSICS_SHADER, 'integrate'),
-      createPipeline(device, DIVERGENCE_SHADER, 'calculate'),
-      createPipeline(device, RESET_PRESSURE_SHADER, 'clear'),
-      createPipeline(device, PRESSURE_SHADER, 'solve'),
-      createPipeline(device, PROJECT_SHADER, 'project'),
-    ]);
-    const integrateGroup = bind(device, integrate, [config, state, solid, fans, heaters, scratch, outlets, windowFlow]);
+    const [integrate, calculate, clear, solve, project] = await getPipelines(device);
+    const integrateGroup = bind(device, integrate, [config, state, solid, fanForces, heaters, scratch, outlets, windowFlow]);
     const divergenceGroup = bind(device, calculate, [config, scratch, solid, divergence]);
     const clearAGroup = bind(device, clear, [config, pressureA]);
     const clearBGroup = bind(device, clear, [config, pressureB]);
@@ -507,7 +537,7 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
       ambientTemperature: settings.ambientTemperature,
       durationSeconds: settings.steps * settings.timeStep,
       assumptions: Object.freeze({
-        model: 'GPU accelerated 3D incompressible transient room-field estimate',
+        model: 'GPU accelerated simplified 3D transient advection-diffusion estimate',
         units: 'velocity in m/s; temperature in estimated °C',
         boundaries: 'closed room walls with adjustable inlet or outlet flow at open windows',
         thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
@@ -517,6 +547,5 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     };
   } finally {
     for (const resource of resources) resource.destroy();
-    device.destroy();
   }
 }

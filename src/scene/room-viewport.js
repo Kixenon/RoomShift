@@ -206,12 +206,20 @@ function createWallGeometry(width, height, windows, wall, room) {
   return new THREE.ShapeGeometry(shape);
 }
 
+const wallLayouts = (room) => [
+  { side: 'front', span: room.width, position: [0, 0, -room.depth / 2], rotation: [0, 0, 0] },
+  { side: 'back', span: room.width, position: [0, 0, room.depth / 2], rotation: [0, Math.PI, 0] },
+  { side: 'left', span: room.depth, position: [-room.width / 2, 0, 0], rotation: [0, Math.PI / 2, 0] },
+  { side: 'right', span: room.depth, position: [room.width / 2, 0, 0], rotation: [0, -Math.PI / 2, 0] },
+];
+
 export class RoomViewport {
-  constructor(container, { onSelect = () => {}, onTransform = () => {}, onDragChange = () => {} } = {}) {
+  constructor(container, { onSelect = () => {}, onTransform = () => {}, onDragChange = () => {}, onPlacementError = () => {} } = {}) {
     this.container = container;
     this.onSelect = onSelect;
     this.onTransform = onTransform;
     this.onDragChange = onDragChange;
+    this.onPlacementError = onPlacementError;
     this.roomScene = null;
     this.selectedId = null;
     this.groups = new Map();
@@ -373,28 +381,44 @@ export class RoomViewport {
     const grid = new THREE.LineSegments(gridGeometry, new THREE.LineBasicMaterial({ color: 0x9aa99c, transparent: true, opacity: 0.23 }));
     this.sceneRoot.add(grid);
 
-    const wallMaterial = material(0xf9fbf6, { transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false });
-    const windows = this.roomScene.objects.filter((object) => object.model === 'window');
-    const walls = [
-      { side: 'front', span: width, position: [0, 0, -depth / 2], rotation: [0, 0, 0] },
-      { side: 'back', span: width, position: [0, 0, depth / 2], rotation: [0, Math.PI, 0] },
-      { side: 'left', span: depth, position: [-width / 2, 0, 0], rotation: [0, Math.PI / 2, 0] },
-      { side: 'right', span: depth, position: [width / 2, 0, 0], rotation: [0, -Math.PI / 2, 0] },
-    ];
-    for (const wall of walls) {
-      const mesh = new THREE.Mesh(createWallGeometry(wall.span, height, windows, wall.side, this.roomScene.room), wallMaterial.clone());
-      mesh.position.set(...wall.position);
-      mesh.rotation.set(...wall.rotation);
-      mesh.castShadow = false;
-      mesh.receiveShadow = true;
-      this.sceneRoot.add(mesh);
-    }
+    for (const wall of wallLayouts(this.roomScene.room)) this.createWall(wall);
     const outline = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(width, height, depth)),
       new THREE.LineBasicMaterial({ color: 0x8fa198, transparent: true, opacity: 0.75 }),
     );
     outline.position.y = height / 2;
     this.sceneRoot.add(outline);
+  }
+
+  createWall(wall) {
+    const { width, height, depth } = this.roomScene.room;
+    const span = wall.side === 'left' || wall.side === 'right' ? depth : width;
+    const windows = this.roomScene.objects.filter((object) => object.model === 'window');
+    const mesh = new THREE.Mesh(
+      createWallGeometry(span, height, windows, wall.side, this.roomScene.room),
+      material(0xf9fbf6, { transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    mesh.name = `room-wall-${wall.side}`;
+    mesh.position.set(...wall.position);
+    mesh.rotation.set(...wall.rotation);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    this.sceneRoot.add(mesh);
+    if (this.lightingPreview) {
+      this.applyLightingToMaterial(mesh.material);
+    }
+  }
+
+  rebuildWalls(sides) {
+    for (const side of new Set(sides)) {
+      const previous = this.sceneRoot.getObjectByName(`room-wall-${side}`);
+      if (previous) {
+        this.sceneRoot.remove(previous);
+        disposeTree(previous);
+      }
+      const wall = wallLayouts(this.roomScene.room).find((item) => item.side === side);
+      if (wall) this.createWall(wall);
+    }
   }
 
   createObjectGroup(object) {
@@ -464,10 +488,11 @@ export class RoomViewport {
 
   setFields(result, mode, options = {}) {
     this.clearFields();
-    if (mode === 'light') {
+    if (mode === 'light' && options.displayStyle !== 'map') {
       this.setLightingPreview(true);
       this.fieldLayer = null;
     } else {
+      this.setLightingPreview(false);
       this.fieldLayer = createRoomFieldLayer(result, mode, this.roomScene, { ...options, objectGroups: this.groups });
       this.sceneRoot.add(this.fieldLayer);
     }
@@ -520,21 +545,7 @@ export class RoomViewport {
 
     this.sceneRoot.traverse((child) => {
       const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const item of materials) {
-        if (!item?.color) continue;
-        item.userData.roomShiftColor ??= item.color.clone();
-        item.userData.roomShiftOpacity ??= item.opacity;
-        if (enabled) {
-          const { r, g, b } = item.userData.roomShiftColor;
-          const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          item.color.setRGB(luminance, luminance, luminance);
-          if (item.transparent && item.userData.roomShiftOpacity <= 0.25) item.opacity = 0.38;
-        } else {
-          item.color.copy(item.userData.roomShiftColor);
-          item.opacity = item.userData.roomShiftOpacity;
-        }
-        item.needsUpdate = true;
-      }
+      for (const item of materials) this.applyLightingToMaterial(item, enabled);
     });
 
     if (enabled) {
@@ -562,6 +573,22 @@ export class RoomViewport {
       this.renderer.domElement.dataset.fieldMode = 'light';
       this.renderer.domElement.dataset.fieldVolumeVoxels = '0';
     }
+  }
+
+  applyLightingToMaterial(item, enabled = this.lightingPreview) {
+    if (!item?.color) return;
+    item.userData.roomShiftColor ??= item.color.clone();
+    item.userData.roomShiftOpacity ??= item.opacity;
+    if (enabled) {
+      const { r, g, b } = item.userData.roomShiftColor;
+      const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      item.color.setRGB(luminance, luminance, luminance);
+      if (item.transparent && item.userData.roomShiftOpacity <= 0.25) item.opacity = 0.38;
+    } else {
+      item.color.copy(item.userData.roomShiftColor);
+      item.opacity = item.userData.roomShiftOpacity;
+    }
+    item.needsUpdate = true;
   }
 
   updateLightingLightPositions() {
@@ -708,17 +735,24 @@ export class RoomViewport {
     let updated;
     try {
       updated = this.onTransform(objectId, position, rotation);
-    } catch {
+    } catch (error) {
+      this.onPlacementError(error.message);
+      if (this.selectionBox) this.selectionBox.material.color.set(0xd04e42);
       this.applyObjectTransform(group, source);
       this.selectionBox?.update();
       return;
     }
     if (!updated) {
+      this.onPlacementError('This placement is invalid.');
+      if (this.selectionBox) this.selectionBox.material.color.set(0xd04e42);
       this.applyObjectTransform(group, source);
       this.selectionBox?.update();
       return;
     }
     this.roomScene = updated.scene;
+    if (source.model === 'window') this.rebuildWalls([source.wall, updated.object.wall]);
+    this.onPlacementError('');
+    if (this.selectionBox) this.selectionBox.material.color.set(0x23836c);
     this.applyObjectTransform(group, updated.object);
     if (this.lightingPreview) this.updateLightingLightPositions();
     this.selectionBox?.update();

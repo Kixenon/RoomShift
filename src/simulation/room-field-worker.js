@@ -1,5 +1,4 @@
-import { simulateRoomFields } from './room-fields-3d.js';
-import { simulateRoomFieldsWebGpu } from './room-fields-webgpu.js';
+import { solveRoomFields } from './room-field-backend.js';
 
 const active = new Set();
 const cancelled = new Set();
@@ -16,11 +15,10 @@ self.addEventListener('message', (event) => {
 async function solve({ requestId, mode, scene }) {
   active.add(requestId);
   try {
-    if (!['airflow', 'temperature'].includes(mode)) {
+    if (!['airflow', 'temperature', 'light'].includes(mode)) {
       throw new RangeError(`Unsupported room field mode: ${mode}`);
     }
-    let result = await simulateRoomFieldsWebGpu(scene, { isCancelled: () => cancelled.has(requestId) });
-    if (!result && !cancelled.has(requestId)) result = simulateRoomFields(scene);
+    const result = await solveRoomFields(scene, mode, { isCancelled: () => cancelled.has(requestId) });
     if (cancelled.has(requestId)) {
       self.postMessage({ requestId, cancelled: true });
       return;

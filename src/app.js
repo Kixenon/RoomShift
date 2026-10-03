@@ -42,15 +42,21 @@ const objectList = $('#object-list');
 const properties = $('#object-properties');
 const fieldControls = {
   airflow: $('#show-airflow'),
-  volume: $('#show-volume'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
+  display: $('#field-display-controls'),
+  displayButtons: [...document.querySelectorAll('[data-display-style]')],
+  sliceControl: $('#slice-height-control'),
+  sliceHeight: $('#slice-height'),
+  sliceValue: $('#slice-height-value'),
+  editorStatus: $('#editor-status'),
   status: $('#field-status'),
   legend: $('#field-legend'),
   legendTitle: $('#field-legend-title'),
   gradient: $('#field-gradient'),
   legendMin: $('#field-legend-min'),
   legendMax: $('#field-legend-max'),
+  accuracy: $('#field-accuracy'),
 };
 
 let editorState = createEditorState();
@@ -76,6 +82,10 @@ function setPressed(button, pressed) {
   button.setAttribute('aria-pressed', String(pressed));
 }
 
+function setEditorStatus(message = '') {
+  fieldControls.editorStatus.textContent = message;
+}
+
 function updateScene(scene, { record = !isDragging } = {}) {
   if (JSON.stringify(scene) === JSON.stringify(roomScene)) return;
   if (record) recordHistory();
@@ -84,32 +94,47 @@ function updateScene(scene, { record = !isDragging } = {}) {
   fieldController?.setScene(scene);
 }
 
-function renderFieldState({ mode, loading, result, error }) {
+function renderFieldState({ mode, loading, result, error, stale }) {
   const viewportElement = $('#viewport');
-  const volumetric = fieldController?.isVolumetricView ?? false;
+  const displayStyle = fieldController?.displayStyle;
   for (const [name, button] of Object.entries({
     airflow: fieldControls.airflow,
     temperature: fieldControls.temperature,
     light: fieldControls.light,
   })) setPressed(button, mode === name);
-  fieldControls.volume.hidden = mode !== 'airflow' && mode !== 'temperature';
-  setPressed(fieldControls.volume, fieldController?.isVolumetricView ?? false);
-  fieldControls.volume.setAttribute(
-    'aria-label',
-    mode === 'temperature' ? 'Show volumetric heat field' : 'Show volumetric airflow field',
-  );
+  fieldControls.display.hidden = !mode;
+  const availableStyles = {
+    airflow: ['gas', 'volume', 'slice'],
+    temperature: ['surfaces', 'volume', 'slice'],
+    light: ['preview', 'map'],
+  }[mode] ?? [];
+  const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
+  for (const button of fieldControls.displayButtons) {
+    const style = button.dataset.displayStyle;
+    button.hidden = !availableStyles.includes(style);
+    button.textContent = styleLabels[style] ?? style;
+    button.setAttribute('aria-pressed', String(style === displayStyle));
+  }
+  const showSlice = (mode === 'airflow' || mode === 'temperature') && displayStyle === 'slice';
+  fieldControls.sliceControl.hidden = !showSlice;
+  if (fieldController?.scene) {
+    fieldControls.sliceHeight.max = String(fieldController.scene.room.height);
+    fieldControls.sliceHeight.value = String(fieldController.sliceHeight);
+    fieldControls.sliceValue.textContent = `${fieldController.sliceHeight.toFixed(2)} m`;
+  }
   viewportElement.classList.toggle('field-active', Boolean(mode));
   viewportElement.setAttribute('aria-busy', String(loading));
-  fieldControls.legend.hidden = !mode || (mode !== 'light' && !result);
-  fieldControls.status.textContent = loading ? (mode === 'light' ? 'Preparing…' : 'Solving…') : error ? 'Unavailable' : '';
-  fieldControls.status.title = error?.message ?? '';
-  if (mode === 'light') {
+  fieldControls.legend.hidden = !mode || (!result && !(mode === 'light' && displayStyle === 'preview'));
+  fieldControls.status.textContent = loading ? (mode === 'light' ? 'Estimating…' : 'Solving…') : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
+  fieldControls.status.title = error?.message ?? result?.gpuFallbackReason ?? result?.assumptions?.model ?? '';
+  if (mode === 'light' && displayStyle === 'preview') {
     if (!loading && !error) fieldControls.status.textContent = 'Realtime shadows';
     fieldControls.status.title = error?.message ?? 'Monochrome room render with lamp point lights and cast shadows.';
     fieldControls.gradient.dataset.mode = 'light';
     fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
     fieldControls.legendMin.textContent = 'shadow';
     fieldControls.legendMax.textContent = 'lit';
+    fieldControls.accuracy.textContent = 'Direct lighting and shadows · no light-bounce solve';
     return;
   }
   if (!result) return;
@@ -118,15 +143,21 @@ function renderFieldState({ mode, loading, result, error }) {
   let legend;
   if (mode === 'airflow') {
     legend = {
-      title: volumetric ? 'Airflow · static volume' : 'Airflow · advected gas',
+      title: displayStyle === 'volume' ? 'Air speed · 3D volume' : displayStyle === 'slice' ? 'Air speed · horizontal slice' : 'Airflow · advected tracer',
       minimum: '0 m/s',
       maximum: '1.2+ m/s',
     };
   } else if (mode === 'temperature') {
     legend = {
-      title: volumetric ? 'Infrared · volumetric air temperature' : 'Infrared · room surfaces and objects',
+      title: displayStyle === 'volume' ? 'Air temperature · 3D volume' : displayStyle === 'slice' ? `Air temperature · ${fieldController.sliceHeight.toFixed(2)} m slice` : 'Air temperature · surfaces and objects',
       minimum: `${(result.ambientTemperature - 4).toFixed(1)} °C`,
       maximum: `${(result.ambientTemperature + 8).toFixed(1)}+ °C`,
+    };
+  } else if (displayStyle === 'map') {
+    legend = {
+      title: 'Estimated relative illumination',
+      minimum: `${result.ambientLevel.toFixed(2)} normalized`,
+      maximum: `${result.stats.maxLevel.toFixed(2)} normalized`,
     };
   } else {
     legend = {
@@ -138,6 +169,11 @@ function renderFieldState({ mode, loading, result, error }) {
   fieldControls.legendTitle.textContent = legend.title;
   fieldControls.legendMin.textContent = legend.minimum;
   fieldControls.legendMax.textContent = legend.maximum;
+  fieldControls.accuracy.textContent = mode === 'light'
+    ? 'Relative estimate · not calibrated in lux'
+    : result.backend === 'webgpu'
+      ? 'WebGPU estimate · not validated CFD'
+      : 'CPU preview · not validated CFD';
 }
 
 function updateSelection(objectId) {
@@ -196,7 +232,7 @@ function propertyField(label, axis, value, kind, limits = {}) {
 function renderProperties() {
   const object = selectedObject();
   const isWindow = object?.model === 'window';
-  const sourceLabels = { fan: 'Fan output', heater: 'Heat output', lamp: 'Lamp brightness' };
+  const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative' };
   const sourceLabel = sourceLabels[object?.model];
   const intensity = object?.intensity ?? 1;
   $('#delete-object').disabled = !object;
@@ -237,7 +273,7 @@ function renderProperties() {
       </div>
       ${sourceLabel ? `<div class="property-group">
         ${object.model === 'fan' ? `<label class="window-open-toggle"><input type="checkbox" data-fan-enabled ${object.enabled !== false ? 'checked' : ''} /><span>${object.enabled !== false ? 'Fan running' : 'Fan off'}</span></label>` : ''}
-        <div class="range-heading"><span>${sourceLabel}</span><output data-range-output>${Math.round(intensity * 100)}%</output></div>
+        <div class="range-heading"><span>${sourceLabel}</span><output data-range-output>${intensity.toFixed(2)}×</output></div>
         <input class="property-slider" type="range" min="0" max="2" step="0.05" value="${intensity}" data-source-intensity aria-label="${sourceLabel}" />
       </div>` : ''}
       <div class="property-group">
@@ -297,33 +333,43 @@ function refreshScene() {
 }
 
 function addBox() {
-  const result = addObject(roomScene);
-  updateScene(result.scene);
-  updateSelection(result.object.id);
-  refreshScene();
+  try {
+    const result = addObject(roomScene);
+    updateScene(result.scene);
+    updateSelection(result.object.id);
+    setEditorStatus('');
+    refreshScene();
+  } catch (error) {
+    setEditorStatus(error.message);
+  }
 }
 
 function addRoomWindow() {
-  const result = addWindow(roomScene);
-  updateScene(result.scene);
-  updateSelection(result.object.id);
-  refreshScene();
+  try {
+    const result = addWindow(roomScene);
+    updateScene(result.scene);
+    updateSelection(result.object.id);
+    setEditorStatus('');
+    refreshScene();
+  } catch (error) {
+    setEditorStatus(error.message);
+  }
 }
 
 function toggleFieldMode(mode) {
   fieldController.setMode(fieldController.mode === mode ? null : mode);
 }
 
-function toggleFieldVolume() {
-  fieldController.setVolumetricView(!fieldController.isVolumetricView);
-}
-
 $('#add-box').addEventListener('click', addBox);
 $('#add-window').addEventListener('click', addRoomWindow);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
-fieldControls.volume.addEventListener('click', toggleFieldVolume);
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
+fieldControls.display.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-display-style]');
+  if (button && !button.hidden) fieldController.setDisplayStyle(button.dataset.displayStyle);
+});
+fieldControls.sliceHeight.addEventListener('input', () => fieldController.setSliceHeight(Number(fieldControls.sliceHeight.value)));
 
 objectList.addEventListener('click', (event) => {
   const row = event.target.closest('[data-select-object]');
@@ -339,11 +385,12 @@ for (const [dimension, input] of Object.entries(roomInputs)) {
     try {
       updateScene(resizeRoom(roomScene, dimensions));
       refreshScene();
-    } catch {
+    } catch (error) {
       input.value = roomScene.room[dimension];
       input.setCustomValidity('Enter a room dimension within the allowed range.');
       input.reportValidity();
       input.setCustomValidity('');
+      setEditorStatus(error.message);
     }
   });
 }
@@ -389,7 +436,8 @@ properties.addEventListener('change', (event) => {
       return;
     }
     refreshScene();
-  } catch {
+  } catch (error) {
+    setEditorStatus(error.message);
     renderProperties();
   }
 });
@@ -401,7 +449,7 @@ properties.addEventListener('input', (event) => {
   if (!output) return;
   output.textContent = input.matches('[data-window-flow-rate]')
     ? `${Number(input.value).toFixed(2)} m/s`
-    : `${Math.round(Number(input.value) * 100)}%`;
+    : `${Number(input.value).toFixed(2)}×`;
 });
 
 $('#delete-object').addEventListener('click', () => {
@@ -516,8 +564,10 @@ viewport = new RoomViewport($('#viewport'), {
     renderInspector();
   },
   onTransform: handleTransform,
+  onPlacementError: setEditorStatus,
   onDragChange(dragging) {
     isDragging = dragging;
+    fieldController?.setInteractionActive(dragging);
     if (dragging) {
       dragSnapshot = currentSnapshot();
     } else if (dragSnapshot) {

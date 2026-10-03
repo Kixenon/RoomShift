@@ -1,4 +1,5 @@
 import { rotatedHalfExtents, rotationMatrixXYZ } from '../model/room-scene.js';
+import { findObjectCollision } from '../model/room-collision.js';
 
 const LIMITS = Object.freeze({
   roomMin: 2,
@@ -18,11 +19,7 @@ const LIMITS = Object.freeze({
   maxTemperature: 60,
 });
 
-const DEFAULTS = Object.freeze({
-  cellSize: 0.15,
-  steps: 120,
-  timeStep: 0.05,
-  pressureIterations: 12,
+export const FIELD_PHYSICS_DEFAULTS = Object.freeze({
   ambientTemperature: 20,
   kinematicViscosity: 0.018,
   effectiveThermalDiffusivity: 0.018,
@@ -32,10 +29,17 @@ const DEFAULTS = Object.freeze({
   heaterRate: 8,
   heaterRadius: 0.45,
 });
+const DEFAULTS = Object.freeze({
+  ...FIELD_PHYSICS_DEFAULTS,
+  cellSize: 0.15,
+  steps: 120,
+  timeStep: 0.05,
+  pressureIterations: 12,
+});
 const FAN_SOURCE_GRID_CELLS = 1.25;
 
 export const FIELD_ASSUMPTIONS = Object.freeze({
-  model: '3D incompressible transient room-field estimate',
+  model: 'simplified 3D transient advection-diffusion estimate',
   defaultCellSizeMeters: DEFAULTS.cellSize,
   defaultDurationSeconds: DEFAULTS.steps * DEFAULTS.timeStep,
   maximumGridDimensions: Object.freeze([LIMITS.maxGridX, LIMITS.maxGridY, LIMITS.maxGridZ]),
@@ -92,6 +96,11 @@ export function validateScene(scene) {
       || z - halfDepth < -tolerance || z + halfDepth > depth + tolerance) {
       throw new RangeError(`Object ${object.id ?? '(unknown)'} extends outside room bounds.`);
     }
+  }
+
+  for (let index = 0; index < scene.objects.length; index += 1) {
+    const collision = findObjectCollision(scene.objects.slice(0, index), scene.objects[index]);
+    if (collision) throw new RangeError(`Objects ${scene.objects[index].name} and ${collision.name} overlap.`);
   }
 }
 
@@ -237,7 +246,7 @@ export function buildWindowBoundary(scene, grid) {
   return { outlets, flow };
 }
 
-function sampleField(field, x, y, z, grid, solid, fallback) {
+function sampleField(field, x, y, z, grid, solid, fallback, skipSolid = false) {
   if (x < 0 || x > grid.width || y < 0 || y > grid.height || z < 0 || z > grid.depth) return fallback;
   const gx = clamp(x / grid.dx - 0.5, 0, grid.nx - 1);
   const gy = clamp(y / grid.dy - 0.5, 0, grid.ny - 1);
@@ -252,6 +261,7 @@ function sampleField(field, x, y, z, grid, solid, fallback) {
   const ty = gy - y0;
   const tz = gz - z0;
   let value = 0;
+  let weightTotal = 0;
 
   for (let oy = 0; oy <= 1; oy += 1) {
     for (let oz = 0; oz <= 1; oz += 1) {
@@ -261,14 +271,40 @@ function sampleField(field, x, y, z, grid, solid, fallback) {
         const k = oz ? z1 : z0;
         const weight = (ox ? tx : 1 - tx) * (oy ? ty : 1 - ty) * (oz ? tz : 1 - tz);
         const index = indexOf(i, j, k, grid);
+        if (skipSolid && solid[index]) continue;
         value += (solid[index] ? fallback : field[index]) * weight;
+        weightTotal += weight;
       }
     }
   }
+  if (skipSolid) return weightTotal > 1e-8 ? value / weightTotal : fallback;
   return value;
 }
 
-function advect(field, u, v, w, grid, solid, timeStep, fallback) {
+function clipBacktrace(position, back, grid, solid) {
+  const distance = Math.hypot(back.x - position.x, back.y - position.y, back.z - position.z);
+  const stepLength = Math.min(grid.dx, grid.dy, grid.dz) * 0.5;
+  const steps = Math.max(1, Math.ceil(distance / stepLength));
+  let lastFluidPoint = position;
+  for (let step = 1; step <= steps; step += 1) {
+    const fraction = step / steps;
+    const point = {
+      x: position.x + (back.x - position.x) * fraction,
+      y: position.y + (back.y - position.y) * fraction,
+      z: position.z + (back.z - position.z) * fraction,
+    };
+    if (point.x < 0 || point.x > grid.width || point.y < 0 || point.y > grid.height
+      || point.z < 0 || point.z > grid.depth) continue;
+    const i = Math.min(grid.nx - 1, Math.floor(point.x / grid.dx));
+    const j = Math.min(grid.ny - 1, Math.floor(point.y / grid.dy));
+    const k = Math.min(grid.nz - 1, Math.floor(point.z / grid.dz));
+    if (solid[indexOf(i, j, k, grid)]) return lastFluidPoint;
+    lastFluidPoint = point;
+  }
+  return back;
+}
+
+function advect(field, u, v, w, grid, solid, timeStep, fallback, skipSolid = false) {
   const next = new Float32Array(field.length);
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
@@ -279,15 +315,12 @@ function advect(field, u, v, w, grid, solid, timeStep, fallback) {
           continue;
         }
         const position = cellPosition(i, j, k, grid);
-        next[index] = sampleField(
-          field,
-          position.x - u[index] * timeStep,
-          position.y - v[index] * timeStep,
-          position.z - w[index] * timeStep,
-          grid,
-          solid,
-          fallback,
-        );
+        const back = clipBacktrace(position, {
+          x: position.x - u[index] * timeStep,
+          y: position.y - v[index] * timeStep,
+          z: position.z - w[index] * timeStep,
+        }, grid, solid);
+        next[index] = sampleField(field, back.x, back.y, back.z, grid, solid, fallback, skipSolid);
       }
     }
   }
@@ -340,7 +373,69 @@ function applyVelocityBoundaries(u, v, w, grid, solid, outlets, windowFlow) {
   }
 }
 
-function applyFanForces(u, v, w, fans, grid, solid, timeStep, settings) {
+function rayIntersectsBox(start, endX, endY, endZ, box) {
+  const matrix = box.rotation;
+  const offsetX = start.x - box.center.x;
+  const offsetY = start.y - box.center.y;
+  const offsetZ = start.z - box.center.z;
+  const directionX = endX - start.x;
+  const directionY = endY - start.y;
+  const directionZ = endZ - start.z;
+  const localStartX = matrix[0][0] * offsetX + matrix[1][0] * offsetY + matrix[2][0] * offsetZ;
+  const localStartY = matrix[0][1] * offsetX + matrix[1][1] * offsetY + matrix[2][1] * offsetZ;
+  const localStartZ = matrix[0][2] * offsetX + matrix[1][2] * offsetY + matrix[2][2] * offsetZ;
+  const localDirectionX = matrix[0][0] * directionX + matrix[1][0] * directionY + matrix[2][0] * directionZ;
+  const localDirectionY = matrix[0][1] * directionX + matrix[1][1] * directionY + matrix[2][1] * directionZ;
+  const localDirectionZ = matrix[0][2] * directionX + matrix[1][2] * directionY + matrix[2][2] * directionZ;
+  let near = 0;
+  let far = 1;
+  if (Math.abs(localDirectionX) < 1e-8) {
+    if (localStartX < -box.halfWidth || localStartX > box.halfWidth) return false;
+  } else {
+    const first = (-box.halfWidth - localStartX) / localDirectionX;
+    const second = (box.halfWidth - localStartX) / localDirectionX;
+    near = Math.max(near, Math.min(first, second));
+    far = Math.min(far, Math.max(first, second));
+    if (near > far) return false;
+  }
+  if (Math.abs(localDirectionY) < 1e-8) {
+    if (localStartY < -box.halfHeight || localStartY > box.halfHeight) return false;
+  } else {
+    const first = (-box.halfHeight - localStartY) / localDirectionY;
+    const second = (box.halfHeight - localStartY) / localDirectionY;
+    near = Math.max(near, Math.min(first, second));
+    far = Math.min(far, Math.max(first, second));
+    if (near > far) return false;
+  }
+  if (Math.abs(localDirectionZ) < 1e-8) {
+    if (localStartZ < -box.halfDepth || localStartZ > box.halfDepth) return false;
+  } else {
+    const first = (-box.halfDepth - localStartZ) / localDirectionZ;
+    const second = (box.halfDepth - localStartZ) / localDirectionZ;
+    near = Math.max(near, Math.min(first, second));
+    far = Math.min(far, Math.max(first, second));
+    if (near > far) return false;
+  }
+  return far > 1e-5 && near < 1 - 1e-5;
+}
+
+function rayIsClear(start, endX, endY, endZ, blockers) {
+  for (const blocker of blockers) {
+    if (rayIntersectsBox(start, endX, endY, endZ, blocker)) return false;
+  }
+  return true;
+}
+
+export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULTS) {
+  const acceleration = new Float32Array(grid.nx * grid.ny * grid.nz * 4);
+  const fans = scene.objects.filter((object) => object.model === 'fan' && object.enabled !== false);
+  const blockers = scene.objects.filter((object) => object.model !== 'fan' && object.model !== 'window').map((object) => ({
+    center: { x: object.position.x, y: object.position.y + object.dimensions.height / 2, z: object.position.z },
+    halfWidth: object.dimensions.width / 2,
+    halfHeight: object.dimensions.height / 2,
+    halfDepth: object.dimensions.depth / 2,
+    rotation: rotationMatrixXYZ(object.rotation),
+  }));
   for (const fan of fans) {
     const matrix = rotationMatrixXYZ(fan.rotation);
     const direction = [matrix[0][2], matrix[1][2], matrix[2][2]];
@@ -360,25 +455,39 @@ function applyFanForces(u, v, w, fans, grid, solid, timeStep, settings) {
         for (let i = 0; i < grid.nx; i += 1) {
           const index = indexOf(i, j, k, grid);
           if (solid[index]) continue;
-          const position = cellPosition(i, j, k, grid);
-          const dx = position.x - source.x;
-          const dy = position.y - source.y;
-          const dz = position.z - source.z;
+          const x = (i + 0.5) * grid.dx;
+          const y = (j + 0.5) * grid.dy;
+          const z = (k + 0.5) * grid.dz;
+          const dx = x - source.x;
+          const dy = y - source.y;
+          const dz = z - source.z;
           const forward = dx * direction[0] + dy * direction[1] + dz * direction[2];
           if (forward < -sourceReach || forward > settings.fanRange) continue;
           const lateralSquared = Math.max(0, dx ** 2 + dy ** 2 + dz ** 2 - forward ** 2);
           const spread = 0.12 + Math.max(0, forward) * 0.2;
+          if (lateralSquared > 9 * spread ** 2 || !rayIsClear(source, x, y, z, blockers)) continue;
           const upstreamFade = Math.exp(-0.5 * (Math.min(0, forward) / sourceReach) ** 2);
           const beam = Math.exp(-lateralSquared / (2 * spread ** 2))
             * Math.exp(-Math.max(0, forward) / settings.fanRange)
             * upstreamFade;
-          const magnitude = settings.fanAcceleration * (fan.intensity ?? 1) * beam * timeStep;
-          u[index] += direction[0] * magnitude;
-          v[index] += direction[1] * magnitude;
-          w[index] += direction[2] * magnitude;
+          const magnitude = settings.fanAcceleration * (fan.intensity ?? 1) * beam;
+          const offset = index * 4;
+          acceleration[offset] += direction[0] * magnitude;
+          acceleration[offset + 1] += direction[1] * magnitude;
+          acceleration[offset + 2] += direction[2] * magnitude;
         }
       }
     }
+  }
+  return acceleration;
+}
+
+function applyFanForces(u, v, w, acceleration, timeStep) {
+  for (let index = 0; index < u.length; index += 1) {
+    const offset = index * 4;
+    u[index] += acceleration[offset] * timeStep;
+    v[index] += acceleration[offset + 1] * timeStep;
+    w[index] += acceleration[offset + 2] * timeStep;
   }
 }
 
@@ -539,77 +648,92 @@ function calculateStats(u, v, w, temperature, solid, grid, ambientTemperature) {
   };
 }
 
-export function simulateRoomFields(scene, options = {}) {
+function createSimulationState(scene, options) {
   validateScene(scene);
   const settings = validateOptions(options, scene.room);
   const grid = buildGrid(scene.room, settings.cellSize);
   const solid = buildSolidMask(scene, grid);
   const { outlets, flow: windowFlow } = buildWindowBoundary(scene, grid);
-  const fans = scene.objects.filter((object) => object.model === 'fan' && object.enabled !== false);
-  const heaters = scene.objects.filter((object) => object.model === 'heater');
-  let u = new Float32Array(grid.nx * grid.ny * grid.nz);
-  let v = new Float32Array(u.length);
-  let w = new Float32Array(u.length);
-  let temperature = new Float32Array(u.length).fill(settings.ambientTemperature);
+  const count = grid.nx * grid.ny * grid.nz;
+  return {
+    scene,
+    settings,
+    grid,
+    solid,
+    outlets,
+    windowFlow,
+    fanAcceleration: buildFanAccelerationField(scene, grid, solid, settings),
+    heaters: scene.objects.filter((object) => object.model === 'heater'),
+    u: new Float32Array(count),
+    v: new Float32Array(count),
+    w: new Float32Array(count),
+    temperature: new Float32Array(count).fill(settings.ambientTemperature),
+  };
+}
 
-  for (let step = 0; step < settings.steps; step += 1) {
-    const previousU = u;
-    const previousV = v;
-    const previousW = w;
-    u = advect(previousU, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
-    v = advect(previousV, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
-    w = advect(previousW, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
-    applyFanForces(u, v, w, fans, grid, solid, settings.timeStep, settings);
-    applyBuoyancy(v, temperature, solid, settings.timeStep, settings.ambientTemperature);
+function advanceSimulation(state) {
+  const { settings, grid, solid, outlets, windowFlow, fanAcceleration, heaters } = state;
+  let { u, v, w, temperature } = state;
+  const previousU = u;
+  const previousV = v;
+  const previousW = w;
+  u = advect(previousU, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
+  v = advect(previousV, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
+  w = advect(previousW, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
+  applyFanForces(u, v, w, fanAcceleration, settings.timeStep);
+  applyBuoyancy(v, temperature, solid, settings.timeStep, settings.ambientTemperature);
 
-    const damp = Math.exp(-0.08 * settings.timeStep);
-    for (let index = 0; index < u.length; index += 1) {
-      if (solid[index]) continue;
-      u[index] = clamp(u[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-      v[index] = clamp(v[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-      w[index] = clamp(w[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-    }
-    u = diffuse(u, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-    v = diffuse(v, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-    w = diffuse(w, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-    projectVelocity(u, v, w, grid, solid, outlets, windowFlow, settings.pressureIterations);
-    for (let index = 0; index < u.length; index += 1) {
-      const speed = Math.hypot(u[index], v[index], w[index]);
-      if (speed > LIMITS.maxSpeed) {
-        const scale = LIMITS.maxSpeed / speed;
-        u[index] *= scale;
-        v[index] *= scale;
-        w[index] *= scale;
-      }
-    }
-
-    temperature = advect(temperature, u, v, w, grid, solid, settings.timeStep, settings.ambientTemperature);
-    temperature = diffuse(temperature, settings.effectiveThermalDiffusivity, settings.timeStep, grid, solid, 0, LIMITS.maxTemperature);
-    for (let index = 0; index < temperature.length; index += 1) {
-      if (solid[index]) {
-        temperature[index] = settings.ambientTemperature;
-        continue;
-      }
-      if (outlets[index]) {
-        const isInlet = outlets[index] & 1 ? windowFlow[index] > 0
-          : outlets[index] & 2 ? windowFlow[index] < 0
-            : outlets[index] & 16 ? windowFlow[index] > 0 : windowFlow[index] < 0;
-        const exchange = Math.min(1, settings.timeStep * Math.abs(windowFlow[index]) / Math.min(grid.dx, grid.dz));
-        if (isInlet) temperature[index] = settings.ambientTemperature;
-        else temperature[index] += (settings.ambientTemperature - temperature[index]) * exchange;
-      }
-      temperature[index] = clamp(
-        temperature[index] + (settings.ambientTemperature - temperature[index]) * settings.coolingRate * settings.timeStep,
-        0,
-        LIMITS.maxTemperature,
-      );
-    }
-    addHeatSources(temperature, heaters, grid, solid, settings, settings.timeStep);
-    for (let index = 0; index < temperature.length; index += 1) {
-      temperature[index] = clamp(temperature[index], 0, LIMITS.maxTemperature);
+  const damp = Math.exp(-0.08 * settings.timeStep);
+  for (let index = 0; index < u.length; index += 1) {
+    if (solid[index]) continue;
+    u[index] = clamp(u[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+    v[index] = clamp(v[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+    w[index] = clamp(w[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+  }
+  u = diffuse(u, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+  v = diffuse(v, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+  w = diffuse(w, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+  projectVelocity(u, v, w, grid, solid, outlets, windowFlow, settings.pressureIterations);
+  for (let index = 0; index < u.length; index += 1) {
+    const speed = Math.hypot(u[index], v[index], w[index]);
+    if (speed > LIMITS.maxSpeed) {
+      const scale = LIMITS.maxSpeed / speed;
+      u[index] *= scale;
+      v[index] *= scale;
+      w[index] *= scale;
     }
   }
 
+  temperature = advect(temperature, previousU, previousV, previousW, grid, solid, settings.timeStep, settings.ambientTemperature, true);
+  temperature = diffuse(temperature, settings.effectiveThermalDiffusivity, settings.timeStep, grid, solid, 0, LIMITS.maxTemperature);
+  for (let index = 0; index < temperature.length; index += 1) {
+    if (solid[index]) {
+      temperature[index] = settings.ambientTemperature;
+      continue;
+    }
+    if (outlets[index]) {
+      const isInlet = outlets[index] & 1 ? windowFlow[index] > 0
+        : outlets[index] & 2 ? windowFlow[index] < 0
+          : outlets[index] & 16 ? windowFlow[index] > 0 : windowFlow[index] < 0;
+      const exchange = Math.min(1, settings.timeStep * Math.abs(windowFlow[index]) / Math.min(grid.dx, grid.dz));
+      if (isInlet) temperature[index] = settings.ambientTemperature;
+      else temperature[index] += (settings.ambientTemperature - temperature[index]) * exchange;
+    }
+    temperature[index] = clamp(
+      temperature[index] + (settings.ambientTemperature - temperature[index]) * settings.coolingRate * settings.timeStep,
+      0,
+      LIMITS.maxTemperature,
+    );
+  }
+  addHeatSources(temperature, heaters, grid, solid, settings, settings.timeStep);
+  for (let index = 0; index < temperature.length; index += 1) {
+    temperature[index] = clamp(temperature[index], 0, LIMITS.maxTemperature);
+  }
+  Object.assign(state, { u, v, w, temperature });
+}
+
+function finishSimulation(state) {
+  const { settings, grid, solid, outlets, windowFlow, u, v, w, temperature } = state;
   const stats = calculateStats(u, v, w, temperature, solid, grid, settings.ambientTemperature);
   return {
     grid: { ...grid, cellSize: settings.cellSize },
@@ -620,4 +744,20 @@ export function simulateRoomFields(scene, options = {}) {
     assumptions: FIELD_ASSUMPTIONS,
     stats,
   };
+}
+
+export function simulateRoomFields(scene, options = {}) {
+  const state = createSimulationState(scene, options);
+  for (let step = 0; step < state.settings.steps; step += 1) advanceSimulation(state);
+  return finishSimulation(state);
+}
+
+export async function simulateRoomFieldsAsync(scene, options = {}, { isCancelled = () => false, yieldEvery = 2 } = {}) {
+  const state = createSimulationState(scene, options);
+  for (let step = 0; step < state.settings.steps; step += 1) {
+    if (isCancelled()) return null;
+    advanceSimulation(state);
+    if ((step + 1) % yieldEvery === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return isCancelled() ? null : finishSimulation(state);
 }
