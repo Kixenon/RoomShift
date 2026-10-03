@@ -34,6 +34,17 @@ They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a brow
 - Undo with **⌘Z / Ctrl+Z**; redo with **⌘⇧Z / Ctrl+Y**. Use the **i** button in the viewport toolbar for the full shortcut list. A gizmo drag is one undo step.
 - **Air** and **Heat** update continuously in the background while selected. Geometry or model edits trigger a fresh estimate; **Light** switches immediately to a real-time shadow preview.
 
+## Time of day in Light mode
+
+The light preview is driven by the real solar position for a fixed site: **Hong Kong**, 22.32° N, 114.17° E, UTC+8, using the NOAA solar position algorithm. The compass is pinned so the scene's -z is north and +x is east, because nothing in the scene model implied an orientation.
+
+- Drag the clock (or press the time control) and the sun's altitude and azimuth change. Colour and intensity follow: warm and low at dawn and dusk, near-neutral and high at midday, nothing below the horizon.
+- **Sun patches.** Each open window projects a parallelogram of direct sun onto the floor, clipped to the room. A patch is dropped when the sun is below the horizon, is on the wrong side of the wall, or the window is closed. Patches pull away from their wall as the sun climbs, and graze it dimly when the light is oblique.
+- **Lamps** switch on when the sun drops below 6°, and the **Lamps** button overrides that in either direction.
+- The site being inside the tropics is not incidental: between the solstices the sun passes north of the zenith, so its azimuth sweeps through the whole compass and a room's aspect changes through the day. In June it stays in the northern half of the sky all day.
+
+This is still a **visual preview, not lux-calibrated photometry**. The solar position is geometric and meaningful; the light intensities are hand-tuned curves chosen to read well, not measured irradiance. The room is a rectangular box with flat walls, and the sun patches are parallel projections with no occlusion by furniture. A near-overhead sun barely reaches any vertical wall, so patches shrink to slivers around local noon.
+
 ## Simulation scope and limits
 
 RoomShift includes bounded **3D estimates** to visualize airflow and temperature plus a grayscale lighting preview. It is **not validated CFD**, an engineering-grade thermal model, calibrated photometry, or a safety tool. A Web Worker uses WebGPU compute for airflow and heat; Three.js renders volumetric fields and provides point-light shadow maps for the lighting preview.
@@ -53,6 +64,8 @@ The scene model is solver-independent (`src/model/room-scene.js`); rendering and
 - `src/model/editor-state.js` — editor selection, view, transform mode, and reset state.
 - `src/simulation/room-fields-webgpu.js` — WebGPU 3D airflow and temperature estimates.
 - `src/simulation/room-fields-3d.js` — bounded CPU preview and shared room geometry checks.
+- `src/simulation/sun-position.js` — solar altitude, azimuth, sunrise and sunset for the site.
+- `src/simulation/daylight.js` — maps a clock time and the scene to sun, sky, lamp, exposure and sun-patch state. Pure, with no three.js.
 - `src/simulation/room-light.js` — retained scalar light estimator; the editor's Light mode uses rendered shadows instead.
 - `src/simulation/room-field-worker.js` and `src/simulation/room-field-controller.js` — background solving and coalesced live updates.
 - `src/scene/room-field-layer-3d.js` and `src/scene/room-field-renderer.js` — volumetric field rendering, animated airflow streamlines, and tracers.

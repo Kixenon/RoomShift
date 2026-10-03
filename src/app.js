@@ -49,6 +49,12 @@ const fieldControls = {
   legendMin: $('#field-legend-min'),
   legendMax: $('#field-legend-max'),
 };
+const timeControls = {
+  group: $('#time-controls'),
+  clock: $('#clock-label'),
+  slider: $('#time-of-day'),
+  lamps: $('#lamps-toggle'),
+};
 
 let editorState = createEditorState();
 let roomScene = editorState.scene;
@@ -81,6 +87,32 @@ function updateScene(scene, { record = !isDragging } = {}) {
   fieldController?.setScene(scene);
 }
 
+function renderTimeOfDay() {
+  const state = viewport?.daylightState;
+  if (!state) return;
+  timeControls.clock.textContent = state.clock;
+  timeControls.clock.title = state.sun.altitude > 0
+    ? `Sun ${state.sun.altitude.toFixed(0)}° up, bearing ${Math.round(state.sun.azimuth)}°. ${state.site.name}.`
+    : `Sun below the horizon. ${state.site.name}.`;
+  // "Auto" means follow the dusk threshold, so the button only reads as pressed
+  // when the user has taken the lamps over.
+  const forced = timeControls.lamps.getAttribute('aria-pressed') === 'true';
+  timeControls.lamps.title = forced
+    ? `Lamps forced on, overriding the dusk threshold. Sun altitude ${state.sun.altitude.toFixed(0)}°.`
+    : `Lamps follow dusk automatically. Currently ${state.lampsOn ? 'on' : 'off'}.`;
+}
+
+timeControls.slider.addEventListener('input', () => {
+  viewport.setTimeOfDay({ timeMinutes: Number(timeControls.slider.value) });
+  renderTimeOfDay();
+});
+timeControls.lamps.addEventListener('click', () => {
+  const forced = timeControls.lamps.getAttribute('aria-pressed') !== 'true';
+  setPressed(timeControls.lamps, forced);
+  viewport.setTimeOfDay({ lampsOverride: forced ? true : null });
+  renderTimeOfDay();
+});
+
 function renderFieldState({ mode, loading, result, error }) {
   const viewportElement = $('#viewport');
   for (const [name, button] of Object.entries({
@@ -93,9 +125,11 @@ function renderFieldState({ mode, loading, result, error }) {
   fieldControls.legend.hidden = !mode || (mode !== 'light' && !result);
   fieldControls.status.textContent = loading ? 'Solving…' : error ? 'Unavailable' : '';
   fieldControls.status.title = error?.message ?? '';
+  timeControls.group.hidden = mode !== 'light';
   if (mode === 'light') {
+    renderTimeOfDay();
     fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : 'Realtime shadows';
-    fieldControls.status.title = error?.message ?? 'Monochrome room render with lamp point lights and cast shadows.';
+    fieldControls.status.title = error?.message ?? 'Monochrome room render driven by the sun position at the site.';
     fieldControls.gradient.dataset.mode = 'light';
     fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
     fieldControls.legendMin.textContent = 'shadow';
