@@ -30,7 +30,7 @@ They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a brow
 - Edit room width, depth, and height in meters.
 - Add generic boxes, then change their name and visual/semantic model (fan, sofa, bed, desk, table, lamp, heater) independently; choosing a model does not change its box dimensions or name.
 - Hover near an object to highlight it; click the object or its list item to select it. Drag the gizmo or edit position, size, and X/Y/Z rotation in the inspector.
-- Add a window, then drag it toward a wall; it snaps to the nearest wall. Open windows can exchange air, act as an inlet, or act as an outlet. Fan, heater, lamp, and window flow strengths are adjustable; fans can be switched off in the inspector. Drag the canvas to orbit in **3D**; **Top** locks the camera vertically; **Ortho** switches the 3D view to orthographic projection.
+- Add a window, then drag it toward a wall; it snaps to the nearest wall. Open windows can exchange air, act as an inlet, or act as an outlet. Fan, heater, lamp, and window flow strengths are adjustable; fans can be switched off in the inspector. Drag the canvas to orbit the 3D room; use the bottom-right camera controls to toggle projection or choose a top-down or angled view. Orbiting remains enabled after choosing the top-down view.
 - Undo with **⌘Z / Ctrl+Z**; redo with **⌘⇧Z / Ctrl+Y**. Use the **i** button in the viewport toolbar for the full shortcut list. A gizmo drag is one undo step.
 - **Air** and **Heat** update continuously in the background while selected. Geometry or model edits trigger a fresh estimate; **Light** switches immediately to a real-time shadow preview.
 

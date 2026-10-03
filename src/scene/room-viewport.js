@@ -207,11 +207,12 @@ function createWallGeometry(width, height, windows, wall, room) {
 }
 
 export class RoomViewport {
-  constructor(container, { onSelect = () => {}, onTransform = () => {}, onDragChange = () => {} } = {}) {
+  constructor(container, { onSelect = () => {}, onTransform = () => {}, onDragChange = () => {}, onCameraViewChange = () => {} } = {}) {
     this.container = container;
     this.onSelect = onSelect;
     this.onTransform = onTransform;
     this.onDragChange = onDragChange;
+    this.onCameraViewChange = onCameraViewChange;
     this.roomScene = null;
     this.selectedId = null;
     this.groups = new Map();
@@ -220,7 +221,6 @@ export class RoomViewport {
     this.lightingPreview = false;
     this.lightingLights = [];
     this.pointerStart = null;
-    this.isTopView = false;
     this.projection = 'perspective';
     this.orthoFrustumHeight = 8;
     this.transformMode = 'translate';
@@ -302,8 +302,12 @@ export class RoomViewport {
     this.orbit.minDistance = 2.5;
     this.orbit.maxDistance = 40;
     this.orbit.maxPolarAngle = Math.PI * 0.48;
-    this.orbit.enableRotate = !this.isTopView;
-    this.orbit.enablePan = !this.isTopView;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    this.orbit.addEventListener('change', () => {
+      const direction = this.camera.position.clone().sub(this.orbit.target).normalize();
+      this.onCameraViewChange(direction.y > 0.98 ? 'top' : '3d');
+    });
     this.orbit.update();
 
     this.transform = new TransformControls(this.camera, this.renderer.domElement);
@@ -326,10 +330,11 @@ export class RoomViewport {
     const up = this.camera.up.clone();
     if (projection === 'orthographic') {
       const distance = position.distanceTo(target);
-      this.orthoFrustumHeight = this.isTopView
-        ? Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.3
-        : Math.max(2, 2 * distance * Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2)));
+      const direction = position.clone().sub(target).normalize();
       const aspect = Math.max(1, this.container.clientWidth) / Math.max(1, this.container.clientHeight);
+      this.orthoFrustumHeight = direction.y > 0.98
+        ? Math.max(this.roomScene.room.depth, this.roomScene.room.width / aspect) * 1.12
+        : Math.max(2, 2 * distance * Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2)));
       this.orthographicCamera.left = -this.orthoFrustumHeight * aspect / 2;
       this.orthographicCamera.right = this.orthoFrustumHeight * aspect / 2;
       this.orthographicCamera.top = this.orthoFrustumHeight / 2;
@@ -458,7 +463,7 @@ export class RoomViewport {
     this.buildRoom();
     for (const object of roomScene.objects) this.createObjectGroup(object);
     this.select(selectedId);
-    if (initialScene) this.fitRoom(false);
+    if (initialScene) this.fitRoom();
     if (showLighting) this.setLightingPreview(true);
   }
 
@@ -602,31 +607,46 @@ export class RoomViewport {
     }
   }
 
-  setView(view) {
-    this.isTopView = view === 'top';
-    this.orbit.enableRotate = !this.isTopView;
-    this.orbit.enablePan = !this.isTopView;
-    this.renderer.domElement.dataset.cameraView = this.isTopView ? 'top' : '3d';
-    this.orbit.target.set(0, this.roomScene.room.height / 2, 0);
+  snapToTop() {
+    const { width, depth, height } = this.roomScene.room;
+    this.orbit.target.set(0, height / 2, 0);
+    this.orbit.enabled = true;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    const aspect = Math.max(1, this.container.clientWidth) / Math.max(1, this.container.clientHeight);
+    const viewHeight = Math.max(depth, width / aspect) * 1.2;
+    const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2));
+    const perspectiveDistance = Math.max(
+      Math.max(width, depth) * 1.6,
+      viewHeight / (2 * tanHalfFov),
+    );
     if (this.camera.isOrthographicCamera) {
-      this.orthoFrustumHeight = Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.45;
+      this.orthoFrustumHeight = 2 * perspectiveDistance * tanHalfFov;
       this.resize();
     }
-    const distance = Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.35;
-    if (this.isTopView) {
-      this.camera.up.set(0, 0, -1);
-      this.camera.position.set(0, this.roomScene.room.height + distance, 0.001);
-    } else {
-      this.camera.up.set(0, 1, 0);
-      this.camera.position.set(distance * 0.88, distance * 0.7, distance * 0.96);
-    }
+    const distance = this.camera.isPerspectiveCamera ? perspectiveDistance : Math.max(width, depth) * 1.35;
+    const tilt = 0.04;
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.set(0, height / 2 + distance * Math.cos(tilt), distance * Math.sin(tilt));
     this.camera.lookAt(this.orbit.target);
     this.orbit.update();
   }
 
-  fitRoom(resetView = true) {
-    if (resetView) this.isTopView = false;
-    this.setView(this.isTopView ? 'top' : '3d');
+  fitRoom() {
+    const { width, depth, height } = this.roomScene.room;
+    this.orbit.target.set(0, height / 2, 0);
+    this.orbit.enabled = true;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    const distance = Math.max(width, depth) * 1.35;
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.set(distance * 0.88, distance * 0.7, distance * 0.96);
+    if (this.camera.isOrthographicCamera) {
+      this.orthoFrustumHeight = Math.max(width, depth) * 1.45;
+      this.resize();
+    }
+    this.camera.lookAt(this.orbit.target);
+    this.orbit.update();
   }
 
   handlePointerUp(event) {

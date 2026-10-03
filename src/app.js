@@ -18,10 +18,8 @@ import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
 import {
   createEditorState,
-  resetEditorState,
   selectObject as selectEditorObject,
   setTransformMode as setEditorTransformMode,
-  setView as setEditorView,
 } from './model/editor-state.js';
 import { RoomViewport } from './scene/room-viewport.js';
 
@@ -160,6 +158,26 @@ function restoreSnapshot(snapshot) {
   viewport.setMode(transformMode);
 }
 
+function setProjection(projection) {
+  viewport.setProjection(projection);
+  const orthographic = viewport.projection === 'orthographic';
+  const button = $('#toggle-projection');
+  button.dataset.projection = viewport.projection;
+  button.setAttribute('aria-pressed', String(orthographic));
+}
+
+function setTransformMode(mode) {
+  transformMode = mode;
+  editorState = setEditorTransformMode(editorState, mode);
+  viewport.setMode(mode);
+  const rotating = mode === 'rotate';
+  const button = $('#transform-mode-toggle');
+  button.dataset.mode = mode;
+  button.setAttribute('aria-pressed', String(rotating));
+  button.setAttribute('aria-label', rotating ? 'Rotate mode' : 'Move mode');
+  button.title = `${rotating ? 'Rotate' : 'Move'} mode (${rotating ? 'R' : 'G'}); click to switch`;
+}
+
 function undo() {
   const snapshot = history.undo(currentSnapshot());
   if (snapshot) restoreSnapshot(snapshot);
@@ -178,12 +196,10 @@ function updateRoomSummary() {
 
 function renderObjectList() {
   objectList.innerHTML = roomScene.objects.map((object) => {
-    const model = MODEL_PRESETS[object.model] ?? MODEL_PRESETS.box;
     return `
       <button class="object-row ${object.id === selectedId ? 'selected' : ''}" type="button" data-select-object="${escapeHtml(object.id)}" aria-pressed="${object.id === selectedId}">
-        <span class="object-row-icon" aria-hidden="true">${escapeHtml(model.icon)}</span>
+        <span class="object-row-icon" aria-hidden="true">${escapeHtml((MODEL_PRESETS[object.model] ?? MODEL_PRESETS.box).icon)}</span>
         <span class="object-row-name">${escapeHtml(object.name)}</span>
-        <span class="object-type">${escapeHtml(model.label)}</span>
       </button>
     `;
   }).join('');
@@ -230,9 +246,9 @@ function renderProperties() {
       <div class="property-group">
         <div class="property-label">Position · m</div>
         <div class="property-fields">
-          ${propertyField('X', 'x', object.position.x, 'position', { min: 0, max: roomScene.room.width })}
-          ${propertyField('Y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height })}
-          ${propertyField('Z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
+          ${propertyField('x', 'x', object.position.x, 'position', { min: 0, max: roomScene.room.width })}
+          ${propertyField('y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height })}
+          ${propertyField('z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
         </div>
       </div>
       ${sourceLabel ? `<div class="property-group">
@@ -243,20 +259,20 @@ function renderProperties() {
       <div class="property-group">
         <div class="property-label">Size · m</div>
         <div class="property-fields">
-          ${propertyField('W', 'width', object.dimensions.width, 'dimension', isWindow ? { min: 0.4, max: maxWindowWidth } : dimensionLimits.width)}
-          ${propertyField('H', 'height', object.dimensions.height, 'dimension', isWindow ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
-          ${isWindow ? '' : propertyField('D', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
+          ${propertyField('w', 'width', object.dimensions.width, 'dimension', isWindow ? { min: 0.4, max: maxWindowWidth } : dimensionLimits.width)}
+          ${propertyField('h', 'height', object.dimensions.height, 'dimension', isWindow ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
+          ${isWindow ? '' : propertyField('d', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
         </div>
       </div>
       ${isWindow ? '' : `<div class="property-group">
         <div class="property-label">Rotation · °</div>
         <div class="property-fields rotation-fields">
-          ${propertyField('X', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
-          ${propertyField('Y', 'y', object.rotation.y, 'rotation', { min: -180, max: 180 })}
-          ${propertyField('Z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
+          ${propertyField('x', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
+          ${propertyField('y', 'y', object.rotation.y, 'rotation', { min: -180, max: 180 })}
+          ${propertyField('z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
         </div>
       </div>`}
-      <div class="properties-note">${isWindow ? 'Drag the window toward a wall to snap it into place.' : 'Drag the gizmo to move or rotate.'}</div>
+      ${isWindow ? '<div class="properties-note">Drag the window toward a wall to snap it into place.</div>' : ''}
     </div>
   `;
   properties.querySelector('[data-object-name]').value = object.name;
@@ -411,66 +427,30 @@ $('#delete-object').addEventListener('click', () => {
   refreshScene();
 });
 
-$('#reset-scene').addEventListener('click', () => {
-  recordHistory();
-  fieldController.setMode(null);
-  editorState = resetEditorState();
-  roomScene = editorState.scene;
-  selectedId = editorState.selectedId;
-  transformMode = editorState.transformMode;
-  $('#mode-move').classList.add('active');
-  $('#mode-rotate').classList.remove('active');
-  viewport.fitRoom(true);
-  viewport.setProjection('perspective');
-  setCameraView('3d');
-  refreshScene();
-  viewport.setMode(transformMode);
+$('#transform-mode-toggle').addEventListener('click', () => {
+  setTransformMode(transformMode === 'translate' ? 'rotate' : 'translate');
 });
 
-$('#mode-move').addEventListener('click', () => {
-  transformMode = 'translate';
-  editorState = setEditorTransformMode(editorState, transformMode);
-  viewport.setMode(transformMode);
-  $('#mode-move').classList.add('active');
-  $('#mode-rotate').classList.remove('active');
+$('#toggle-projection').addEventListener('click', () => {
+  setProjection(viewport.projection === 'perspective' ? 'orthographic' : 'perspective');
 });
-
-$('#mode-rotate').addEventListener('click', () => {
-  transformMode = 'rotate';
-  editorState = setEditorTransformMode(editorState, transformMode);
-  viewport.setMode(transformMode);
-  $('#mode-rotate').classList.add('active');
-  $('#mode-move').classList.remove('active');
-});
-
-function setCameraView(view) {
-  editorState = setEditorView(editorState, view);
-  viewport.setView(view);
-  $('#view-3d').classList.toggle('active', view === '3d');
-  $('#view-top').classList.toggle('active', view === 'top');
-  $('#projection-perspective').classList.toggle('active', viewport.projection === 'perspective');
-  $('#projection-orthographic').classList.toggle('active', viewport.projection === 'orthographic');
-  $('#view-3d').setAttribute('aria-pressed', String(view === '3d'));
-  $('#view-top').setAttribute('aria-pressed', String(view === 'top'));
-  $('#projection-perspective').setAttribute('aria-pressed', String(viewport.projection === 'perspective'));
-  $('#projection-orthographic').setAttribute('aria-pressed', String(viewport.projection === 'orthographic'));
+const cameraViewPicker = $('#camera-view-picker');
+const cameraViewPickerButton = $('#camera-view-picker-button');
+function setCameraViewSelection(view) {
+  for (const item of cameraViewPicker.querySelectorAll('[data-camera-view]')) {
+    item.setAttribute('aria-checked', String(item.dataset.cameraView === view));
+  }
 }
-
-$('#view-3d').addEventListener('click', () => setCameraView('3d'));
-$('#view-top').addEventListener('click', () => setCameraView('top'));
-$('#projection-perspective').addEventListener('click', () => {
-  viewport.setProjection('perspective');
-  setCameraView(editorState.view);
+cameraViewPicker.addEventListener('toggle', () => {
+  cameraViewPickerButton.setAttribute('aria-expanded', String(cameraViewPicker.open));
 });
-$('#projection-orthographic').addEventListener('click', () => {
-  viewport.setProjection('orthographic');
-  setCameraView(editorState.view);
-});
-
-$('#view-home').addEventListener('click', () => {
-  viewport.setProjection('perspective');
-  viewport.fitRoom(true);
-  setCameraView('3d');
+cameraViewPicker.addEventListener('click', (event) => {
+  const option = event.target.closest('[data-camera-view]');
+  if (!option) return;
+  if (option.dataset.cameraView === 'top') viewport.snapToTop();
+  else viewport.fitRoom();
+  setCameraViewSelection(option.dataset.cameraView);
+  cameraViewPicker.open = false;
 });
 
 document.addEventListener('keydown', (event) => {
@@ -486,27 +466,35 @@ document.addEventListener('keydown', (event) => {
     redo();
     return;
   }
-  if (key === 'g') $('#mode-move').click();
-  if (key === 'r') $('#mode-rotate').click();
-  if (key === 'o') $('#projection-orthographic').click();
+  if (key === 'g') setTransformMode('translate');
+  if (key === 'r') setTransformMode('rotate');
+  if (key === 'o') $('#toggle-projection').click();
   if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) $('#delete-object').click();
 });
 
 const shortcutHelp = $('#shortcut-help');
-$('#show-shortcuts').addEventListener('click', () => {
-  shortcutHelp.hidden = !shortcutHelp.hidden;
-  $('#show-shortcuts').setAttribute('aria-expanded', String(!shortcutHelp.hidden));
+const shortcutButton = $('#show-shortcuts');
+const viewportInfo = $('.viewport-info');
+function setShortcutHelpOpen(open) {
+  shortcutHelp.hidden = !open;
+  shortcutButton.setAttribute('aria-expanded', String(open));
+}
+viewportInfo.addEventListener('pointerenter', () => setShortcutHelpOpen(true));
+viewportInfo.addEventListener('pointerleave', () => {
+  if (!viewportInfo.contains(document.activeElement)) setShortcutHelpOpen(false);
+});
+viewportInfo.addEventListener('focusin', () => setShortcutHelpOpen(true));
+viewportInfo.addEventListener('focusout', (event) => {
+  if (!viewportInfo.contains(event.relatedTarget) && !viewportInfo.matches(':hover')) setShortcutHelpOpen(false);
 });
 document.addEventListener('pointerdown', (event) => {
-  if (!event.target.closest('.viewport-info')) {
-    shortcutHelp.hidden = true;
-    $('#show-shortcuts').setAttribute('aria-expanded', 'false');
-  }
+  if (!cameraViewPicker.contains(event.target)) cameraViewPicker.open = false;
+  if (!viewportInfo.contains(event.target) && !viewportInfo.matches(':hover')) setShortcutHelpOpen(false);
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
-    shortcutHelp.hidden = true;
-    $('#show-shortcuts').setAttribute('aria-expanded', 'false');
+    cameraViewPicker.open = false;
+    setShortcutHelpOpen(false);
   }
 });
 
@@ -525,8 +513,11 @@ viewport = new RoomViewport($('#viewport'), {
       dragSnapshot = null;
     }
   },
+  onCameraViewChange: setCameraViewSelection,
 });
 viewport.setScene(roomScene, selectedId);
+setProjection('perspective');
+setTransformMode(transformMode);
 renderInspector();
 fieldController = new RoomFieldController({
   worker: new Worker(new URL('./simulation/room-field-worker.js', import.meta.url), { type: 'module' }),

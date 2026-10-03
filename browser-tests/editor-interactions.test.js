@@ -127,7 +127,7 @@ test('dragging the vertical rotation ring changes object rotation', async () => 
   const bounds = await canvas.boundingBox();
   const center = fanScreenPoint(bounds);
   await page.mouse.click(center.x, center.y);
-  await page.locator('#mode-rotate').click();
+  await page.locator('#transform-mode-toggle').click();
   await page.waitForFunction(() => document.querySelector('[data-rotation="y"]') !== null);
 
   const start = roomScreenPoint(bounds, [fanCenterWorld[0] + 0.8, fanCenterWorld[1], fanCenterWorld[2]]);
@@ -268,7 +268,7 @@ test('a fan close to a wall keeps a visible resolved airflow field', async () =>
   assert.ok(Number(await page.locator('#room-canvas').getAttribute('data-field-cells')) > 0);
 });
 
-test('room edits, object properties, delete, view, mode, and reset work end to end', async () => {
+test('room edits, object properties, camera controls, and delete work end to end', async () => {
   const initialObjectCount = await page.locator('[data-select-object]').count();
   const width = page.locator('#room-width');
   const depth = page.locator('#room-depth');
@@ -292,22 +292,21 @@ test('room edits, object properties, delete, view, mode, and reset work end to e
   await rotation.blur();
   assert.equal(await page.locator('[data-rotation="y"]').inputValue(), '45.00');
 
-  await page.locator('#view-top').click();
-  assert.equal(await page.locator('#view-top').getAttribute('class'), 'view-button active');
-  await page.locator('#mode-rotate').click();
-  assert.equal(await page.locator('#mode-rotate').getAttribute('class'), 'tool-button active');
-  await page.locator('#view-home').click();
-  assert.equal(await page.locator('#view-3d').getAttribute('class'), 'view-button active');
+  await page.locator('#camera-view-picker-button').click();
+  await page.locator('#camera-view-top').click();
+  await page.locator('#toggle-projection').click();
+  assert.equal(await page.locator('#room-canvas').getAttribute('data-projection'), 'orthographic');
+  await page.locator('#toggle-projection').click();
+  assert.equal(await page.locator('#room-canvas').getAttribute('data-projection'), 'perspective');
+  await page.locator('#transform-mode-toggle').click();
+  assert.equal(await page.locator('#transform-mode-toggle').getAttribute('aria-pressed'), 'true');
+  await page.locator('#camera-view-picker-button').click();
+  await page.locator('#camera-view-3d').click();
 
   await page.locator('#delete-object').click();
   assert.equal(await page.locator('[data-select-object]').count(), initialObjectCount - 1);
   assert.equal(await page.locator('#delete-object').isDisabled(), true);
 
-  await page.locator('#reset-scene').click();
-  assert.equal(await page.locator('#room-summary').textContent(), '5.2 × 4.0 × 2.7 m');
-  assert.equal(await page.locator('[data-select-object]').count(), initialObjectCount);
-  assert.equal(await page.locator('#view-3d').getAttribute('class'), 'view-button active');
-  assert.equal(await page.locator('#mode-move').getAttribute('class'), 'tool-button active');
 });
 
 test('narrow screens keep the canvas and field controls usable', async () => {
@@ -350,12 +349,13 @@ test('hovering over a scene object highlights it without selecting it', async ()
   await page.waitForFunction(() => !document.querySelector('#room-canvas')?.dataset.hoveredObject);
 });
 
-test('top view locks camera rotation and keeps a vertical view while dragging', async () => {
+test('top view can be orbited after selecting it from the camera menu', async () => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#viewport canvas').first().waitFor();
   await page.waitForTimeout(250);
-  await page.locator('#view-top').click();
+  await page.locator('#camera-view-picker-button').click();
+  await page.locator('#camera-view-top').click();
   const canvas = page.locator('#room-canvas');
   const bounds = await canvas.boundingBox();
   const before = await canvas.screenshot();
@@ -367,7 +367,7 @@ test('top view locks camera rotation and keeps a vertical view while dragging', 
   await page.mouse.up();
   await page.waitForTimeout(120);
 
-  assert.equal((await canvas.screenshot()).equals(before), true, 'top view should not orbit or pan from a drag');
+  assert.equal((await canvas.screenshot()).equals(before), false, 'top view should orbit from a drag');
 });
 
 test('rotation inspector edits all three Euler axes independently', async () => {
@@ -390,7 +390,7 @@ test('rotate gizmo exposes X and Z axes as well as Y', async () => {
   const ringRadius = cameraDistance * 1.9 * Math.tan(42 * Math.PI / 360) * 0.8 * 0.5 / 4;
   await page.mouse.click(center.x, center.y);
   await page.keyboard.press('r');
-  assert.equal(await page.locator('#mode-rotate').getAttribute('class'), 'tool-button active');
+  assert.equal(await page.locator('#transform-mode-toggle').getAttribute('aria-pressed'), 'true');
 
   for (const [axis, startPoint, endPoint] of [
     ['x', rotationRingPoint('x', Math.PI / 4, ringRadius), rotationRingPoint('x', Math.PI * 4 / 9, ringRadius)],
