@@ -1,4 +1,4 @@
-import { rotationMatrixXYZ } from '../model/room-scene.js';
+import { rotationMatrixXYZ, sourceScale } from '../model/room-scene.js';
 import { validateScene, buildOutletMask, buildSolidMask } from './room-fields-3d.js';
 import { createSimulationGrid, DEFAULT_CELL_SIZE } from './room-grid.js';
 
@@ -39,7 +39,7 @@ export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
       fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * local.x + matrix[1][1] * local.y + matrix[1][2] * local.z,
       fan.position.z + matrix[2][0] * local.x + matrix[2][1] * local.y + matrix[2][2] * local.z,
       settings.fanRange,
-      matrix[0][2], matrix[1][2], matrix[2][2], settings.fanAcceleration,
+      matrix[0][2], matrix[1][2], matrix[2][2], settings.fanAcceleration * sourceScale(fan),
       1.25 * Math.hypot(grid.dx * matrix[0][2], grid.dy * matrix[1][2], grid.dz * matrix[2][2]),
       0.12, 0.2, 0,
     ], offset);
@@ -52,7 +52,7 @@ export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
       heater.position.y + heater.dimensions.height / 2,
       heater.position.z,
       settings.heaterRadius,
-      settings.heaterRate, 0, 0, 0,
+      settings.heaterRate * sourceScale(heater), 0, 0, 0,
     ], offset);
   });
 

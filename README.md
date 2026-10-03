@@ -25,14 +25,14 @@ npm run test:browser     # or: npm run test:all to run everything
 
 They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a browser executable path to use a different one.
 
-## Editor
+## App
 
-- Edit room width, depth, and height in meters.
-- Add generic boxes, then change their name and visual/semantic model (fan, sofa, bed, desk, table, lamp, heater) independently; choosing a model does not change its box dimensions or name.
-- Hover near an object to highlight it; click the object or its list item to select it. Drag the gizmo or edit position, size, and X/Y/Z rotation in the inspector.
-- Add windows on room walls and toggle them open to exhaust air and heat. Drag the canvas to orbit in **3D**; **Top** locks the camera vertically; **Ortho** switches the 3D view to orthographic projection.
-- Undo with **⌘Z / Ctrl+Z**; redo with **⌘⇧Z / Ctrl+Y**. Use the **i** button in the viewport toolbar for the full shortcut list. A gizmo drag is one undo step.
-- **Air** and **Heat** update continuously in the background while selected. Geometry or model edits trigger a fresh estimate; **Light** switches immediately to a real-time shadow preview.
+- **Rooms page** (Drive-style): templates, search, sort, grid/list, multi-select duplicate / download / delete, autosave in the browser, import/export room files.
+- **Editor**: full-bleed 3D room with floating panels, ⌘K command palette (type `sofa 210x90x80` to add at an exact size), keyboard shortcuts (`?`), view cube, light/dark theme, drag-to-place dock, resize handles, L-shaped and rounded rooms, per-object colour, material, size presets and real-unit intensity (W, lm, dB, dBm, fan speed), doors and windows that open.
+- **Five lenses**: Air (WebGPU Navier–Stokes with advected particles, BS 5925 ventilation), Heat (buoyant heat field + steady-state heat balance with solar gain and running cost), Light (sun position for city/date/time, lux volume with bounce light), WiFi (ITU-R P.1238 + material losses) and Sound (Eyring RT60 + direct/diffuse level). Hover to trace the level back to its source; click to pin live measurements.
+- **Livability**: walkway, door-swing, clearance, daylight, WiFi and comfort checks with a score, plus a simulated-annealing layout suggestion that respects locked objects.
+- **Capture**: room size from a photo (corner clicks), on-device furniture detection and classification (TensorFlow.js), Claude AI room scan and shop-link product import (bring your own API key, browser only), Polycam / RoomPlan 3D-scan import (GLB, OBJ, USDZ, PLY), and floor-plan underlays.
+- **Share**: layout variants with side-by-side comparison, printable room report, USDZ (iPhone AR Quick Look) and GLB export.
 
 ## Simulation scope and limits
 
@@ -44,7 +44,7 @@ RoomShift includes bounded **3D estimates** to visualize airflow and temperature
 - **Light** is a real-time monochrome material render with point lights at lamp bulbs and cast shadows. It is a visual preview, not lux-calibrated photometry; it does not model indirect light bounce, glass transmission, or measured lamp output.
 - Closed room walls block flow. An open window creates a simplified one-way exhaust boundary with a small imposed outward velocity and ambient-temperature exchange. It illustrates heat and air leaving, but is not a calibrated opening-flow model. The estimates omit validated turbulence, wall/material heat capacity, radiation, HVAC, and measured calibration. Do not use them to claim real-world comfort, temperature, ventilation, lighting, or safety performance.
 
-The scene model is solver-independent (`src/model/room-scene.js`); rendering and field solving consume the same scene without mixing simulation state into object geometry. Scene persistence and schema migration are not implemented.
+The scene model is solver-independent (`src/model/room-scene.js`); rendering and field solving consume the same scene without mixing simulation state into object geometry. Scenes persist per browser (localStorage) and migrate on load via `normalizeScene`.
 
 ## Structure
 

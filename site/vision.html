@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f6f3" />
+    <title>RoomShift — Vision</title>
+    <meta name="description" content="Who RoomShift is for, where it sits in the market, how it reaches its first thousand rooms, and what could go wrong." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" />
+    <link rel="stylesheet" href="./site.css" />
+  </head>
+  <body class="theme-paper">
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="./"><span class="logo-mark"></span>RoomShift</a>
+      <nav class="site-nav" aria-label="Pages">
+        <a href="./">Product</a><a href="./science.html">Science</a><a href="./pricing.html">Pricing</a><a href="./vision.html"  aria-current="page">Vision</a><a href="./slides/">Deck</a>
+      </nav>
+      <button class="nav-toggle" type="button" aria-label="Menu" data-nav-toggle>☰</button>
+      <a class="btn btn-primary btn-small" href="../">Open RoomShift <span class="arrow">→</span></a>
+    </header>
+
+    <main id="main">
+      <section class="page-hero wrap" aria-labelledby="page-title">
+        <p class="eyebrow">Vision</p>
+        <h1 id="page-title" data-stretch>A weekend problem, solved before the weekend.</h1>
+        <p class="lede">People rearrange a room a few times a year: moving into a hall, setting up a desk, buying a fan before a Hong Kong summer. RoomShift is the room-physics tool for those moments, priced for them, and good enough that designers use it all week.</p>
+      </section>
+
+      <section class="section wrap" aria-labelledby="who-title" style="padding-top: 40px">
+        <div class="section-head"><p class="eyebrow">Who pays</p><h2 id="who-title" data-split>One customer first, two who follow.</h2></div>
+        <div class="audiences" data-reveal>
+          <article class="card" style="--c: var(--wifi)" data-glow><span class="icon">⌂</span><h3>Students and renters</h3><p>A few hundred square feet, a long humid summer, and a fan, AC, desk and bed competing for the same metres. The question is concrete (“where does the fan go?”) and nobody wants another subscription.</p><span class="meta">Room Pass · paid once</span></article>
+          <article class="card" style="--c: var(--sound)" data-glow><span class="icon">◫</span><h3>Interior designers</h3><p>They compare layouts for a living. A side-by-side of air, light and acoustics in two proposals, plus a client-ready report, is something a homeowner understands.</p><span class="meta">Studio · monthly</span></article>
+          <article class="card" style="--c: var(--light-c)" data-glow><span class="icon">▤</span><h3>Small offices</h3><p>Heater placement, desk spacing, WiFi dead spots and stuffy meeting rooms show up as complaints. Comes once calibration earns the trust that reporting needs.</p><span class="meta">Per-project licence · later</span></article>
+        </div>
+      </section>
+
+      <section class="section wrap" aria-labelledby="map-title" style="padding-top: 40px">
+        <div class="livability">
+          <div>
+            <p class="eyebrow">Where we sit</p>
+            <h2 id="map-title" data-split style="font-size: clamp(2.2rem, 4.6vw, 3.6rem); margin-top: 16px">Real physics, minutes of setup.</h2>
+            <p class="lede" style="margin-top: 18px">Room planners (magicplan, Polycam) make capture easy but show no physics. Engineering simulators (SimScale, DesignBuilder) have the physics but need an engineer. Consumer airflow apps sit between. RoomShift scans like a planner and simulates like a lab, in one browser tab.</p>
+          </div>
+          <div class="map-wrap" data-reveal><figure class="map" data-map>
+            <svg viewBox="0 0 640 520" role="img" aria-labelledby="map-desc">
+              <desc id="map-desc">A schematic map with setup effort on the horizontal axis and physics depth on the vertical axis. Room planners sit at low effort and no physics. Engineering simulators sit at high effort and deep physics. Consumer airflow apps sit in between. RoomShift aims for low effort with furnished-room physics.</desc>
+              <line x1="70" y1="460" x2="610" y2="460" class="map-axis" />
+              <line x1="70" y1="460" x2="70" y2="30" class="map-axis" />
+              <text x="610" y="492" text-anchor="end" class="axis-title">More setup effort</text>
+              <text x="70" y="492" class="axis-title">Less</text>
+              <text x="58" y="40" text-anchor="end" class="axis-title" transform="rotate(-90 58 40)">Deeper physics</text>
+              <g class="map-region" data-map-item>
+                <rect x="96" y="352" width="220" height="86" rx="43" />
+                <text x="206" y="390" text-anchor="middle" class="map-name">Room planners</text>
+                <text x="206" y="412" text-anchor="middle" class="map-eg">Fit and look, scans</text>
+              </g>
+              <g class="map-region" data-map-item>
+                <rect x="380" y="56" width="214" height="96" rx="48" />
+                <text x="487" y="98" text-anchor="middle" class="map-name">Engineering CFD</text>
+                <text x="487" y="120" text-anchor="middle" class="map-eg">Built for engineers</text>
+              </g>
+              <g class="map-region" data-map-item>
+                <rect x="250" y="206" width="236" height="86" rx="43" />
+                <text x="368" y="244" text-anchor="middle" class="map-name">Consumer airflow apps</text>
+                <text x="368" y="266" text-anchor="middle" class="map-eg">Ventilation advice, plans</text>
+              </g>
+              <g class="map-gap" data-map-item><rect x="86" y="44" width="250" height="160" rx="26" /><text x="100" y="70" class="map-gap-label">The gap: real physics, minutes of setup</text></g>
+              <g class="map-us" data-map-item>
+                <circle cx="168" cy="150" r="13" />
+                <text x="192" y="146" class="map-name">RoomShift</text>
+                <text x="192" y="168" class="map-eg">Furnished 3D room, browser</text>
+              </g>
+              <path d="M168 168 C168 240 176 300 190 340" class="map-arrow" data-map-item />
+            </svg>
+            <figcaption>A schematic of our own market scan, October 2026. Not measured, and not exhaustive.</figcaption>
+          </figure></div>
+        </div>
+      </section>
+
+      <section class="section" aria-label="Why now" style="padding: 0">
+        <div class="stats" data-reveal>
+          <div class="stat"><b>WebGPU</b><span>ships in mainstream browsers: 3D airflow runs in a tab</span></div>
+          <div class="stat"><b>LiDAR</b><span>in every Pro iPhone: a room scan takes a minute</span></div>
+          <div class="stat"><b>Vision AI</b><span>turns one photo into a furnished model</span></div>
+          <div class="stat"><b>$0</b><span>server cost per simulation: it runs on the customer’s device</span></div>
+        </div>
+      </section>
+
+      <section class="section wrap" aria-labelledby="gtm-title">
+        <div class="section-head"><p class="eyebrow">Go to market</p><h2 id="gtm-title" data-split>Getting to the first thousand rooms.</h2></div>
+        <div class="timeline" data-reveal>
+          <div style="--c: var(--wifi)"><p class="when">Late August</p><h3>Hall move-in</h3><p>Students move into rooms they’ve never seen with a desk, a bed and a fan. Hall associations and student groups reach them in one week; the hall template and AI scan get them set up in minutes.</p></div>
+          <div style="--c: var(--heat-c)"><p class="when">From May</p><h3>Cooling season</h3><p>People buy fans and portable AC units and wonder where they go. A “try it in your room first” link from electronics retailers and review sites costs them nothing, and shop-link import puts the exact product in the room.</p></div>
+          <div style="--c: var(--sound)"><p class="when">All year</p><h3>Designers as a channel</h3><p>Every report a designer sends a client is a RoomShift render in front of a homeowner.</p></div>
+        </div>
+      </section>
+
+      <section class="section wrap" aria-labelledby="road-title" style="padding-top: 0">
+        <div class="section-head"><p class="eyebrow">Roadmap</p><h2 id="road-title" data-split>What ships next.</h2></div>
+        <div class="bento" data-reveal>
+          <article class="card span-2" style="--c: var(--air)" data-glow><h3>Calibrated fans</h3><p>Anemometer bench readings tune the fan model until simulated and measured breezes agree.</p><span class="meta">Accuracy</span></article>
+          <article class="card span-2" style="--c: var(--wifi)" data-glow><h3>Whole-home plans</h3><p>Rooms from one floor plan linked into a flat, with WiFi and air flowing between them.</p><span class="meta">Multi-room</span></article>
+          <article class="card span-2" style="--c: var(--sound)" data-glow><h3>Live AR editing</h3><p>Move furniture in AR on your phone and see the lenses update in place.</p><span class="meta">AR</span></article>
+        </div>
+      </section>
+
+      <section class="section wrap" aria-labelledby="risk-title" style="padding-top: 0">
+        <div class="section-head"><p class="eyebrow">Risks</p><h2 id="risk-title" data-split>What could go wrong, and how we’ll find out early.</h2></div>
+        <div class="faq" data-reveal>
+          <details open><summary>“Is it accurate?”</summary><p>Every lens names its model and its limits on the Science page, and every number is labelled an estimate. Calibration against measured fans comes before any accuracy claim.</p></details>
+          <details><summary>People only need it once</summary><p>That’s the premise, not a bug. The Room Pass is priced for one weekend; repeat use comes from moving, buying and designers.</p></details>
+          <details><summary>Setup takes too long</summary><p>Photo, AI, LiDAR, floor-plan and shop-link capture are all in the product. The test we run: can someone rebuild their furnished bedroom in under five minutes?</p></details>
+          <details><summary>Willingness to pay is unknown</summary><p>First test: a priced checkout shown to renters who’ve just finished a free session.</p></details>
+        </div>
+      </section>
+
+      <section class="closing" aria-labelledby="closing-title">
+        <div class="wrap"><h2 id="closing-title">See the product behind the plan.</h2>
+          <div class="hero-actions"><a class="btn btn-primary" href="../">Open RoomShift <span class="arrow">→</span></a><a class="btn btn-ghost" href="./slides/">Watch the deck</a></div></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <span><span class="logo-mark" style="display:inline-block;vertical-align:-5px;margin-right:8px"></span>RoomShift · built at HacKU 2026 with Three.js, GSAP and Vite</span>
+        <nav aria-label="Footer"><a href="./">Product</a><a href="./science.html">Science</a><a href="./pricing.html">Pricing</a><a href="./vision.html">Vision</a><a href="./slides/">Deck</a><a href="https://github.com/Kixenon/RoomShift">GitHub</a></nav>
+      </div>
+    </footer>
+    <script type="module" src="./vision.js"></script>
+  </body>
+</html>

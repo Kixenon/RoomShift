@@ -3,108 +3,322 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4f6f3" />
-    <title>RoomShift — Room editor</title>
+    <title>RoomShift</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" />
     <link rel="stylesheet" href="/styles.css" />
+    <script>
+      // Apply the saved theme before first paint.
+      try { const t = localStorage.getItem('roomshift.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}
+    </script>
   </head>
-  <body>
-    <header class="topbar">
-      <a class="brand" href="#" aria-label="RoomShift">
-        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><path d="M4 8.5 14 3l10 5.5v11L14 25 4 19.5v-11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 15 3.2 3.2L19.5 11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        <span>roomshift<span class="brand-period">.</span></span>
-      </a>
-      <div class="scene-title"><span class="scene-dot"></span><span>Living room</span><span class="title-divider">/</span><span id="room-summary">5.2 × 4.0 × 2.7 m</span></div>
-      <button class="quiet-button" id="reset-scene" type="button" title="Reset room">Reset</button>
-    </header>
-
-    <main class="editor-layout">
-      <aside class="asset-rail" aria-label="Add objects">
-        <div class="rail-title">ADD</div>
-        <button class="asset-button" id="add-box" data-add-box type="button" aria-label="Add box" title="Add box">
-          <span class="asset-glyph">□</span><span>Box</span>
-        </button>
-        <button class="asset-button" id="add-window" type="button" aria-label="Add window" title="Add window">
-          <span class="asset-glyph">▣</span><span>Window</span>
-        </button>
+  <body data-lens="none">
+    <!-- ════════════ Files ════════════ -->
+    <div id="files" class="files" hidden>
+      <aside class="files-side">
+        <a class="logo" href="#/" aria-label="RoomShift"><span class="logo-mark"></span><span>RoomShift</span></a>
+        <div class="new-wrap">
+          <button class="btn primary new-button" type="button" data-action="new-menu"><span class="plus">+</span> New</button>
+          <div id="new-menu" class="menu" hidden></div>
+        </div>
+        <nav class="files-nav">
+          <button class="nav-item active" type="button" data-files-view="rooms"><span class="nav-icon">▦</span>My rooms</button>
+          <button class="nav-item" type="button" data-files-view="templates"><span class="nav-icon">◫</span>Templates</button>
+        </nav>
+        <div class="files-side-foot">
+          <a class="nav-item" href="/site/" target="_blank" rel="noopener"><span class="nav-icon">↗</span>About RoomShift</a>
+          <button class="nav-item" type="button" data-action="theme"><span class="nav-icon theme-icon">◐</span><span class="theme-label">Theme</span></button>
+          <p class="storage-note">Rooms are saved in this browser.</p>
+        </div>
       </aside>
+      <main class="files-main">
+        <header class="files-bar">
+          <label class="search"><span>⌕</span><input id="files-search" type="search" placeholder="Search rooms" aria-label="Search rooms" /></label>
+          <div class="files-bar-right">
+            <select id="files-sort" class="select" aria-label="Sort">
+              <option value="updated">Last modified</option>
+              <option value="name">Name</option>
+              <option value="area">Floor area</option>
+            </select>
+            <div class="segmented" role="group" aria-label="Layout">
+              <button type="button" data-files-layout="list" class="active" title="List">☰</button>
+              <button type="button" data-files-layout="grid" title="Grid">▦</button>
+            </div>
+            <button class="btn" type="button" data-action="import-project">Upload</button>
+          </div>
+        </header>
+        <div id="selection-bar" class="selection-bar" hidden>
+          <button class="icon-btn" type="button" data-action="clear-selection" aria-label="Clear selection">✕</button>
+          <span id="selection-count"></span>
+          <span class="spacer"></span>
+          <button class="btn ghost" type="button" data-action="open-selected">Open</button>
+          <button class="btn ghost" type="button" data-action="duplicate-selected">Duplicate</button>
+          <button class="btn ghost" type="button" data-action="export-selected">Download</button>
+          <button class="btn danger" type="button" data-action="delete-selected">Delete</button>
+        </div>
+        <section id="files-rooms" class="files-content"></section>
+        <section id="files-templates" class="files-content" hidden></section>
+      </main>
+    </div>
 
-      <section class="viewport-wrap" aria-label="3D room">
-        <div class="viewport-topline">
-          <div class="camera-controls">
-            <div class="view-toggle" role="group" aria-label="Camera view">
-            <button id="view-3d" class="view-button active" type="button" aria-pressed="true">3D</button>
-            <button id="view-top" class="view-button" type="button" aria-pressed="false">Top</button>
-            </div>
-            <div class="view-toggle" role="group" aria-label="Projection">
-              <button id="projection-perspective" class="view-button active" type="button" aria-pressed="true">Persp</button>
-              <button id="projection-orthographic" class="view-button" type="button" aria-pressed="false" title="Orthographic projection (O)">Ortho</button>
-            </div>
-          </div>
-          <div class="field-controls" role="group" aria-label="Simulation and lighting views">
-            <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false">Air</button>
-            <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false">Heat</button>
-            <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false">Light</button>
-            <span id="field-status" class="field-status" aria-live="polite"></span>
-          </div>
-          <div class="viewport-actions" role="group" aria-label="Object transform mode">
-            <button id="mode-move" class="tool-button active" type="button" title="Move selected object (G)" aria-label="Move selected object">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M10 2 7.5 4.5M10 2l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <button id="mode-rotate" class="tool-button" type="button" title="Rotate selected object (R)" aria-label="Rotate selected object">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8.2A6.2 6.2 0 1 0 16.1 12M16 4.5v4h-4" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <span class="tool-separator"></span>
-            <button id="view-home" class="tool-button" type="button" title="Frame room" aria-label="Frame room">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M17 8V3h-5M3 12v5h5m9-5v5h-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <span class="tool-separator"></span>
-            <div class="viewport-info">
-              <button id="show-shortcuts" class="tool-button info-button" type="button" aria-label="Show keyboard shortcuts" aria-expanded="false" aria-controls="shortcut-help" title="Keyboard shortcuts">i</button>
-              <section id="shortcut-help" class="shortcut-help" aria-label="Keyboard shortcuts" hidden>
-                <div class="shortcut-heading">Shortcuts</div>
-                <div><span>Undo</span><kbd>⌘ Z / Ctrl Z</kbd></div>
-                <div><span>Redo</span><kbd>⌘ ⇧ Z / Ctrl Y</kbd></div>
-                <div><span>Move / rotate</span><kbd>G / R</kbd></div>
-                <div><span>Orthographic</span><kbd>O</kbd></div>
-                <div><span>Delete selection</span><kbd>⌫ / Delete</kbd></div>
-                <p>Drag to orbit · scroll to zoom</p>
-              </section>
-            </div>
+    <!-- ════════════ Editor ════════════ -->
+    <div id="editor" class="editor" hidden>
+      <div id="viewport" class="viewport">
+        <div class="field-legend" id="field-legend" hidden aria-label="Lens legend">
+          <span id="field-legend-title" class="field-legend-title"></span>
+          <span id="field-gradient" class="field-gradient" aria-hidden="true"></span>
+          <span class="field-gradient-labels"><span id="field-legend-min"></span><span id="field-legend-max"></span></span>
+          <span id="field-status" class="field-status" aria-live="polite"></span>
+        </div>
+        <div id="probe" class="probe" hidden></div>
+        <div id="empty-hint" class="empty-hint" hidden>
+          <strong>Empty room</strong>
+          <span>Drag furniture up from the dock, or detect it from a photo.</span>
+        </div>
+        <div id="drop-ghost" class="drop-ghost" hidden></div>
+      </div>
+
+      <!-- top-left: document -->
+      <header class="island doc-island">
+        <a class="logo-btn" href="#/" title="All rooms" aria-label="All rooms"><span class="logo-mark"></span></a>
+        <input id="project-name" class="doc-name" aria-label="Room name" maxlength="60" />
+        <span id="save-status" class="save-dot" title="Saved"></span>
+        <span class="divider"></span>
+        <button class="icon-btn" id="undo-button" type="button" title="Undo ⌘Z" aria-label="Undo">↶</button>
+        <button class="icon-btn" id="redo-button" type="button" title="Redo ⌘⇧Z" aria-label="Redo">↷</button>
+        <div class="menu-wrap">
+          <button class="icon-btn" type="button" data-action="file-menu" title="File" aria-label="File menu">⋯</button>
+          <div id="file-menu" class="menu" hidden>
+            <button type="button" data-action="go-files">All rooms</button>
+            <button type="button" data-action="new-dialog">New room…</button>
+            <button type="button" data-action="duplicate-project">Make a copy</button>
+            <hr />
+            <button type="button" data-action="report">Room report (PDF)</button>
+            <button type="button" data-action="compare">Compare layouts</button>
+            <button type="button" data-action="ar-usdz">View in AR on iPhone</button>
+            <button type="button" data-action="ar-glb">Export 3D model (GLB)</button>
+            <hr />
+            <button type="button" data-action="export-project">Download room file <kbd>⌘E</kbd></button>
+            <button type="button" data-action="import-project">Upload room file…</button>
+            <hr />
+            <button type="button" id="reset-scene">Reset to template</button>
           </div>
         </div>
-        <div id="viewport" class="viewport">
-          <div class="field-legend" id="field-legend" hidden aria-label="Simulation map legend">
-            <span id="field-legend-title" class="field-legend-title"></span>
-            <span id="field-gradient" class="field-gradient" aria-hidden="true"></span>
-            <span class="field-gradient-labels"><span id="field-legend-min"></span><span id="field-legend-max"></span></span>
-          </div>
+      </header>
+
+      <!-- state chips -->
+      <div class="chips">
+        <button class="chip" type="button" data-sheet="room" title="Room size, shape and finishes"><span class="chip-k">Room</span><span id="room-summary" class="mono">5.2 × 4.0 × 2.7 m</span></button>
+        <button class="chip" type="button" data-sheet="site" title="Location, orientation and weather"><span class="chip-k">Site</span><span id="site-summary"></span></button>
+      </div>
+
+      <!-- top-center: lenses -->
+      <div class="lens-wrap">
+        <nav class="island lens-bar" role="group" aria-label="Analysis lenses">
+          <button id="show-airflow" class="lens" data-mode="airflow" type="button" aria-pressed="false" aria-label="Airflow lens" title="Airflow · 1"><i>≋</i><span>Air</span></button>
+          <button id="show-temperature" class="lens" data-mode="temperature" type="button" aria-pressed="false" aria-label="Heat lens" title="Heat · 2"><i>♨</i><span>Heat</span></button>
+          <button id="show-light" class="lens" data-mode="light" type="button" aria-pressed="false" aria-label="Light lens" title="Light & sun · 3"><i>☀</i><span>Light</span></button>
+          <button id="show-wifi" class="lens" data-mode="wifi" type="button" aria-pressed="false" aria-label="WiFi lens" title="WiFi · 4"><i>⌔</i><span>WiFi</span></button>
+          <button id="show-sound" class="lens" data-mode="sound" type="button" aria-pressed="false" aria-label="Sound lens" title="Sound · 5"><i>♪</i><span>Sound</span></button>
+          <button id="lens-clear" class="lens clear" type="button" title="Clear · 0" hidden><span>Clear</span></button>
+        </nav>
+        <p id="narrator" class="narrator" aria-live="polite"></p>
+      </div>
+
+      <!-- top-right -->
+      <div class="top-right">
+        <button class="island orb" id="score-orb" type="button" data-sheet="insights" title="Livability — open insights">
+          <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="16" class="orb-track" /><circle cx="20" cy="20" r="16" class="orb-value" id="orb-value" /></svg>
+          <span id="orb-score" class="mono">–</span>
+        </button>
+        <div class="island tool-island">
+          <button class="text-btn share-btn" type="button" data-action="report" title="Printable room report">Report</button>
+          <button class="icon-btn" type="button" data-action="palette" title="Search everything ⌘K" aria-label="Command palette">⌕</button>
+          <button class="icon-btn" type="button" data-action="theme" title="Theme" aria-label="Toggle theme"><span class="theme-icon">◐</span></button>
+          <button class="icon-btn" id="show-shortcuts" type="button" title="Shortcuts ?" aria-label="Keyboard shortcuts" aria-controls="shortcut-help">?</button>
         </div>
+      </div>
+
+      <!-- left: outline -->
+      <aside id="outline" class="island outline" aria-label="Objects in the room">
+        <div class="outline-head">
+          <span class="label">In this room</span><span id="object-count" class="count mono"></span>
+          <button class="icon-btn small" type="button" data-action="toggle-outline" title="Collapse" aria-label="Collapse list">‹</button>
+        </div>
+        <div id="object-list" class="object-list"></div>
+      </aside>
+      <button id="outline-tab" class="island outline-tab" type="button" data-action="toggle-outline" hidden title="Show objects">☰</button>
+
+      <!-- bottom-right: camera -->
+      <div class="island view-island">
+        <button id="mode-move" class="icon-btn active" type="button" title="Move · G" aria-label="Move selected object">✥</button>
+        <button id="mode-rotate" class="icon-btn" type="button" title="Rotate · R" aria-label="Rotate selected object">⟳</button>
+        <span class="divider"></span>
+        <button id="view-3d" class="text-btn active" type="button" aria-pressed="true" title="3D · V">3D</button>
+        <button id="view-top" class="text-btn" type="button" aria-pressed="false" title="Top · T">Top</button>
+        <button id="projection-perspective" class="text-btn active" type="button" aria-pressed="true" hidden>Persp</button>
+        <button id="projection-orthographic" class="text-btn" type="button" aria-pressed="false" title="Orthographic · O">Ortho</button>
+        <span class="divider"></span>
+        <button id="view-home" class="icon-btn" type="button" title="Frame room · F" aria-label="Frame room">⛶</button>
+      </div>
+
+      <!-- bottom: dock -->
+      <div id="dock" class="island dock">
+        <div id="dock-tabs" class="dock-tabs" role="tablist"></div>
+        <div id="dock-items" class="dock-items"></div>
+      </div>
+      <button id="add-box" data-add-box type="button" hidden>Box</button>
+      <button id="add-window" type="button" hidden>Window</button>
+
+      <!-- sun -->
+      <div id="sun-dock" class="island sun-dock" hidden>
+        <button id="sun-play" class="icon-btn" type="button" aria-label="Play the day" title="Play the day · Space">▶</button>
+        <span id="sun-time" class="mono">15:00</span>
+        <input id="sun-hour" type="range" min="5" max="20" step="0.25" value="15" aria-label="Time of day" />
+        <span id="sun-info" class="sun-info"></span>
+      </div>
+
+      <!-- floating object card -->
+      <section id="inspector-card" class="island card" hidden aria-label="Selected object">
+        <header class="card-head">
+          <span id="card-icon" class="card-icon"></span>
+          <div class="card-title"><span id="card-type" class="card-type"></span></div>
+          <button id="lock-object" class="icon-btn small" type="button" title="Lock · K" aria-label="Lock">🔓</button>
+          <button id="duplicate-object" class="icon-btn small" type="button" title="Duplicate · ⌘D" aria-label="Duplicate">⧉</button>
+          <button id="delete-object" class="icon-btn small danger" type="button" title="Delete · ⌫" aria-label="Delete selected object">🗑</button>
+          <button class="icon-btn small" type="button" data-action="deselect" title="Close · Esc" aria-label="Deselect">✕</button>
+        </header>
+        <div id="object-properties" class="card-body"></div>
       </section>
 
-      <aside class="inspector" aria-label="Room and object properties">
-        <section class="inspector-section room-section">
-          <div class="section-heading"><span>Room</span></div>
-          <div class="dimension-fields">
-            <label class="field"><span>W</span><input id="room-width" aria-label="Room width in meters" type="number" min="2" max="20" step="0.1" value="5.2" /></label>
-            <label class="field"><span>D</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
-            <label class="field"><span>H</span><input id="room-height" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" value="2.7" /></label>
+      <!-- right sheet -->
+      <aside id="sheet" class="island sheet" hidden>
+        <header class="sheet-head">
+          <div class="segmented sheet-tabs" role="tablist">
+            <button type="button" data-sheet="insights">Insights</button>
+            <button type="button" data-sheet="room">Room</button>
+            <button type="button" data-sheet="site">Site</button>
           </div>
-          <div class="unit-note">m</div>
-        </section>
-
-        <section class="inspector-section object-list-section">
-          <div class="section-heading"><span>Objects</span></div>
-          <div id="object-list" class="object-list"></div>
-        </section>
-
-        <section class="inspector-section properties-section" id="properties-section">
-          <div class="section-heading"><span>Selection</span><button id="delete-object" class="delete-button" type="button" aria-label="Delete selected object" title="Delete selected object" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11m-9.5 0 .6 10h7.8l.6-10M8 6V4h4v2m-3 3v4m2-4v4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
-          <div id="object-properties" class="empty-properties">Select an object</div>
-        </section>
+          <button class="icon-btn small" type="button" data-action="close-sheet" aria-label="Close panel">✕</button>
+        </header>
+        <div class="sheet-panel" data-panel="insights">
+          <div id="layout-report" class="layout-report"></div>
+          <button class="btn primary wide" type="button" data-action="suggest-layout">Suggest a better layout</button>
+          <h3 id="mode-insight-title" class="sheet-h">Lens</h3>
+          <div id="mode-insights" class="mode-insights"></div>
+        </div>
+        <div class="sheet-panel" data-panel="room" hidden>
+          <h3 class="sheet-h">Size · metres <span class="hint">or drag the blue handles</span></h3>
+          <div class="field-row three">
+            <label class="field"><span>W</span><input id="room-width" class="mono" aria-label="Room width in meters" type="number" min="2" max="20" step="0.1" /></label>
+            <label class="field"><span>D</span><input id="room-depth" class="mono" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" /></label>
+            <label class="field"><span>H</span><input id="room-height" class="mono" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" /></label>
+          </div>
+          <h3 class="sheet-h">Shape</h3>
+          <div id="shape-picker" class="shape-picker"></div>
+          <div id="shape-params" class="field-row"></div>
+          <h3 class="sheet-h">Finishes</h3>
+          <label class="field-v"><span>Floor</span><select id="floor-material" class="select"></select></label>
+          <label class="field-v"><span>Walls</span><select id="wall-material" class="select"></select></label>
+          <p class="note">Finishes change echo (sound), bounce light (light) and nothing else.</p>
+        </div>
+        <div class="sheet-panel" data-panel="site" hidden>
+          <h3 class="sheet-h">Where &amp; which way</h3>
+          <label class="field-v"><span>City</span><select id="env-city" class="select"></select></label>
+          <label class="field-v"><span>Back wall faces</span><select id="env-bearing" class="select"></select></label>
+          <div id="compass" class="compass" aria-hidden="true"></div>
+          <div class="field-row two">
+            <label class="field"><span>Month</span><input id="env-month" class="mono" type="number" min="1" max="12" /></label>
+            <label class="field"><span>Day</span><input id="env-day" class="mono" type="number" min="1" max="31" /></label>
+          </div>
+          <label class="field-v"><span>People usually in the room</span><input id="env-people" class="input mono" type="number" min="0" max="12" step="1" /></label>
+          <h3 class="sheet-h">Weather now <button class="link-btn" id="weather-refresh" type="button">Fetch</button></h3>
+          <div id="weather" class="weather"><span class="muted">Live outdoor conditions from Open-Meteo. Nothing about you is sent.</span></div>
+          <label class="field-v"><span>Baseline indoor °C</span><input id="env-baseline" class="input mono" type="number" min="0" max="40" step="0.5" /></label>
+          <p class="note">Air &amp; heat relax toward this temperature. Use the outdoor value for an unconditioned room.</p>
+        </div>
       </aside>
-    </main>
 
-    <script type="module" src="/src/app.js"></script>
+      <div id="context-menu" class="menu context" hidden></div>
+    </div>
+
+    <!-- ════════════ Overlays ════════════ -->
+    <div id="palette" class="palette-backdrop" hidden>
+      <div class="palette" role="dialog" aria-label="Command palette">
+        <input id="palette-input" class="palette-input" placeholder="Search, or add at a size: “sofa 210x90x80”" autocomplete="off" />
+        <div id="palette-list" class="palette-list" role="listbox"></div>
+        <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> run</span><span><kbd>esc</kbd> close</span></div>
+      </div>
+    </div>
+
+    <dialog id="new-dialog" class="dialog">
+      <form method="dialog" class="dialog-body">
+        <h2>New room</h2>
+        <label class="field-v"><span>Name</span><input id="new-name" class="input" placeholder="My hall room" maxlength="60" /></label>
+        <div id="new-templates" class="template-pick"></div>
+        <div class="dialog-actions"><button class="btn ghost" value="cancel">Cancel</button><button class="btn primary" value="create">Create</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="furniture-dialog" class="dialog wide">
+      <div class="dialog-body">
+        <h2>Furniture from a photo</h2>
+        <p class="muted">Runs on your device. The photo is never uploaded. Works for a whole room or a single item.</p>
+        <label class="drop-zone" id="furniture-drop"><input id="furniture-file" type="file" accept="image/*" hidden /><span>Drop a photo or <u>choose a file</u></span></label>
+        <div id="furniture-preview" class="furniture-preview"></div>
+        <div id="furniture-results" class="furniture-results"></div>
+        <div class="dialog-actions"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="furniture-add" disabled>Add to room</button></div>
+      </div>
+    </dialog>
+
+    <dialog id="suggest-dialog" class="dialog">
+      <div class="dialog-body">
+        <h2>Suggested layout</h2>
+        <div id="suggest-body"></div>
+        <div class="dialog-actions"><button class="btn ghost" type="button" data-close>Keep mine</button><button class="btn ghost" type="button" id="suggest-again">Try another</button><button class="btn primary" type="button" id="suggest-apply" disabled>Apply</button></div>
+      </div>
+    </dialog>
+
+    <dialog id="shortcut-help" class="dialog wide">
+      <div class="dialog-body">
+        <h2>Keyboard</h2>
+        <div class="shortcut-columns">
+          <div>
+            <h4>Anywhere</h4>
+            <div><span>Search everything</span><kbd>⌘K</kbd></div>
+            <div><span>Undo / redo</span><kbd>⌘Z</kbd> <kbd>⌘⇧Z</kbd></div>
+            <div><span>Download room</span><kbd>⌘E</kbd></div>
+            <div><span>Insights</span><kbd>I</kbd></div>
+            <div><span>Add something</span><kbd>A</kbd></div>
+            <h4>Lenses &amp; view</h4>
+            <div><span>Air · Heat · Light · WiFi · Sound</span><kbd>1–5</kbd></div>
+            <div><span>Clear lens</span><kbd>0</kbd></div>
+            <div><span>3D / top</span><kbd>V</kbd> <kbd>T</kbd></div>
+            <div><span>Orthographic</span><kbd>O</kbd></div>
+            <div><span>Frame room</span><kbd>F</kbd></div>
+          </div>
+          <div>
+            <h4>Selected object</h4>
+            <div><span>Next / previous</span><kbd>Tab</kbd> <kbd>⇧Tab</kbd></div>
+            <div><span>Nudge 5 cm (⇧ 50 cm)</span><kbd>← ↑ → ↓</kbd></div>
+            <div><span>Rotate 15° (⇧ 90°)</span><kbd>[</kbd> <kbd>]</kbd></div>
+            <div><span>Move / rotate gizmo</span><kbd>G</kbd> <kbd>R</kbd></div>
+            <div><span>Duplicate</span><kbd>⌘D</kbd></div>
+            <div><span>Lock</span><kbd>K</kbd></div>
+            <div><span>Open / close door or window</span><kbd>Space</kbd></div>
+            <div><span>Delete</span><kbd>⌫</kbd></div>
+            <div><span>Deselect</span><kbd>Esc</kbd></div>
+            <p class="muted">Drag to orbit · right-click for actions · double-click a door to open it</p>
+          </div>
+        </div>
+        <div class="dialog-actions"><button class="btn primary" type="button" data-close>Done</button></div>
+      </div>
+    </dialog>
+
+    <input id="import-file" type="file" accept=".json,application/json" multiple hidden />
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>

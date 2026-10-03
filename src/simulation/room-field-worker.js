@@ -13,14 +13,14 @@ self.addEventListener('message', (event) => {
   void solve(message);
 });
 
-async function solve({ requestId, mode, scene }) {
+async function solve({ requestId, mode, scene, options = {} }) {
   active.add(requestId);
   try {
     if (!['airflow', 'temperature'].includes(mode)) {
       throw new RangeError(`Unsupported room field mode: ${mode}`);
     }
-    let result = await simulateRoomFieldsWebGpu(scene, { isCancelled: () => cancelled.has(requestId) });
-    if (!result && !cancelled.has(requestId)) result = simulateRoomFields(scene);
+    let result = await simulateRoomFieldsWebGpu(scene, { ...options, isCancelled: () => cancelled.has(requestId) });
+    if (!result && !cancelled.has(requestId)) result = simulateRoomFields(scene, options);
     if (cancelled.has(requestId)) {
       self.postMessage({ requestId, cancelled: true });
       return;

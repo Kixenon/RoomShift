@@ -281,6 +281,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'Home') go(0);
   else if (key === 'End') go(slides.length - 1);
   else if (key === 'o' || key === 'O' || (key === 'Escape' && overview)) toggleOverview();
+  else if (key === 'Escape' && !document.fullscreenElement) window.location.href = '../';
   else if (key === 'n' || key === 'N') toggleNotes();
   else if (key === 'f' || key === 'F') toggleFullscreen();
   else if (key === 'l' || key === 'L') loadDemo();

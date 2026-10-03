@@ -2,6 +2,7 @@ import { initMotion, initHeader, stretchIn, ScrollTrigger } from './motion.js';
 import { renderHeatmap, renderJetCheck, runs, jet, benchDefaults } from './charts.js';
 
 initHeader();
+document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => document.querySelector('.site-nav').classList.toggle('is-open'));
 stretchIn(document.querySelector('[data-stretch]'), { delay: 0.1 });
 
 const heat = renderHeatmap(document.querySelector('[data-heatmap]'));

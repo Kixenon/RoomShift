@@ -79,10 +79,10 @@ function createFieldTexture(result, mode) {
   const voxelCount = grid.nx * grid.ny * grid.nz;
   const data = new Uint8Array(voxelCount * 4);
   for (let index = 0; index < voxelCount; index += 1) {
-    const value = mode === 'airflow'
+    const normalized = fields.signal ? fields.signal[index] : normalizeScalar(result, mode, mode === 'airflow'
       ? Math.hypot(fields.u[index], fields.v[index], fields.w[index])
-      : mode === 'temperature' ? fields.temperature[index] : fields.light[index];
-    data[index * 4] = Math.round(normalizeScalar(result, mode, value) * 255);
+      : mode === 'temperature' ? fields.temperature[index] : fields.light[index]);
+    data[index * 4] = Math.round(normalized * 255);
     data[index * 4 + 1] = fields.solid?.[index] ? 255 : 0;
   }
 
@@ -112,7 +112,17 @@ export function createFieldVolume(result, mode) {
       uVolumeSize: { value: new THREE.Vector3(grid.width, grid.height, grid.depth) },
       uStepLength: { value: stepLength },
       uOpacity: { value: mode === 'airflow' ? 1.2 : 1.55 },
-      uFieldMode: { value: mode === 'airflow' ? 0 : mode === 'temperature' ? 1 : 2 },
+      uFieldMode: { value: { airflow: 0, temperature: 1, light: 2, wifi: 3, sound: 4, lux: 5 }[mode] ?? 2 },
+      uTime: { value: 0 },
+      uSources: { value: Array.from({ length: 4 }, (_, index) => {
+        const source = result.sources?.[index];
+        return source ? new THREE.Vector3(source.x - grid.width / 2, source.y - grid.height / 2, source.z - grid.depth / 2) : new THREE.Vector3();
+      }) },
+      uSourceCount: { value: Math.min(4, result.sources?.length ?? 0) },
+      // Visual wavelength (m) and phase speed: sound uses a real 500 Hz wavelength
+      // (0.69 m) slowed down; WiFi's 6 cm wave is drawn at 0.3 m to stay visible.
+      uWaveNumber: { value: mode === 'sound' ? 2 * Math.PI / 0.69 : 2 * Math.PI / 0.3 },
+      uWaveSpeed: { value: mode === 'sound' ? 4.5 : 9 },
     },
     side: THREE.DoubleSide,
     transparent: true,
@@ -138,11 +148,43 @@ export function createFieldVolume(result, mode) {
       uniform float uStepLength;
       uniform float uOpacity;
       uniform int uFieldMode;
+      uniform float uTime;
+      uniform vec3 uSources[4];
+      uniform int uSourceCount;
+      uniform float uWaveNumber;
+      uniform float uWaveSpeed;
       varying vec3 vLocalPosition;
       varying vec3 vRayOrigin;
       out vec4 fragColor;
 
       vec3 palette(float value) {
+        if (uFieldMode == 5) {
+          vec3 dim = vec3(0.16, 0.12, 0.3);
+          vec3 warm = vec3(0.95, 0.55, 0.22);
+          vec3 bright = vec3(1.0, 0.86, 0.5);
+          vec3 sun = vec3(1.0, 0.98, 0.9);
+          if (value < 0.35) return mix(dim, warm, value / 0.35);
+          if (value < 0.75) return mix(warm, bright, (value - 0.35) / 0.4);
+          return mix(bright, sun, (value - 0.75) / 0.25);
+        }
+        if (uFieldMode == 3) {
+          vec3 weak = vec3(0.86, 0.29, 0.25);
+          vec3 fair = vec3(0.95, 0.66, 0.26);
+          vec3 good = vec3(0.45, 0.82, 0.48);
+          vec3 strong = vec3(0.1, 0.62, 0.95);
+          if (value < 0.33) return mix(weak, fair, value / 0.33);
+          if (value < 0.66) return mix(fair, good, (value - 0.33) / 0.33);
+          return mix(good, strong, (value - 0.66) / 0.34);
+        }
+        if (uFieldMode == 4) {
+          vec3 quiet = vec3(0.16, 0.2, 0.5);
+          vec3 mid = vec3(0.62, 0.32, 0.72);
+          vec3 loud = vec3(1.0, 0.55, 0.3);
+          vec3 peak = vec3(1.0, 0.92, 0.62);
+          if (value < 0.4) return mix(quiet, mid, value / 0.4);
+          if (value < 0.8) return mix(mid, loud, (value - 0.4) / 0.4);
+          return mix(loud, peak, (value - 0.8) / 0.2);
+        }
         if (uFieldMode == 1) {
           vec3 cold = vec3(0.015, 0.035, 0.22);
           vec3 cyan = vec3(0.0, 0.65, 1.0);
@@ -211,10 +253,29 @@ export function createFieldVolume(result, mode) {
           vec4 field = texture(uField, textureCoordinate);
           float density = smoothstep(0.035, 0.72, field.r);
           if (uFieldMode == 1) { density = pow(density, 0.7); }
+          vec3 color = palette(field.r);
+          if (uFieldMode == 5) {
+            // Light: a soft glow that thickens only where it is bright.
+            density = pow(field.r, 4.0) * 0.9;
+          } else if (uFieldMode >= 3) {
+            // Expanding spherical wavefronts from each source. Their brightness is
+            // the local field strength, so they fade with distance and in the
+            // shadow of absorbing or blocking furniture.
+            float wave = 0.0;
+            for (int s = 0; s < 4; s++) {
+              if (s >= uSourceCount) break;
+              float d = length(point - uSources[s]);
+              wave += pow(0.5 + 0.5 * sin(d * uWaveNumber - uTime * uWaveSpeed), 28.0) * smoothstep(0.05, 0.3, d);
+            }
+            float strength = field.r;
+            // A faint body shows the level; bright thin shells are the travelling waves.
+            density = 0.015 + strength * strength * 0.09 + wave * strength * 1.9;
+            color = mix(color, vec3(1.0), wave * strength * 0.35);
+          }
           density *= 1.0 - step(0.5, field.g);
           float alpha = 1.0 - exp(-density * 2.35 * stepLength * uOpacity);
           float contribution = (1.0 - accumulated.a) * alpha;
-          accumulated.rgb += palette(field.r) * contribution;
+          accumulated.rgb += color * contribution;
           accumulated.a += contribution;
           if (accumulated.a > 0.985) break;
         }
@@ -366,7 +427,7 @@ function createStreamlineMaterial() {
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
     toneMapped: false,
-    uniforms: { uTime: { value: 0 }, uOpacity: { value: 0.9 } },
+    uniforms: { uTime: { value: 0 }, uOpacity: { value: 0.45 } },
     vertexShader: `
       attribute float aProgress;
       attribute float aSpeed;
@@ -403,52 +464,128 @@ function samplePath(path, progress, target) {
   return target.copy(path[index].position).lerp(path[index + 1].position, scaled - index);
 }
 
-function createTracerLayer(paths) {
-  const particles = [];
-  for (const path of paths) {
-    if (path.length < 2) continue;
-    for (let index = 0; index < 2; index += 1) {
-      particles.push({ path, phase: index * 0.5 });
+// Particles advected through the solved velocity field in real time. They are
+// emitted where the air moves fastest (fan and AC jets, window inflow), travel at
+// the simulated speed, and fade as the flow slows, so direction and dissipation
+// read directly. Positions are kept in grid space and offset to the room centre.
+function createParticleLayer(result, count = 1600) {
+  const { grid, fields, stats } = result;
+  const maximumSpeed = Math.max(stats.maxSpeed, 0.001);
+  const candidates = [];
+  const weights = [];
+  let total = 0;
+  for (let j = 0; j < grid.ny; j += 1) {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        const index = indexOf(i, j, k, grid);
+        if (fields.solid[index]) continue;
+        const speed = Math.hypot(fields.u[index], fields.v[index], fields.w[index]) / maximumSpeed;
+        if (speed < 0.12) continue;
+        total += speed ** 3;
+        candidates.push(i, j, k);
+        weights.push(total);
+      }
     }
   }
-  if (particles.length === 0) return null;
-  const positions = new Float32Array(particles.length * 3);
-  const lifeValues = new Float32Array(particles.length);
+  if (!weights.length) return null;
+  const positions = new Float32Array(count * 3);
+  const grid3 = new Float32Array(count * 3);
+  const alpha = new Float32Array(count);
+  const speedValues = new Float32Array(count);
+  const age = new Float32Array(count);
+  const life = new Float32Array(count);
+  let seed = 12345;
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const spawn = (index) => {
+    const target = random() * total;
+    let lo = 0;
+    let hi = weights.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (weights[mid] < target) lo = mid + 1;
+      else hi = mid;
+    }
+    grid3[index * 3] = (candidates[lo * 3] + random()) * grid.dx;
+    grid3[index * 3 + 1] = (candidates[lo * 3 + 1] + random()) * grid.dy;
+    grid3[index * 3 + 2] = (candidates[lo * 3 + 2] + random()) * grid.dz;
+    age[index] = 0;
+    life[index] = 2.5 + random() * 3.5;
+  };
+  for (let index = 0; index < count; index += 1) {
+    spawn(index);
+    age[index] = random() * life[index];
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('aLife', new THREE.BufferAttribute(lifeValues, 1));
+  geometry.setAttribute('aLife', new THREE.BufferAttribute(alpha, 1));
+  geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speedValues, 1));
   const material = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     depthTest: true,
-    blending: THREE.NormalBlending,
     toneMapped: false,
-    uniforms: { uSize: { value: 9 } },
+    uniforms: { uSize: { value: 26 } },
     vertexShader: `
       uniform float uSize;
       attribute float aLife;
+      attribute float aSpeed;
       varying float vLife;
+      varying float vSpeed;
       void main() {
         vLife = aLife;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = uSize;
+        vSpeed = aSpeed;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        gl_PointSize = clamp(uSize * (0.55 + aSpeed * 0.6) / max(0.5, -mvPosition.z), 1.5, 14.0);
       }
     `,
     fragmentShader: `
       varying float vLife;
+      varying float vSpeed;
       void main() {
         float radius = length(gl_PointCoord - vec2(0.5));
-        float alpha = (1.0 - smoothstep(0.18, 0.5, radius)) * vLife;
+        float alpha = (1.0 - smoothstep(0.15, 0.5, radius)) * vLife;
         if (alpha < 0.02) discard;
-        gl_FragColor = vec4(0.06, 0.58, 0.82, alpha);
+        vec3 slow = vec3(0.16, 0.48, 0.86);
+        vec3 fast = vec3(0.98, 0.42, 0.18);
+        gl_FragColor = vec4(mix(slow, fast, clamp(vSpeed, 0.0, 1.0)), alpha);
       }
     `,
   });
   const layer = new THREE.Points(geometry, material);
   layer.name = 'airflow-tracers';
-  layer.userData.particles = particles;
   layer.renderOrder = 3;
   layer.frustumCulled = false;
+  const point = new THREE.Vector3();
+  let lastTime = null;
+  layer.userData.step = (time) => {
+    const dt = lastTime === null ? 0.016 : clamp(time - lastTime, 0, 0.05);
+    lastTime = time;
+    for (let index = 0; index < count; index += 1) {
+      point.set(grid3[index * 3], grid3[index * 3 + 1], grid3[index * 3 + 2]);
+      const velocity = sampleVelocity(result, point);
+      const speed = velocity.length() / maximumSpeed;
+      grid3[index * 3] += velocity.x * dt;
+      grid3[index * 3 + 1] += velocity.y * dt;
+      grid3[index * 3 + 2] += velocity.z * dt;
+      // Slow air ages faster: particles visibly die out where the jet dissipates.
+      age[index] += dt * (1 + 2.5 * (1 - Math.min(1, speed * 4)));
+      point.set(grid3[index * 3], grid3[index * 3 + 1], grid3[index * 3 + 2]);
+      if (age[index] > life[index] || speed < 0.01 || !isFluidPoint(point, grid, fields.solid)) spawn(index);
+      const t = age[index] / life[index];
+      alpha[index] = smoothstep01(t / 0.12) * (1 - smoothstep01((t - 0.6) / 0.4)) * Math.min(1, 0.35 + speed * 2.2) * 0.9;
+      speedValues[index] = speed;
+      positions[index * 3] = grid3[index * 3] - grid.width / 2;
+      positions[index * 3 + 1] = grid3[index * 3 + 1];
+      positions[index * 3 + 2] = grid3[index * 3 + 2] - grid.depth / 2;
+    }
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.aLife.needsUpdate = true;
+    geometry.attributes.aSpeed.needsUpdate = true;
+  };
   return layer;
 }
 
@@ -467,24 +604,10 @@ export function createAirflowLayers(result) {
     streamlines.name = 'airflow-streamlines';
     streamlines.renderOrder = 2;
   }
-  const tracers = createTracerLayer(paths);
-  const particlePosition = new THREE.Vector3();
+  const tracers = createParticleLayer(result);
   const update = (time) => {
     if (streamlines) streamlines.material.uniforms.uTime.value = time;
-    if (!tracers) return;
-    const positions = tracers.geometry.attributes.position;
-    const lifeValues = tracers.geometry.attributes.aLife;
-    const particlePaths = tracers.userData.particles;
-    const progress = ((time * 0.24) % 1 + 1) % 1;
-    for (let index = 0; index < particlePaths.length; index += 1) {
-      const particle = particlePaths[index];
-      const phase = (progress + particle.phase) % 1;
-      samplePath(particle.path, phase, particlePosition);
-      positions.setXYZ(index, particlePosition.x, particlePosition.y, particlePosition.z);
-      lifeValues.setX(index, smoothstep01(phase / 0.12) * (1 - smoothstep01((phase - 0.82) / 0.18)));
-    }
-    positions.needsUpdate = true;
-    lifeValues.needsUpdate = true;
+    tracers?.userData.step(time);
   };
   update(0);
   return { streamlines, tracers, update };

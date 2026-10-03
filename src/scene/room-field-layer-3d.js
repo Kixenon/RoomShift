@@ -20,13 +20,14 @@ function validateResult(result, mode) {
     || (mode === 'airflow' && fields.solid?.length !== cellCount)
     || (mode === 'airflow' && [fields.u, fields.v, fields.w].some((field) => field?.length !== cellCount))
     || (mode === 'temperature' && fields.temperature?.length !== cellCount)
-    || (mode === 'light' && fields.light?.length !== cellCount)) {
+    || (mode === 'light' && fields.light?.length !== cellCount)
+    || (['wifi', 'sound', 'lux'].includes(mode) && fields.signal?.length !== cellCount)) {
     throw new TypeError('Room fields must contain complete 3D arrays matching the grid dimensions.');
   }
 }
 
 export function createRoomFieldLayer(result, mode) {
-  if (!['airflow', 'temperature', 'light'].includes(mode)) {
+  if (!['airflow', 'temperature', 'light', 'wifi', 'sound', 'lux'].includes(mode)) {
     throw new RangeError(`Unsupported room field mode: ${mode}`);
   }
   validateResult(result, mode);
@@ -42,6 +43,8 @@ export function createRoomFieldLayer(result, mode) {
     if (airflow.tracers) layer.add(airflow.tracers);
     layer.userData.streamlineVertexCount = airflow.streamlines?.geometry.getAttribute('position').count ?? 0;
     layer.userData.animate = airflow.update;
+  } else if (mode === 'wifi' || mode === 'sound') {
+    layer.userData.animate = (time) => { volume.material.uniforms.uTime.value = time; };
   }
   return layer;
 }

@@ -1,4 +1,4 @@
-import { rotatedHalfExtents, rotationMatrixXYZ } from '../model/room-scene.js';
+import { floorContains, rotatedHalfExtents, rotationMatrixXYZ, sourceScale } from '../model/room-scene.js';
 
 const LIMITS = Object.freeze({
   roomMin: 2,
@@ -149,6 +149,15 @@ function inverseRotate(x, y, z, matrix) {
 
 export function buildSolidMask(scene, grid) {
   const solid = new Uint8Array(grid.nx * grid.ny * grid.nz);
+  // Cells outside an L-shaped or rounded floor are solid wall.
+  if (scene.room.shape && scene.room.shape.type !== 'rect') {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        if (floorContains(scene.room, (i + 0.5) * grid.dx, (k + 0.5) * grid.dz)) continue;
+        for (let j = 0; j < grid.ny; j += 1) solid[indexOf(i, j, k, grid)] = 1;
+      }
+    }
+  }
   for (const object of scene.objects) {
     if (object.model === 'fan' || object.model === 'window') continue;
     const [halfWidth, halfHeight, halfDepth] = rotatedHalfExtents(object.dimensions, object.rotation);
@@ -349,7 +358,7 @@ function applyFanForces(u, v, w, fans, grid, solid, timeStep, settings) {
           const beam = Math.exp(-lateralSquared / (2 * spread ** 2))
             * Math.exp(-Math.max(0, forward) / settings.fanRange)
             * upstreamFade;
-          const magnitude = settings.fanAcceleration * beam * timeStep;
+          const magnitude = settings.fanAcceleration * sourceScale(fan) * beam * timeStep;
           u[index] += direction[0] * magnitude;
           v[index] += direction[1] * magnitude;
           w[index] += direction[2] * magnitude;
@@ -465,7 +474,7 @@ function addHeatSources(temperature, heaters, grid, solid, settings, timeStep) {
           const position = cellPosition(i, j, k, grid);
           const distanceSquared = (position.x - heater.position.x) ** 2
             + (position.y - centerY) ** 2 + (position.z - heater.position.z) ** 2;
-          temperature[index] += settings.heaterRate * Math.exp(-distanceSquared / radiusSquared) * timeStep;
+          temperature[index] += settings.heaterRate * sourceScale(heater) * Math.exp(-distanceSquared / radiusSquared) * timeStep;
         }
       }
     }

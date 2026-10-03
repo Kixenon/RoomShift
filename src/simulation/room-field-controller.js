@@ -8,6 +8,7 @@ export class RoomFieldController {
     this.onState = onState;
     this.debounceMs = debounceMs;
     this.scene = null;
+    this.options = {};
     this.mode = null;
     this.latestRequestId = 0;
     this.inFlight = null;
@@ -22,6 +23,11 @@ export class RoomFieldController {
   setScene(scene) {
     this.scene = scene;
     if (this.mode && this.mode !== 'light') this.scheduleUpdate();
+  }
+
+  // Solver settings such as the baseline temperature; applied on the next solve.
+  setOptions(options) {
+    this.options = { ...options };
   }
 
   setMode(mode) {
@@ -58,6 +64,7 @@ export class RoomFieldController {
       requestId: this.latestRequestId,
       mode: this.mode,
       scene: this.scene,
+      options: this.options,
     };
     this.viewport.clearFields();
     this.onState({ mode: this.mode, loading: true, result: null, error: null });

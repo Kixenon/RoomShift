@@ -1,7 +1,4 @@
-import { initMotion, initHeader, stretchIn, gsap, ScrollTrigger } from './motion.js';
-
-// Bundled URLs for every layout render, so swapped sources survive hashing in the build.
-const layoutImages = import.meta.glob('./img/layout-*.webp', { eager: true, query: '?url', import: 'default' });
+import { initMotion, initHeader, stretchIn, gsap } from './motion.js';
 
 // Frames of a real camera orbit around the solved room, for the scroll-scrubbed section.
 const scrubFrames = Object.entries(import.meta.glob('./media/seq/air/*.webp', { eager: true, query: '?url', import: 'default' }))
@@ -80,91 +77,23 @@ function initSwipe(root) {
   Promise.all(images.map((image) => image.decode().catch(() => {}))).then(begin);
 }
 
-// Room / Air / Heat / Light tabs.
-function initLayerTabs(root) {
-  const tabs = [...root.querySelectorAll('[role="tab"]')];
-  const panel = root.querySelector('[role="tabpanel"]');
-  const select = (tab, focus = false) => {
-    const layer = tab.dataset.layer;
-    for (const other of tabs) {
-      const active = other === tab;
-      other.setAttribute('aria-selected', String(active));
-      other.tabIndex = active ? 0 : -1;
-    }
-    panel.setAttribute('aria-labelledby', tab.id);
-    for (const media of root.querySelectorAll('[data-layer-image]')) {
-      const active = media.dataset.layerImage === layer;
-      media.classList.toggle('is-active', active);
-      if (media.tagName !== 'VIDEO') continue;
-      if (active && !reducedMotion) {
-        media.preload = 'auto';
-        media.play().catch(() => {});
-      } else media.pause();
-    }
-    for (const note of root.querySelectorAll('[data-layer-note]')) note.hidden = note.dataset.layerNote !== layer;
-    if (focus) tab.focus();
+// Sticky lens showcase: the step in the middle of the screen picks the image.
+function initShowcase(root) {
+  const steps = [...root.querySelectorAll('[data-lens-step]')];
+  const images = [...root.querySelectorAll('[data-lens-image]')];
+  const stage = root.querySelector('.showcase-stage');
+  const activate = (lens) => {
+    for (const step of steps) step.classList.toggle('is-active', step.dataset.lensStep === lens);
+    for (const image of images) image.classList.toggle('is-active', image.dataset.lensImage === lens);
+    const color = getComputedStyle(steps.find((step) => step.dataset.lensStep === lens)).getPropertyValue('--c');
+    stage.style.setProperty('--stage-glow', color);
   };
-  tabs.forEach((tab, index) => {
-    tab.addEventListener('click', () => select(tab));
-    tab.addEventListener('keydown', (event) => {
-      const offset = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
-      if (event.key === 'Home') select(tabs[0], true);
-      else if (event.key === 'End') select(tabs.at(-1), true);
-      else if (offset) select(tabs[(index + offset + tabs.length) % tabs.length], true);
-      else return;
-      event.preventDefault();
-    });
-  });
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) if (entry.isIntersecting) activate(entry.target.dataset.lensStep);
+  }, { rootMargin: '-45% 0px -45% 0px' });
+  steps.forEach((step) => observer.observe(step));
 }
 
-// Layout A / B plans, switched together.
-function initCompare(root) {
-  const buttons = [...root.querySelectorAll('[data-compare]')];
-  const images = { a: root.querySelector('[data-compare-image="a"]'), b: root.querySelector('[data-compare-image="b"]') };
-  const names = { top: 'seen from above', 'top-air': 'airflow from above', 'top-heat': 'heat from above', light: 'light and shadow preview' };
-  // Each solve has its own scale; these are the editor's legend values for these renders.
-  const captions = {
-    top: { a: 'The default room', b: 'Four pieces moved' },
-    'top-air': { a: 'Airflow, 0 to 2.26 m/s', b: 'Airflow, 0 to 2.30 m/s' },
-    'top-heat': { a: 'Heat, 20.0 to 32.1 °C', b: 'Heat, 20.0 to 33.2 °C' },
-    light: { a: 'Shadow preview', b: 'Shadow preview' },
-  };
-  const choose = (button) => {
-    const view = button.dataset.compare;
-    for (const other of buttons) other.setAttribute('aria-pressed', String(other === button));
-    for (const [key, image] of Object.entries(images)) {
-      const next = layoutImages[`./img/layout-${key}-${view}.webp`];
-      if (image.dataset.view === view) continue;
-      image.dataset.view = view;
-      image.classList.add('is-loading');
-      const loader = new Image();
-      loader.src = next;
-      loader.decode().catch(() => {}).then(() => {
-        image.src = next;
-        image.alt = `Layout ${key.toUpperCase()}, ${names[view]}.`;
-        image.classList.remove('is-loading');
-      });
-    }
-    for (const caption of root.querySelectorAll('[data-compare-caption]')) caption.textContent = captions[view][caption.dataset.compareCaption];
-    for (const note of root.querySelectorAll('[data-tradeoff]')) note.classList.toggle('is-current', note.dataset.tradeoff === view);
-  };
-  buttons.forEach((button) => button.addEventListener('click', () => choose(button)));
-}
-
-// The live editor loads only on request: it starts a GPU solver.
-function initEmbed(root) {
-  root.querySelector('[data-embed-load]').addEventListener('click', () => {
-    const frame = document.createElement('iframe');
-    frame.src = '../';
-    frame.title = 'RoomShift editor';
-    frame.allow = 'fullscreen';
-    root.append(frame);
-    root.classList.add('is-live');
-    frame.focus();
-  });
-}
-
-// Pinned section: scrolling scrubs through a real orbit of the solved room.
 function initScrub(root) {
   const canvas = root.querySelector('.scrub-canvas');
   const context = canvas.getContext('2d');
@@ -202,27 +131,30 @@ function initScrub(root) {
   });
 }
 
-// Play the active layer clip only while it's on screen.
-function initLayerVideos(root) {
-  ScrollTrigger.create({
-    trigger: root,
-    start: 'top bottom',
-    end: 'bottom top',
-    onToggle: ({ isActive }) => {
-      const video = root.querySelector('video.is-active');
-      if (!video || reducedMotion) return;
-      if (isActive) video.play().catch(() => {});
-      else video.pause();
-    },
+// Cards light up under the cursor.
+function initGlow(card) {
+  card.addEventListener('pointermove', (event) => {
+    const bounds = card.getBoundingClientRect();
+    card.style.setProperty('--mx', `${event.clientX - bounds.left}px`);
+    card.style.setProperty('--my', `${event.clientY - bounds.top}px`);
   });
 }
 
+// The score ring fills when it scrolls into view.
+function initScore(root) {
+  new IntersectionObserver(([entry], observer) => {
+    if (!entry.isIntersecting) return;
+    root.classList.add('is-in');
+    observer.disconnect();
+  }, { threshold: 0.4 }).observe(root);
+}
+
 document.querySelectorAll('[data-swipe]').forEach(initSwipe);
-document.querySelectorAll('[data-tabs]').forEach(initLayerTabs);
-document.querySelectorAll('.compare').forEach(initCompare);
-document.querySelectorAll('[data-embed]').forEach(initEmbed);
+document.querySelectorAll('[data-showcase]').forEach(initShowcase);
 document.querySelectorAll('[data-scrub]').forEach(initScrub);
-document.querySelectorAll('.layer-viewer').forEach(initLayerVideos);
+document.querySelectorAll('[data-glow]').forEach(initGlow);
+document.querySelectorAll('.score-big').forEach(initScore);
+document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => document.querySelector('.site-nav').classList.toggle('is-open'));
 initHeader();
 stretchIn(document.querySelector('[data-stretch]'), { delay: 0.15 });
 initMotion();

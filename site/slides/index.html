@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" />
-    <link rel="stylesheet" href="../site.css" />
+    <link rel="stylesheet" href="./deck-base.css" />
     <link rel="stylesheet" href="./slides.css" />
   </head>
   <body class="deck-body">
@@ -264,6 +264,8 @@
       <div class="wipe" aria-hidden="true"><span></span><span></span></div>
     </div>
 
+    <a class="deck-exit" href="../" aria-label="Exit the deck and return to the site (Esc)"><span aria-hidden="true">✕</span> Exit</a>
+    <div class="deck-hint" aria-hidden="true">← → to move · O overview · Esc to exit</div>
     <div class="deck-ui" data-ui>
       <div class="deck-progress"><span data-progress></span></div>
       <div class="deck-controls">
@@ -273,7 +275,7 @@
         <button type="button" data-overview aria-label="Show all slides (O)">Overview</button>
         <button type="button" data-notes-toggle aria-label="Show presenter notes (N)" aria-pressed="false">Notes</button>
         <button type="button" data-fullscreen aria-label="Full screen (F)">Full screen</button>
-        <a href="../">Site</a>
+        <a href="../">Exit deck</a>
       </div>
       <aside class="deck-notes" data-notes-panel hidden aria-label="Presenter notes"></aside>
     </div>

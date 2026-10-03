@@ -1,6 +1,7 @@
 import { initMotion, initHeader, stretchIn, gsap, prefersReducedMotion } from './motion.js';
 
 initHeader();
+document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => document.querySelector('.site-nav').classList.toggle('is-open'));
 stretchIn(document.querySelector('[data-stretch]'), { delay: 0.1 });
 
 // The market map draws its regions in, then RoomShift drops onto it.

@@ -3,39 +3,88 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f8f6" />
-    <title>RoomShift — The experiment</title>
-    <meta name="description" content="How RoomShift answers the Test the Change Before You Make It brief: a two-input fan experiment, a model check, two configurations compared, and what the model leaves out." />
+    <meta name="theme-color" content="#f6f6f3" />
+    <title>RoomShift — The science</title>
+    <meta name="description" content="The physics behind RoomShift’s five lenses, and a full fan-placement experiment with its model check and limits." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" />
     <link rel="stylesheet" href="./site.css" />
   </head>
-  <body class="page-evidence">
-    <a class="skip-link" href="#main">Skip to content</a>
+  <body class="theme-paper">
+    <a class="skip" href="#main">Skip to content</a>
     <header class="site-header">
-      <a class="brand" href="./" aria-label="RoomShift home">
-        <svg class="brand-mark" viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M4 8.5 14 3l10 5.5v11L14 25 4 19.5v-11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 15 3.2 3.2L19.5 11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span translate="no">roomshift</span>
-      </a>
+      <a class="brand" href="./"><span class="logo-mark"></span>RoomShift</a>
       <nav class="site-nav" aria-label="Pages">
-        <a href="./">Product</a>
-        <a href="./evidence.html" aria-current="page">The experiment</a>
-        <a href="./business.html">Business</a>
-        <a href="./slides/">Deck</a>
+        <a href="./">Product</a><a href="./science.html" aria-current="page">Science</a><a href="./pricing.html">Pricing</a><a href="./vision.html">Vision</a><a href="./slides/">Deck</a>
       </nav>
-      <a class="button button-small" href="../">Open the editor</a>
+      <button class="nav-toggle" type="button" aria-label="Menu" data-nav-toggle>☰</button>
+      <a class="btn btn-primary btn-small" href="../">Open RoomShift <span class="arrow">→</span></a>
     </header>
 
     <main id="main">
-      <section class="page-hero" aria-labelledby="page-title">
-        <p class="kicker">Deep Technology brief: Test the Change Before You Make It</p>
-        <h1 id="page-title" data-stretch>Where should the fan go?</h1>
-        <p class="lede">The brief asks for one small system, two inputs, one constraint, and a trade-off you can’t escape. Ours is a fan in a furnished home office, solved by RoomShift’s own airflow model. Every number on this page comes from that solver and can be rerun with one command.</p>
+
+      <section class="page-hero wrap" aria-labelledby="page-title">
+        <p class="eyebrow">The science</p>
+        <h1 id="page-title" data-stretch>How RoomShift knows.</h1>
+        <p class="lede">Every lens runs a published model you can look up. Below: what each one computes and where it stops, then a full case study with its data, a check against theory and an honest list of what is left out.</p>
+      </section>
+      <section class="section" aria-labelledby="models-title" style="padding-top: 20px">
+        <div class="wrap">
+          <div class="section-head">
+            <p class="eyebrow">Every lens, explained</p>
+            <h2 id="models-title" data-split>Published physics, not pretty gradients.</h2>
+            <p>Each lens runs a model you can look up. Here is what it computes, the formula behind it, and where it stops being trustworthy.</p>
+          </div>
+          <div class="models" data-reveal>
+            <article class="model-card" style="--c: var(--air)">
+              <h3><i>≋</i> Air</h3>
+              <div class="formula">∂u/∂t + (u·∇)u = −∇p/ρ + ν∇²u + f,&nbsp; ∇·u = 0</div>
+              <p>Incompressible Navier–Stokes on a 5 cm grid (up to 1.5 M cells) on your GPU: semi-Lagrangian advection, viscous diffusion, Jacobi pressure projection. Fans and AC units push a jet; furniture is solid; open windows and doors are outlets.</p>
+              <ul><li>Fresh air: BS 5925 natural ventilation (single-sided Q = 0.025·A·v, cross Q = C<sub>d</sub>A<sub>eff</sub>v√ΔC<sub>p</sub>) with live wind</li><li>CO₂ from a steady-state mass balance</li></ul>
+              <p class="source">Stam, Stable Fluids (1999) · BS 5925 · CIBSE AM10</p>
+            </article>
+            <article class="model-card" style="--c: var(--heat-c)">
+              <h3><i>♨</i> Heat</h3>
+              <div class="formula">T<sub>in</sub> = T<sub>out</sub> + (Q<sub>sun</sub> + Q<sub>int</sub> − Q<sub>AC</sub>) / (ΣUA + ρc<sub>p</sub>V̇)</div>
+              <p>The 3D field carries heat with the flow, with Boussinesq buoyancy so warm air rises. A steady-state balance then adds solar gain through glass (SHGC 0.7), people (100 W), appliances, lamps and heaters at their real watts, against walls (U 2.0), glazing (U 5.7) and ventilation.</p>
+              <ul><li>AC throttles to 24 °C; running cost from your city’s tariff</li></ul>
+              <p class="source">CIBSE Guide A · ASHRAE Fundamentals</p>
+            </article>
+            <article class="model-card" style="--c: var(--light-c)">
+              <h3><i>☀</i> Light &amp; sun</h3>
+              <div class="formula">E = I·cosθ / d² &nbsp;+&nbsp; Φρ̄ / (A(1−ρ̄))</div>
+              <p>Lamps are point sources with the inverse-square and cosine laws, shadowed by furniture. Direct sun enters only through glass (70% transmission), sky light through each window’s solid angle, and the lumen method adds inter-reflected light from your floor and wall finishes.</p>
+              <ul><li>Sun position for your city, date and hour: NOAA solar equations (±0.5°)</li><li>Rendered shadows with real sun direction through window openings</li></ul>
+              <p class="source">NOAA solar calculator · CIBSE LG · EN 12464-1 (300–500 lux)</p>
+            </article>
+            <article class="model-card" style="--c: var(--wifi)">
+              <h3><i>⌔</i> WiFi</h3>
+              <div class="formula">L = 20·log₁₀f + N·log₁₀d + ΣL<sub>obj</sub> − 28</div>
+              <p>The ITU indoor site-general model with N = 28 (2.4 GHz) or 30 (5 GHz), plus penetration loss for every object on the direct path: metal 22 dB, stone 12, glass 4, wood 3, fabric 2 (×1.3 at 5 GHz).</p>
+              <ul><li>Bands: excellent ≥ −50, good ≥ −67, weak &lt; −75 dBm</li></ul>
+              <p class="source">ITU-R P.1238 · measured material losses (NIST, Wilson 2002)</p>
+            </article>
+            <article class="model-card" style="--c: var(--sound)">
+              <h3><i>♪</i> Sound</h3>
+              <div class="formula">T₆₀ = 0.161V / (−S·ln(1−ᾱ)),&nbsp; L<sub>p</sub> = L<sub>w</sub> + 10log(Q/4πr² + 4/R)</div>
+              <p>Eyring reverberation from every surface’s absorption: the floor and walls you pick, plus the exposed area of each piece of furniture by material. Level at each seat combines the direct field (with barrier loss behind objects) and the diffuse field.</p>
+              <p class="source">Eyring (1930) · Sabine · Hopkins &amp; Stryker</p>
+            </article>
+            <article class="model-card" style="--c: var(--good)">
+              <h3><i>✓</i> Livability</h3>
+              <div class="formula">walkable = flood-fill(door, clearance 0.3 m)</div>
+              <p>A 10 cm occupancy grid, flood-filled from the door with a 60 cm person, checks access to beds, desks and storage, the door swing, blocked windows, heater clearances and aim of fans and AC. Suggest layout runs simulated annealing over the unlocked pieces.</p>
+              <p class="source">Neufert / residential circulation guidance · NFPA space-heater clearance</p>
+            </article>
+          </div>
+        </div>
       </section>
 
-      <section class="brief-map" aria-labelledby="map-title">
+
+      <section class="section wrap brief-map" style="padding-top: 60px; padding-bottom: 60px" aria-labelledby="map-title">
+        <div class="section-head" style="margin-bottom: 30px"><p class="eyebrow">Case study</p><h2 data-split>Where should the fan go?</h2><p>One small system, two inputs, one constraint and a trade-off you can’t escape, solved by RoomShift’s own airflow model. Every number below can be rerun with one command.</p></div>
         <h2 id="map-title" class="visually-hidden">How the brief maps to RoomShift</h2>
         <dl class="spec" data-reveal>
           <div><dt>System</dt><dd>Air in a 5.2 × 4.0 × 2.7&nbsp;m room with a desk, sofa, coffee table, lamp, heater and one pedestal fan. The furniture is solid to the air.</dd></div>
@@ -48,7 +97,7 @@
         </dl>
       </section>
 
-      <section class="experiment" aria-labelledby="experiment-title">
+      <section class="section wrap experiment" style="padding-top: 60px; padding-bottom: 60px" aria-labelledby="experiment-title">
         <div class="section-head">
           <h2 id="experiment-title" data-split>30 runs, one answer</h2>
           <p>Each cell is a separate solve of the same room: five distances times six settings, including “off”, which gives zero everywhere and isn’t drawn. Hover or tab through the cells. Hatched cells break the setting budget.</p>
@@ -66,7 +115,7 @@
         <p class="footnote">Solver: RoomShift’s CPU preview (0.15&nbsp;m grid, 2&nbsp;s simulated, 12 pressure iterations), the same model the editor falls back to without WebGPU. Rerun it with <code>node site/scripts/experiment.mjs</code>.</p>
       </section>
 
-      <section class="configs" aria-labelledby="configs-title">
+      <section class="section wrap configs" style="padding-top: 60px; padding-bottom: 60px" aria-labelledby="configs-title">
         <div class="section-head">
           <h2 id="configs-title" data-split>Two configurations, side by side</h2>
           <p>Both give the desk the same breeze. Only one of them fits the budget.</p>
@@ -93,7 +142,7 @@
         </div>
       </section>
 
-      <section class="check" aria-labelledby="check-title">
+      <section class="section wrap check" style="padding-top: 60px; padding-bottom: 60px" aria-labelledby="check-title">
         <div class="section-head">
           <h2 id="check-title" data-split>Checking the model against a known jet</h2>
           <p>Far from the fan, a free round jet slows roughly as one over distance. We ran the fan alone in an empty 6 × 5&nbsp;m room and read the speed along its axis.</p>
@@ -122,7 +171,7 @@
               <li>An empty, unforced room stays still and at exactly 20&nbsp;°C.</li>
               <li>A heater makes a bounded, local rise, and furniture blocks light behind it.</li>
             </ul>
-            <p class="footnote">Each of these is an automated test in the repository, part of the 46 that pass.</p>
+            <p class="footnote">Each of these is an automated test in the repository, part of the 90 that pass.</p>
           </article>
         </div>
         <form class="bench" data-bench aria-labelledby="bench-title">
@@ -146,7 +195,7 @@
         <p class="conclusion">So read the experiment as a comparison, not a forecast. The ranking between distances is the useful output. The absolute speeds wait for calibration.</p>
       </section>
 
-      <section class="labels" aria-labelledby="labels-title">
+      <section class="section wrap labels" style="padding-top: 60px; padding-bottom: 60px" aria-labelledby="labels-title">
         <div class="section-head">
           <h2 id="labels-title" data-split>What’s simulated, and what’s left out</h2>
         </div>
@@ -164,7 +213,7 @@
             <ul>
               <li>Fan cost: the setting, with power and noise rising steeply with speed. Not modelled.</li>
               <li>Occupied zones: fixed boxes at seated head and chest height</li>
-              <li>Heater output: an estimated °C per second, not watts</li>
+              <li>Heater output in the 3D field: watts scaled onto the solver’s warming rate</li>
             </ul>
           </div>
           <div>
@@ -172,7 +221,7 @@
             <ul>
               <li>Turbulence models and the fan’s real blade and swirl</li>
               <li>Steady state: this run covers 2 simulated seconds</li>
-              <li>Heat stored in walls and furniture, radiation, sunlight, HVAC</li>
+              <li>Heat stored in walls and furniture, and radiation (sunlight and AC are now handled by the steady-state heat balance)</li>
               <li>Humidity, people’s body heat, and perceived comfort</li>
               <li>Any calibration against a measured room, so far</li>
             </ul>
@@ -181,20 +230,19 @@
         <p class="footnote">We also tried a second outcome, warmth at the sofa with the heater beside it. Two simulated seconds weren’t enough for heat to reach the seat (under 0.03&nbsp;°C in every run), so we left it out of the trade-off rather than report a non-result as a finding.</p>
       </section>
 
-      <section class="closing closing-compact" aria-labelledby="closing-title">
-        <h2 id="closing-title">Try the change yourself.</h2>
-        <div class="actions">
-          <a class="button" href="../">Open the editor</a>
-          <a class="button button-quiet" href="./slides/">Watch the deck</a>
+      <section class="closing" aria-labelledby="closing-title">
+        <div class="wrap">
+          <h2 id="closing-title">Test the change yourself.</h2>
+          <div class="hero-actions"><a class="btn btn-primary" href="../">Open RoomShift <span class="arrow">→</span></a><a class="btn btn-ghost" href="./slides/">Watch the deck</a></div>
         </div>
       </section>
     </main>
-
     <footer class="site-footer">
-      <span translate="no">RoomShift</span>
-      <nav aria-label="Footer"><a href="./">Product</a><a href="./evidence.html">The experiment</a><a href="./business.html">Business</a><a href="./slides/">Deck</a></nav>
-      <p class="credits-line">Built at HacKU 2026. Open-source credits: <a href="https://threejs.org">Three.js</a> (MIT), <a href="https://gsap.com">GSAP</a>, <a href="https://vite.dev">Vite</a> (MIT), <a href="https://playwright.dev">Playwright</a> (Apache-2.0), and the <a href="https://fonts.google.com/specimen/Archivo">Archivo</a> typeface (OFL).</p>
+      <div class="wrap">
+        <span><span class="logo-mark" style="display:inline-block;vertical-align:-5px;margin-right:8px"></span>RoomShift · built at HacKU 2026 with Three.js, GSAP and Vite</span>
+        <nav aria-label="Footer"><a href="./">Product</a><a href="./science.html">Science</a><a href="./pricing.html">Pricing</a><a href="./vision.html">Vision</a><a href="./slides/">Deck</a><a href="https://github.com/Kixenon/RoomShift">GitHub</a></nav>
+      </div>
     </footer>
-    <script type="module" src="./evidence.js"></script>
+    <script type="module" src="./science.js"></script>
   </body>
 </html>

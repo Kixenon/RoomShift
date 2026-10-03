@@ -42,7 +42,7 @@ test.before(async () => {
 test.beforeEach(async () => {
   browserErrors = [];
   await page.setViewportSize({ width: 1280, height: 577 });
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}#/p/demo`, { waitUntil: 'domcontentloaded' });
   await page.locator('#viewport canvas').first().waitFor();
   await page.waitForTimeout(250);
 });
