@@ -7,7 +7,7 @@ export { rotationMatrixXYZ } from './room-transform.js';
 export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
 
 export const DEFAULT_BOX_DIMENSIONS = Object.freeze({ width: 1, height: 1, depth: 1 });
-export const SOURCE_MODELS = Object.freeze(['fan', 'heater', 'lamp']);
+export const DEVICE_MODELS = Object.freeze(['fan', 'heater', 'lamp']);
 export const SOURCE_INTENSITY_LIMITS = Object.freeze({ min: 0, max: 2 });
 
 const preset = (label, icon, dimensions) => Object.freeze({
@@ -17,7 +17,7 @@ const preset = (label, icon, dimensions) => Object.freeze({
 });
 
 export const MODEL_PRESETS = Object.freeze({
-  box: preset('Box', '□', DEFAULT_BOX_DIMENSIONS),
+  box: preset('Object', '□', DEFAULT_BOX_DIMENSIONS),
   fan: preset('Fan', '✳', { width: 0.42, height: 1.35, depth: 0.42 }),
   sofa: preset('Sofa', '▰', { width: 1.55, height: 0.78, depth: 0.84 }),
   bed: preset('Bed', '▰', { width: 1.6, height: 0.55, depth: 2 }),
@@ -30,12 +30,12 @@ export const MODEL_PRESETS = Object.freeze({
 });
 
 const INITIAL_OBJECTS = Object.freeze([
-  { id: 'fan-1', primitive: 'box', model: 'fan', name: 'Pedestal fan', enabled: true, intensity: 1, position: { x: 0.82, y: 0, z: 3.15 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
+  { id: 'fan-1', primitive: 'device', model: 'fan', name: 'Pedestal fan', enabled: true, intensity: 1, position: { x: 0.82, y: 0, z: 3.15 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
   { id: 'sofa-2', primitive: 'box', model: 'sofa', name: 'Sofa', position: { x: 4.18, y: 0, z: 3.04 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.55, height: 0.78, depth: 0.84 } },
   { id: 'desk-3', primitive: 'box', model: 'desk', name: 'Desk', position: { x: 4.18, y: 0, z: 0.86 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.18, height: 0.74, depth: 0.62 } },
   { id: 'table-4', primitive: 'box', model: 'table', name: 'Coffee table', position: { x: 2.62, y: 0, z: 2.12 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.92, height: 0.38, depth: 0.62 } },
-  { id: 'lamp-1', primitive: 'box', model: 'lamp', name: 'Floor lamp', intensity: 1, position: { x: 1.2, y: 0, z: 0.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
-  { id: 'heater-1', primitive: 'box', model: 'heater', name: 'Panel heater', intensity: 1, position: { x: 0.55, y: 0, z: 1.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
+  { id: 'lamp-1', primitive: 'device', model: 'lamp', name: 'Floor lamp', enabled: true, intensity: 1, position: { x: 1.2, y: 0, z: 0.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
+  { id: 'heater-1', primitive: 'device', model: 'heater', name: 'Panel heater', enabled: true, intensity: 1, position: { x: 0.55, y: 0, z: 1.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
 ]);
 
 export function createRoomScene() {
@@ -172,12 +172,13 @@ export function setWindowWall(scene, objectId, wall) {
 }
 
 export function addObject(scene, options = {}) {
-  const { model = 'box', name, dimensions = DEFAULT_BOX_DIMENSIONS } = options;
+  const { model = 'box', name } = options;
   if (!MODEL_PRESETS[model]) throw new RangeError(`Unsupported object model: ${model}`);
   if (isOpeningObject({ model })) throw new RangeError('Use the opening tools to place a window or door on a room wall.');
 
   const idNumber = scene.nextObjectId;
-  const boxDimensions = { ...dimensions };
+  const isDevice = DEVICE_MODELS.includes(model);
+  const boxDimensions = { ...(options.dimensions ?? (isDevice ? MODEL_PRESETS[model].dimensions : DEFAULT_BOX_DIMENSIONS)) };
   if (!['width', 'height', 'depth'].every((axis) => Number.isFinite(boxDimensions[axis]) && boxDimensions[axis] > 0)) {
     throw new RangeError('Object dimensions must be positive finite values.');
   }
@@ -186,11 +187,11 @@ export function addObject(scene, options = {}) {
     throw new RangeError('Object does not fit inside the room.');
   }
   const template = {
-    id: `box-${idNumber}`,
-    primitive: 'box',
+    id: `${isDevice ? model : 'object'}-${idNumber}`,
+    primitive: isDevice ? 'device' : 'box',
     model,
-    name: normalizeObjectName(name ?? `Box ${idNumber}`),
-    ...(SOURCE_MODELS.includes(model) ? { intensity: 1 } : {}),
+    name: normalizeObjectName(name ?? `${isDevice ? MODEL_PRESETS[model].label : 'Object'} ${idNumber}`),
+    ...(isDevice ? { enabled: true, intensity: 1 } : {}),
     dimensions: boxDimensions,
     position: { x: scene.room.width / 2, y: 0, z: scene.room.depth / 2 },
     rotation: { x: 0, y: 0, z: 0 },
@@ -219,23 +220,29 @@ export function addObject(scene, options = {}) {
   return { object, scene: { ...scene, nextObjectId: idNumber + 1, objects: [...scene.objects, object] } };
 }
 
+export function addDevice(scene, model) {
+  if (!DEVICE_MODELS.includes(model)) throw new RangeError(`Unsupported device type: ${model}`);
+  return addObject(scene, { model });
+}
+
 export function setObjectModel(scene, objectId, model) {
   const existing = scene.objects.find((object) => object.id === objectId);
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
   if (!MODEL_PRESETS[model]) throw new RangeError(`Unsupported object model: ${model}`);
   if (isOpeningObject({ model })) throw new RangeError('Use the opening tools to place a window or door on a room wall.');
-  const updated = { ...existing, primitive: 'box', model };
-  if (SOURCE_MODELS.includes(model)) updated.intensity = existing.intensity ?? 1;
+  const isDevice = DEVICE_MODELS.includes(model);
+  const updated = { ...existing, primitive: isDevice ? 'device' : 'box', model };
+  if (isDevice) updated.intensity = existing.intensity ?? 1;
   else delete updated.intensity;
-  if (model === 'fan') updated.enabled = existing.model === 'fan' ? existing.enabled !== false : true;
+  if (isDevice) updated.enabled = DEVICE_MODELS.includes(existing.model) ? existing.enabled !== false : true;
   else delete updated.enabled;
   const objects = scene.objects.map((object) => object.id === objectId ? updated : object);
   return { scene: { ...scene, objects }, object: updated };
 }
 
-export function setFanEnabled(scene, objectId, enabled) {
+export function setDeviceEnabled(scene, objectId, enabled) {
   const existing = scene.objects.find((object) => object.id === objectId);
-  if (!existing || existing.model !== 'fan') throw new RangeError(`Unknown fan: ${objectId}`);
+  if (!existing || !DEVICE_MODELS.includes(existing.model)) throw new RangeError(`Unknown device: ${objectId}`);
   const updated = { ...existing, enabled: Boolean(enabled) };
   return {
     object: updated,
@@ -246,7 +253,7 @@ export function setFanEnabled(scene, objectId, enabled) {
 export function setObjectIntensity(scene, objectId, intensity) {
   const existing = scene.objects.find((object) => object.id === objectId);
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
-  if (!SOURCE_MODELS.includes(existing.model)) throw new RangeError(`${existing.model} has no adjustable source strength.`);
+  if (!DEVICE_MODELS.includes(existing.model)) throw new RangeError(`${existing.model} has no adjustable source strength.`);
   if (!Number.isFinite(intensity) || intensity < SOURCE_INTENSITY_LIMITS.min || intensity > SOURCE_INTENSITY_LIMITS.max) {
     throw new RangeError(`Source strength must be between ${SOURCE_INTENSITY_LIMITS.min} and ${SOURCE_INTENSITY_LIMITS.max}.`);
   }

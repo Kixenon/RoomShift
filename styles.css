@@ -54,21 +54,32 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .camera-controls { position: absolute; z-index: 2; right: 14px; bottom: 14px; height: 34px; display: inline-flex; align-items: center; gap: 3px; pointer-events: auto; }
 .simulation-controls { display: flex; flex-direction: column; align-items: center; gap: 5px; pointer-events: auto; }
 .field-controls { height: 34px; display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid rgba(218, 225, 218, .92); border-radius: 9px; background: rgba(255, 255, 255, .94); box-shadow: 0 3px 10px rgba(35, 57, 48, .045); backdrop-filter: blur(12px); pointer-events: auto; }
-.display-controls { min-height: 28px; display: inline-flex; align-items: center; gap: 2px; padding: 3px 5px; border: 1px solid rgba(218, 225, 218, .88); border-radius: 8px; background: rgba(255, 255, 255, .88); box-shadow: 0 3px 10px rgba(35, 57, 48, .035); backdrop-filter: blur(12px); }
-.display-controls[hidden], .slice-height-control[hidden] { display: none; }
-.display-label { padding: 0 4px; color: #a0aaa4; font-size: 7px; font-weight: 700; letter-spacing: .6px; }
-.display-button { height: 21px; padding: 0 7px; border: 0; border-radius: 5px; background: transparent; color: #82918a; cursor: pointer; font-size: 8px; }
-.display-button:hover, .display-button[aria-pressed="true"] { background: #e9f2eb; color: #2f755e; font-weight: 600; }
-.slice-height-control { width: 240px; min-height: 27px; display: flex; align-items: center; gap: 8px; padding: 3px 8px; border: 1px solid rgba(218, 225, 218, .88); border-radius: 7px; background: rgba(255, 255, 255, .9); color: #73847b; font-size: 8px; backdrop-filter: blur(12px); }
-.slice-height-control input { min-width: 40px; flex: 1; height: 13px; margin: 0; accent-color: #43856c; }
-.slice-height-control output { min-width: 37px; color: #526b60; font-variant-numeric: tabular-nums; text-align: right; }
+.field-display-control[hidden], .slice-height-control[hidden], .room-daylight-control[hidden] { display: none; }
+.field-display-control select { height: 26px; padding: 0 22px 0 8px; border: 0; border-radius: 6px; appearance: none; background: #f3f7f3; color: #64776d; font-size: 8px; cursor: pointer; }
+.field-display-control::after { position: absolute; right: 9px; top: 11px; width: 5px; height: 5px; border-right: 1px solid #82918a; border-bottom: 1px solid #82918a; content: ''; pointer-events: none; transform: rotate(45deg); }
+.field-display-control { position: relative; }
+.slice-height-control { position: relative; }
+.slice-height-control > summary, .room-daylight-control > summary { min-height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 8px; list-style: none; color: #64776d; font-size: 8px; cursor: pointer; }
+.slice-height-control > summary::-webkit-details-marker, .room-daylight-control > summary::-webkit-details-marker { display: none; }
+.slice-height-control > summary { padding: 0 8px; border-radius: 6px; background: #f3f7f3; }
+.slice-height-control > summary:hover, .room-daylight-control > summary:hover { color: #2f755e; }
+.parameter-menu { position: absolute; z-index: 5; top: calc(100% + 6px); left: 0; min-width: 160px; display: none; flex-direction: column; gap: 7px; padding: 9px; border: 1px solid #e4eae4; border-radius: 7px; background: rgba(255, 255, 255, .97); box-shadow: 0 6px 18px rgba(35, 57, 48, .1); }
+.slice-height-control[open] .parameter-menu, .room-daylight-control[open] .parameter-menu { display: flex; }
+.slice-height-menu input, .room-daylight-menu input { width: 100%; margin: 0; accent-color: #43856c; }
+.parameter-menu output { color: #526b60; font-size: 8px; font-variant-numeric: tabular-nums; text-align: right; }
+.room-daylight-control { position: relative; margin-top: 9px; }
+.room-daylight-control > summary output { color: #2f755e; font-size: 9px; font-variant-numeric: tabular-nums; }
+.room-daylight-control .parameter-menu { right: 0; left: auto; }
+.field-loading { position: absolute; z-index: 2; bottom: 14px; left: 14px; width: 19px; height: 19px; display: grid; place-items: center; border: 2px solid #d4e3da; border-top-color: #27816d; border-radius: 50%; animation: field-spin .7s linear infinite; }
+.field-loading[hidden] { display: none; }
+.field-loading.has-error { border-color: #a4483d; color: #a4483d; font-size: 11px; font-weight: 700; animation: none; }
+.field-loading.has-error::after { content: '!'; }
+@keyframes field-spin { to { transform: rotate(360deg); } }
 .editor-status { padding: 4px 7px; border-radius: 5px; background: rgba(255, 247, 244, .94); color: #a4483d; font-size: 8px; box-shadow: 0 3px 10px rgba(35, 57, 48, .04); }
 .editor-status:empty { display: none; }
 .field-button { height: 26px; border: 0; border-radius: 6px; cursor: pointer; font-size: 9px; }
 .field-button { min-width: 33px; padding: 0 6px; background: transparent; color: #82918a; }
 .field-button.active { background: #e9f2eb; color: #2f755e; font-weight: 600; }
-.field-status { padding: 0 5px; color: #74847c; font-size: 8px; white-space: nowrap; }
-.field-status:empty { display: none; }
 .tool-button { width: 27px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #7b8c84; cursor: pointer; }
 .tool-button svg { width: 16px; height: 16px; }
 .camera-button { position: relative; isolation: isolate; width: 32px; height: 32px; padding: 0; }
@@ -116,6 +127,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .outdoor-temperature-field { margin-top: 7px; }
 .outdoor-temperature-field > span:last-child { color: #91a098; font-size: 8px; font-weight: 500; }
 .object-list-section { min-height: 145px; }
+.section-subheading { margin: 12px 0 5px; color: #929f97; font-size: 8px; font-weight: 600; }
 
 .object-list { display: flex; flex-direction: column; gap: 3px; }
 .object-row { width: 100%; height: 31px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #72817a; text-align: left; cursor: pointer; font-size: 9px; }
@@ -143,7 +155,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .range-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #929f97; font-size: 8px; }
 .range-heading output { color: #5c7568; font-variant-numeric: tabular-nums; }
 .property-slider { width: 100%; height: 14px; margin: 0; accent-color: #43856c; cursor: pointer; }
-.properties-note { color: #a4aea7; font-size: 8px; }
 
 @media (max-width: 1020px) {
   .topbar { padding: 0 14px; }
@@ -165,10 +176,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
   .properties-section { min-height: 235px; }
   .viewport-topline { top: 9px; left: 8px; right: 8px; }
   .simulation-controls { position: absolute; top: 43px; left: 0; align-items: flex-start; }
-  .field-status { display: none; }
   .camera-controls { right: 8px; bottom: 8px; }
   .field-legend { right: 8px; bottom: 48px; width: 126px; }
-  .slice-height-control { width: min(240px, calc(100vw - 88px)); }
+  .field-loading { left: 8px; bottom: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -186,44 +196,4 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .window-open-toggle { display: flex; align-items: center; gap: 7px; min-height: 29px; color: #60766b; font-size: 9px; }
 .window-open-toggle input { accent-color: #27816d; }
 
-/* Time-of-day controls, shown only while the light preview is active.
-   Colours follow the existing light toolbar rather than a dark theme. */
-.time-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 6px;
-  border-left: 1px solid #e6ebe6;
-  margin-left: 2px;
-}
-.time-clock {
-  font-variant-numeric: tabular-nums;
-  font-size: 9px;
-  font-weight: 600;
-  color: #2f755e;
-  min-width: 2.8em;
-  text-align: right;
-  cursor: help;
-}
-.time-controls input[type='range'] {
-  width: 118px;
-  accent-color: #e0913c;
-  cursor: pointer;
-}
-.time-controls .tool-button {
-  width: auto;
-  height: 26px;
-  padding: 0 8px;
-  font-size: 9px;
-  white-space: nowrap;
-}
-.time-controls .tool-button[aria-pressed='true'] {
-  background: #e0913c;
-  color: #fff8ec;
-}
-/* The status sits beside the time group, so keep it from being squeezed out. */
-.time-controls:not([hidden]) ~ .field-status { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 720px) {
-  .time-controls input[type='range'] { width: 84px; }
-  .time-controls .tool-button { padding: 0 6px; }
-}
+.slice-height-control > summary::after, .room-daylight-control > summary::after { width: 5px; height: 5px; border-right: 1px solid #82918a; border-bottom: 1px solid #82918a; content: ''; flex: 0 0 5px; transform: rotate(45deg) translateY(-2px); }

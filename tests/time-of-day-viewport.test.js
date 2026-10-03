@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
 import { RoomViewport } from '../src/scene/room-viewport.js';
-import { addWindow, createRoomScene, setWindowOpen } from '../src/model/room-scene.js';
+import { addWindow, createRoomScene, setDeviceEnabled, setWindowOpen } from '../src/model/room-scene.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES } from '../src/simulation/daylight.js';
 
 // Exercises the three.js side of the time-of-day model against stand-in lights,
@@ -17,7 +17,6 @@ function harness(overrides = {}) {
   const viewport = {
     roomScene: roomScene ?? createRoomScene(),
     timeMinutes: DEFAULT_TIME_MINUTES,
-    lampsOverride: null,
     daylightState: null,
     lightingPreview: true,
     sunPatchMeshes: [],
@@ -45,9 +44,7 @@ const sceneWithOpenWindow = (wall = 'back') => {
   return setWindowOpen(withWindow.scene, 'window-1', true).scene;
 };
 
-const setClock = (viewport, timeMinutes, lampsOverride) => (
-  viewport.setTimeOfDay({ timeMinutes, lampsOverride })
-);
+const setClock = (viewport, timeMinutes) => viewport.setTimeOfDay({ timeMinutes });
 
 test('setting the time of day derives and publishes the daylight state', () => {
   const viewport = harness();
@@ -108,37 +105,27 @@ test('at night the sun is hidden and the exposure opens up', () => {
   assert.ok(viewport.renderer.toneMappingExposure > dayExposure);
 });
 
-test('lamps are switched off during the day and on after dusk', () => {
+test('lamp power is independent of time of day', () => {
   const viewport = harness();
-  viewport.lightingLights = [
-    { power: DEFAULT_LAMP_POWER, userData: {} },
-    { power: DEFAULT_LAMP_POWER, userData: {} },
-  ];
+  viewport.lightingLights = [{ power: 0, userData: { objectId: 'lamp-1' } }];
 
   setClock(viewport, 13 * 60);
-  assert.equal(viewport.daylightState.lampsOn, false);
-  for (const light of viewport.lightingLights) assert.equal(light.power, 0);
-
-  setClock(viewport, 22 * 60);
-  assert.equal(viewport.daylightState.lampsOn, true);
-  for (const light of viewport.lightingLights) assert.equal(light.power, DEFAULT_LAMP_POWER);
-});
-
-test('the lamps can be forced on by day and forced off at night', () => {
-  const viewport = harness();
-  viewport.lightingLights = [{ power: DEFAULT_LAMP_POWER, userData: {} }];
-
-  setClock(viewport, 13 * 60, true);
-  assert.equal(viewport.daylightState.lampsOn, true);
   assert.equal(viewport.lightingLights[0].power, DEFAULT_LAMP_POWER);
 
-  setClock(viewport, 0, false);
-  assert.equal(viewport.daylightState.lampsOn, false);
+  setClock(viewport, 22 * 60);
+  assert.equal(viewport.lightingLights[0].power, DEFAULT_LAMP_POWER);
+});
+
+test('lamp power follows its device on setting at any time', () => {
+  const viewport = harness();
+  viewport.lightingLights = [{ power: DEFAULT_LAMP_POWER, userData: { objectId: 'lamp-1' } }];
+
+  viewport.roomScene = setDeviceEnabled(viewport.roomScene, 'lamp-1', false).scene;
+  setClock(viewport, 13 * 60);
   assert.equal(viewport.lightingLights[0].power, 0);
 
-  // Clearing the override hands the decision back to the dusk threshold.
-  setClock(viewport, 0, null);
-  assert.equal(viewport.daylightState.lampsOn, true);
+  setClock(viewport, 0);
+  assert.equal(viewport.lightingLights[0].power, 0);
 });
 
 test('sun patches become meshes on the floor', () => {

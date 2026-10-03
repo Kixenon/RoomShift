@@ -18,8 +18,17 @@
     <main class="editor-layout">
       <aside class="asset-rail" aria-label="Add objects">
         <div class="rail-title">Add</div>
-        <button class="asset-button" id="add-box" data-add-box type="button" aria-label="Add box" title="Add box">
-          <span class="asset-glyph">□</span><span>Box</span>
+        <button class="asset-button" id="add-object" type="button" aria-label="Add object" title="Add object">
+          <span class="asset-glyph">□</span><span>Object</span>
+        </button>
+        <button class="asset-button" id="add-fan" type="button" aria-label="Add fan" title="Add fan">
+          <span class="asset-glyph">✳</span><span>Fan</span>
+        </button>
+        <button class="asset-button" id="add-heater" type="button" aria-label="Add heater" title="Add heater">
+          <span class="asset-glyph">▥</span><span>Heater</span>
+        </button>
+        <button class="asset-button" id="add-lamp" type="button" aria-label="Add lamp" title="Add lamp">
+          <span class="asset-glyph">◉</span><span>Lamp</span>
         </button>
         <button class="asset-button" id="add-window" type="button" aria-label="Add window" title="Add window">
           <span class="asset-glyph">▣</span><span>Window</span>
@@ -36,27 +45,17 @@
               <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false">Air</button>
               <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false">Heat</button>
               <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false">Light</button>
-              <span class="time-controls" id="time-controls" hidden>
-                <span class="time-clock" id="clock-label">13:30</span>
-                <input id="time-of-day" type="range" min="0" max="1439" step="5" value="810" aria-label="Time of day" />
-                <button id="lamps-toggle" class="tool-button" type="button" aria-pressed="false" aria-label="Switch the lamps on">Lamps</button>
-              </span>
-              <span id="field-status" class="field-status" aria-live="polite"></span>
+              <label id="field-display-control" class="field-display-control" hidden>
+                <select id="field-display" aria-label="Field view"></select>
+              </label>
             </div>
-            <div id="field-display-controls" class="display-controls" role="group" aria-label="Field display" hidden>
-              <span class="display-label">Display</span>
-              <button class="display-button" data-display-style="gas" type="button" aria-pressed="false">Gas</button>
-              <button class="display-button" data-display-style="surfaces" type="button" aria-pressed="false">Surfaces</button>
-              <button class="display-button" data-display-style="volume" type="button" aria-pressed="false">Volume</button>
-              <button class="display-button" data-display-style="slice" type="button" aria-pressed="false">Slice</button>
-              <button class="display-button" data-display-style="preview" type="button" aria-pressed="false">Preview</button>
-              <button class="display-button" data-display-style="map" type="button" aria-pressed="false">Map</button>
-            </div>
-            <label id="slice-height-control" class="slice-height-control" hidden>
-              <span>Slice height</span>
-              <input id="slice-height" type="range" min="0" max="2.7" step="0.05" value="1.2" aria-label="Simulation slice height in meters" />
-              <output id="slice-height-value">1.20 m</output>
-            </label>
+            <details id="slice-height-control" class="slice-height-control" hidden>
+              <summary id="slice-height-summary">Slice · 1.20 m</summary>
+              <div class="parameter-menu slice-height-menu">
+                <input id="slice-height" type="range" min="0" max="2.7" step="0.05" value="1.2" aria-label="Simulation slice height in meters" />
+                <output id="slice-height-value">1.20 m</output>
+              </div>
+            </details>
             <span id="editor-status" class="editor-status" aria-live="polite"></span>
           </div>
           <div class="viewport-info">
@@ -78,6 +77,7 @@
             <span id="field-gradient" class="field-gradient" aria-hidden="true"></span>
             <span class="field-gradient-labels"><span id="field-legend-min"></span><span id="field-legend-max"></span></span>
           </div>
+          <span id="field-loading" class="field-loading" role="status" hidden></span>
           <div class="camera-controls" role="group" aria-label="Camera controls">
             <button id="transform-mode-toggle" class="tool-button camera-button" type="button" data-mode="translate" aria-label="Move mode" aria-pressed="false" title="Move mode (G); click to rotate">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -124,11 +124,19 @@
             <label class="field"><span>Height</span><input id="room-height" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" value="2.7" /></label>
           </div>
           <label class="field outdoor-temperature-field"><span>Outside</span><input id="outdoor-temperature" aria-label="Outdoor temperature in degrees Celsius" type="number" min="-20" max="50" step="1" value="10" required /><span>°C</span></label>
+          <details id="room-daylight-control" class="room-daylight-control" hidden>
+            <summary><span>Time of day</span><output id="clock-label">13:30</output></summary>
+            <div class="parameter-menu room-daylight-menu">
+              <input id="time-of-day" type="range" min="0" max="1439" step="5" value="810" aria-label="Time of day" />
+            </div>
+          </details>
         </section>
 
         <section class="inspector-section object-list-section">
           <div class="section-heading"><span>Objects</span></div>
           <div id="object-list" class="object-list"></div>
+          <div class="section-subheading">Devices</div>
+          <div id="device-list" class="object-list"></div>
         </section>
 
         <section class="inspector-section properties-section" id="properties-section">

@@ -28,9 +28,9 @@ They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a brow
 ## Editor
 
 - Edit room width, depth, and height in meters.
-- Add generic boxes, then change their name and visual/semantic model (fan, sofa, bed, desk, table, lamp, heater) independently; choosing a model does not change its box dimensions or name.
+- Add objects, devices, windows, or doors from the asset rail. Devices have their own type and an on/off control; furniture models can be changed in the inspector.
 - Hover near an object to highlight it; click the object or its list item to select it. Drag the gizmo or edit position, size, and X/Y/Z rotation in the inspector.
-- Add a window or door opening, then drag it toward a wall; it snaps to the nearest wall. Openings can exchange air, act as an inlet, or act as an outlet. Open apertures cut through the wall and admit direct sunlight; closed windows and doors block it. Fan, heater, lamp, and opening flow strengths are adjustable; fans can be switched off in the inspector. Drag the canvas to orbit the 3D room; use the bottom-right camera controls to toggle projection or choose a top-down or angled view. Orbiting remains enabled after choosing the top-down view.
+- Add a window or door opening, then drag it toward a wall; it snaps to the nearest wall. Openings can exchange air, act as an inlet, or act as an outlet. Open apertures cut through the wall and admit direct sunlight; closed windows and doors block it. Device and opening strengths are adjustable, and devices can be switched off in their properties. Drag the canvas to orbit the 3D room; use the bottom-right camera controls to toggle projection or choose a top-down or angled view. Orbiting remains enabled after choosing the top-down view.
 - Undo with **⌘Z / Ctrl+Z**; redo with **⌘⇧Z / Ctrl+Y**. Use the **i** button in the viewport toolbar for the full shortcut list. A gizmo drag is one undo step.
 - **Air** and **Heat** update continuously in the background while selected. Geometry or model edits trigger a fresh estimate; **Light** switches immediately to a real-time shadow preview.
 
@@ -40,7 +40,7 @@ The light preview is driven by the real solar position for a fixed site: **Hong 
 
 - Drag the clock (or press the time control) and the sun's altitude and azimuth change. Colour and intensity follow: warm and low at dawn and dusk, near-neutral and high at midday, nothing below the horizon.
 - **Sun patches.** Each open window or door projects a parallelogram of direct sun onto the floor, clipped to the room. A patch is dropped when the sun is below the horizon, is on the wrong side of the wall, or the opening is closed. Patches pull away from their wall as the sun climbs, and graze it dimly when the light is oblique.
-- **Lamps** switch on by themselves when the sun drops below 6°, and the **Lamps** button reads as lit whenever they are. It is a plain on/off switch: it flips whatever the lamps are doing now, so you can turn them off at night as well as on during the day. Until you press it, the dusk threshold decides.
+- Fans, heaters, and lamps have an **On** setting in their device properties. They start on and are controlled independently of time of day.
 - The site being inside the tropics is not incidental: between the solstices the sun passes north of the zenith, so its azimuth sweeps through the whole compass and a room's aspect changes through the day. In June it stays in the northern half of the sky all day.
 
 This is still a **visual preview, not lux-calibrated photometry**. The solar position is geometric and meaningful; the light intensities are hand-tuned curves chosen to read well, not measured irradiance. The room is a rectangular box with flat walls, and the sun patches are parallel projections with no occlusion by furniture. A near-overhead sun barely reaches any vertical wall, so patches shrink to slivers around local noon.

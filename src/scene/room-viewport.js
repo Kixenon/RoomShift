@@ -251,7 +251,6 @@ export class RoomViewport {
     this.lightingPreview = false;
     this.lightingLights = [];
     this.timeMinutes = DEFAULT_TIME_MINUTES;
-    this.lampsOverride = null;
     this.daylightState = null;
     this.sunPatchMeshes = [];
     this.pointerStart = null;
@@ -618,7 +617,7 @@ export class RoomViewport {
     });
 
     if (enabled) {
-      for (const object of this.roomScene.objects.filter((item) => item.model === 'lamp')) {
+      for (const object of this.roomScene.objects.filter((item) => item.model === 'lamp' && item.enabled !== false)) {
         const group = this.groups.get(object.id);
         if (!group) continue;
         const source = new THREE.PointLight(0xffffff, 1, LAMP_LIGHT_DISTANCE, 2);
@@ -654,14 +653,12 @@ export class RoomViewport {
    * time; it is a no-op for rendering while the light preview is off, but the
    * state is kept so the inspector can show it.
    */
-  setTimeOfDay({ timeMinutes, lampsOverride } = {}) {
+  setTimeOfDay({ timeMinutes } = {}) {
     if (timeMinutes !== undefined) this.timeMinutes = timeMinutes;
-    if (lampsOverride !== undefined) this.lampsOverride = lampsOverride;
     if (!this.roomScene) return null;
     this.daylightState = describeDaylight({
       scene: this.roomScene,
       timeMinutes: this.timeMinutes,
-      lampsOverride: this.lampsOverride,
     });
     if (this.lightingPreview) this.applyDaylight();
     return this.daylightState;
@@ -704,7 +701,7 @@ export class RoomViewport {
 
     for (const light of this.lightingLights) {
       const lamp = this.roomScene.objects.find((object) => object.id === light.userData.objectId);
-      light.power = (state.lampsOn ? DEFAULT_LAMP_POWER : 0) * (lamp?.intensity ?? 1);
+      light.power = (lamp?.enabled !== false ? DEFAULT_LAMP_POWER : 0) * (lamp?.intensity ?? 1);
     }
     this.rebuildSunPatches();
     this.updateDaylightDataset();
@@ -718,7 +715,7 @@ export class RoomViewport {
     data.sunAltitude = String(Number(state.sun.altitude.toFixed(1)));
     data.sunAzimuth = String(Number(state.sun.azimuth.toFixed(1)));
     data.clockTime = state.clock;
-    data.lampsOn = String(state.lampsOn);
+    data.lampsOn = String(this.roomScene.objects.some((object) => object.model === 'lamp' && object.enabled !== false));
     data.sunPatches = String(this.sunPatchMeshes.length);
   }
 

@@ -1,4 +1,4 @@
-import { rotatedHalfExtents, rotationMatrixXYZ } from '../model/room-scene.js';
+import { rotatedHalfExtents, rotationMatrixXYZ, DEVICE_MODELS } from '../model/room-scene.js';
 import { findObjectCollision } from '../model/room-collision.js';
 import { isOpeningObject } from '../model/openings.js';
 
@@ -87,8 +87,8 @@ export function validateScene(scene) {
       && (!Number.isFinite(object.intensity) || object.intensity < 0 || object.intensity > 2)) {
       throw new RangeError(`Object ${object.id ?? '(unknown)'} source strength must be between 0 and 2.`);
     }
-    if (object.model === 'fan' && object.enabled !== undefined && typeof object.enabled !== 'boolean') {
-      throw new TypeError(`Fan ${object.id ?? '(unknown)'} enabled state must be boolean.`);
+    if (DEVICE_MODELS.includes(object.model) && object.enabled !== undefined && typeof object.enabled !== 'boolean') {
+      throw new TypeError(`Device ${object.id ?? '(unknown)'} enabled state must be boolean.`);
     }
     if (isOpeningObject(object)
       && ((object.flowDirection !== undefined && !['exchange', 'inlet', 'outlet'].includes(object.flowDirection))

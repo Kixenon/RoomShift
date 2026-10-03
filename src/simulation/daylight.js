@@ -15,13 +15,10 @@ const RAD = Math.PI / 180;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const mix = (a, b, t) => a + (b - a) * t;
 
-export const LAMP_AUTO_ALTITUDE_DEGREES = 6;
 export const WALLS = Object.freeze(['back', 'front', 'left', 'right']);
-// Nominal lamp output in lumens, matching the value the light preview used
-// before there was a time of day.
 export const DEFAULT_LAMP_POWER = 4500;
-// Mid-afternoon by default: the sun is high enough to throw clear patches and the
-// lamps are off, so the preview opens showing daylight rather than a dark room.
+// Mid-afternoon opens the preview with clear sun patches; lamp state is controlled
+// independently on each lamp.
 export const DEFAULT_TIME_MINUTES = 13 * 60 + 30;
 
 // Compass convention for the scene's coordinates. The room runs x from 0 to
@@ -192,7 +189,6 @@ export function describeDaylight({
   scene,
   timeMinutes = 720,
   date = DEFAULT_DATE,
-  lampsOverride = null,
   ...rest
 } = {}) {
   if (!scene?.room || !Array.isArray(scene.objects)) {
@@ -212,11 +208,6 @@ export function describeDaylight({
   const warmth = 1 - smoothstep(2, 26, sun.altitude);
   const sunColour = mixColour(MIDDAY_SUN, HORIZON_SUN, warmth);
 
-  const hasLamps = scene.objects.some((object) => object.model === 'lamp');
-  const lampsOn = lampsOverride === null
-    ? hasLamps && sun.altitude < LAMP_AUTO_ALTITUDE_DEGREES
-    : Boolean(lampsOverride);
-
   const skyColour = mixColour(NIGHT_SKY, DAY_SKY, daylight);
   const background = mixColour(NIGHT_BACKGROUND, DAY_BACKGROUND, daylight);
 
@@ -234,10 +225,7 @@ export function describeDaylight({
     },
     sky: { colour: skyColour, intensity: mix(0.3, 0.78, daylight) },
     background,
-    // Lamps carry the room at night, so the exposure opens up as daylight fades.
     exposure: mix(1.05, 0.98, daylight),
-    lampsOn,
-    hasLamps,
     patches: sunPatches(scene, { direction, daylight }),
     site: { name: SITE.name, ...rest },
     events: dayEvents({ date, ...rest }),

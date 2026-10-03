@@ -79,7 +79,7 @@ function createLightState(scene, options) {
   const { settings, lamps } = validate(scene, options);
   const grid = createSimulationGrid(scene.room, settings.cellSize);
   const light = new Float32Array(grid.nx * grid.ny * grid.nz).fill(settings.ambientLevel);
-  const sources = lamps.map((lamp) => {
+  const sources = lamps.filter((lamp) => lamp.enabled !== false).map((lamp) => {
     const matrix = rotationMatrixXYZ(lamp.rotation);
     const localBulb = { x: 0, y: lamp.dimensions.height * 0.22, z: 0 };
     return {

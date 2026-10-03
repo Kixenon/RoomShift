@@ -1,6 +1,8 @@
 import {
   MODEL_PRESETS,
+  DEVICE_MODELS,
   addObject,
+  addDevice,
   addWindow,
   addDoor,
   moveObject,
@@ -11,7 +13,7 @@ import {
   rotateObject,
   setObjectModel,
   setObjectIntensity,
-  setFanEnabled,
+  setDeviceEnabled,
   setWindowFlow,
   setWindowOpen,
   setWindowWall,
@@ -42,18 +44,20 @@ const roomInputs = {
 };
 const outdoorTemperatureInput = $('#outdoor-temperature');
 const objectList = $('#object-list');
+const deviceList = $('#device-list');
 const properties = $('#object-properties');
 const fieldControls = {
   airflow: $('#show-airflow'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
-  display: $('#field-display-controls'),
-  displayButtons: [...document.querySelectorAll('[data-display-style]')],
+  display: $('#field-display-control'),
+  displaySelect: $('#field-display'),
   sliceControl: $('#slice-height-control'),
+  sliceSummary: $('#slice-height-summary'),
   sliceHeight: $('#slice-height'),
   sliceValue: $('#slice-height-value'),
   editorStatus: $('#editor-status'),
-  status: $('#field-status'),
+  loading: $('#field-loading'),
   legend: $('#field-legend'),
   legendTitle: $('#field-legend-title'),
   gradient: $('#field-gradient'),
@@ -61,10 +65,9 @@ const fieldControls = {
   legendMax: $('#field-legend-max'),
 };
 const timeControls = {
-  group: $('#time-controls'),
+  group: $('#room-daylight-control'),
   clock: $('#clock-label'),
   slider: $('#time-of-day'),
-  lamps: $('#lamps-toggle'),
 };
 
 let editorState = createEditorState();
@@ -105,34 +108,18 @@ function updateScene(scene, { record = !isDragging } = {}) {
 function renderTimeOfDay() {
   const state = viewport?.daylightState;
   if (!state) return;
+  timeControls.slider.value = String(viewport.timeMinutes);
   timeControls.clock.textContent = state.clock;
   timeControls.clock.title = state.sun.altitude > 0
     ? `Sun ${state.sun.altitude.toFixed(0)}° up, bearing ${Math.round(state.sun.azimuth)}°. ${state.site.name}.`
     : `Sun below the horizon. ${state.site.name}.`;
-  // The button is a lamp switch, so it reads as on whenever the lamps are lit,
-  // whether dusk turned them on or the user did. Only the explanation differs.
-  setPressed(timeControls.lamps, state.lampsOn);
-  timeControls.lamps.setAttribute('aria-label', state.lampsOn ? 'Switch the lamps off' : 'Switch the lamps on');
-  const manual = viewport.lampsOverride !== null;
-  timeControls.lamps.title = state.lampsOn
-    ? `Lamps on${manual ? ', set by hand' : ', following dusk'}. Click to switch them off.`
-    : `Lamps off${manual ? ', set by hand' : ''}. Click to switch them on.`;
 }
 
 timeControls.slider.addEventListener('input', () => {
   viewport.setTimeOfDay({ timeMinutes: Number(timeControls.slider.value) });
   renderTimeOfDay();
 });
-timeControls.lamps.addEventListener('click', () => {
-  // A plain on/off switch. It flips whatever the lamps are doing now, so it can
-  // switch them off at night as well as on during the day; the dusk threshold
-  // only decides the state until the first click.
-  const next = !(viewport?.daylightState?.lampsOn ?? false);
-  viewport.setTimeOfDay({ lampsOverride: next });
-  renderTimeOfDay();
-});
-
-function renderFieldState({ mode, loading, result, error, stale }) {
+function renderFieldState({ mode, loading, result, error }) {
   const viewportElement = $('#viewport');
   const displayStyle = fieldController?.displayStyle;
   for (const [name, button] of Object.entries({
@@ -140,40 +127,35 @@ function renderFieldState({ mode, loading, result, error, stale }) {
     temperature: fieldControls.temperature,
     light: fieldControls.light,
   })) setPressed(button, mode === name);
-  fieldControls.display.hidden = !mode;
   const availableStyles = {
     airflow: ['gas', 'volume', 'slice'],
     temperature: ['surfaces', 'volume', 'slice'],
     light: ['preview', 'map'],
   }[mode] ?? [];
   const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
-  for (const button of fieldControls.displayButtons) {
-    const style = button.dataset.displayStyle;
-    button.hidden = !availableStyles.includes(style);
-    button.textContent = styleLabels[style] ?? style;
-    button.setAttribute('aria-pressed', String(style === displayStyle));
-  }
+  fieldControls.display.hidden = !mode;
+  fieldControls.displaySelect.setAttribute('aria-label', `${mode ?? 'Field'} view`);
+  fieldControls.displaySelect.replaceChildren(...availableStyles.map((style) => new Option(styleLabels[style], style)));
+  if (displayStyle) fieldControls.displaySelect.value = displayStyle;
   const showSlice = (mode === 'airflow' || mode === 'temperature') && displayStyle === 'slice';
   fieldControls.sliceControl.hidden = !showSlice;
   if (fieldController?.scene) {
     fieldControls.sliceHeight.max = String(fieldController.scene.room.height);
     fieldControls.sliceHeight.value = String(fieldController.sliceHeight);
     fieldControls.sliceValue.textContent = `${fieldController.sliceHeight.toFixed(2)} m`;
+    fieldControls.sliceSummary.textContent = `Slice · ${fieldController.sliceHeight.toFixed(2)} m`;
   }
   viewportElement.classList.toggle('field-active', Boolean(mode));
   viewportElement.setAttribute('aria-busy', String(loading));
+  fieldControls.loading.hidden = !loading && !error;
+  fieldControls.loading.classList.toggle('has-error', Boolean(error));
+  fieldControls.loading.title = error?.message ?? '';
+  fieldControls.loading.setAttribute('aria-label', error ? `Simulation unavailable: ${error.message}` : 'Updating simulation');
   fieldControls.legend.hidden = !mode || (!result && !(mode === 'light' && displayStyle === 'preview'));
-  fieldControls.status.textContent = loading ? (mode === 'light' ? 'Estimating…' : 'Solving…') : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
-  fieldControls.status.title = error?.message ?? '';
   const showDaylightControls = mode === 'light' && displayStyle === 'preview';
   timeControls.group.hidden = !showDaylightControls;
   if (showDaylightControls) {
     renderTimeOfDay();
-    // The active mode is already named by the pressed button and the clock
-    // reports the time, so there is nothing worth saying here. Keep the
-    // transient states, which are the only part that carries new information.
-    fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
-    fieldControls.status.title = error?.message ?? '';
     fieldControls.gradient.dataset.mode = 'light';
     fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
     fieldControls.legendMin.textContent = 'shadow';
@@ -271,7 +253,7 @@ function syncRoomInputs() {
 }
 
 function renderObjectList() {
-  objectList.innerHTML = roomScene.objects.map((object) => {
+  const renderRows = (objects) => objects.map((object) => {
     return `
       <button class="object-row ${object.id === selectedId ? 'selected' : ''}" type="button" data-select-object="${escapeHtml(object.id)}" aria-pressed="${object.id === selectedId}">
         <span class="object-row-icon" aria-hidden="true">${escapeHtml((MODEL_PRESETS[object.model] ?? MODEL_PRESETS.box).icon)}</span>
@@ -279,6 +261,8 @@ function renderObjectList() {
       </button>
     `;
   }).join('');
+  objectList.innerHTML = renderRows(roomScene.objects.filter((object) => !DEVICE_MODELS.includes(object.model)));
+  deviceList.innerHTML = renderRows(roomScene.objects.filter((object) => DEVICE_MODELS.includes(object.model)));
 }
 
 function propertyField(label, axis, value, kind, limits = {}) {
@@ -288,6 +272,7 @@ function propertyField(label, axis, value, kind, limits = {}) {
 function renderProperties() {
   const object = selectedObject();
   const isOpening = isOpeningObject(object);
+  const isDevice = DEVICE_MODELS.includes(object?.model);
   const openingLabel = object?.model === 'door' ? 'Door' : 'Window';
   const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative' };
   const sourceLabel = sourceLabels[object?.model];
@@ -304,7 +289,7 @@ function renderProperties() {
     height: { min: 0.1, max: roomScene.room.height },
     depth: { min: 0.1, max: roomScene.room.depth },
   };
-  const modelOptions = Object.entries(MODEL_PRESETS).filter(([key]) => !['window', 'door'].includes(key)).map(([key, model]) => (
+  const modelOptions = Object.entries(MODEL_PRESETS).filter(([key]) => !DEVICE_MODELS.includes(key) && !['window', 'door'].includes(key)).map(([key, model]) => (
     `<option value="${escapeHtml(key)}">${escapeHtml(model.label)}</option>`
   )).join('');
   properties.innerHTML = `
@@ -314,7 +299,7 @@ function renderProperties() {
         <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="${openingLabel} wall">
           <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
         </select></label>
-        <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="${openingLabel} open" ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
+        <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="${openingLabel} open" ${object.open ? 'checked' : ''} /><span>Open</span></label>
         <label class="property-field"><span>Exterior pressure</span><select class="property-input" data-window-flow-direction aria-label="Opening exterior pressure direction">
           <option value="exchange">Stack exchange · two-way</option><option value="inlet">Positive pressure · intake bias</option><option value="outlet">Negative pressure · exhaust bias</option>
         </select></label>
@@ -322,7 +307,7 @@ function renderProperties() {
           <div class="range-heading"><span>Outside wind</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
           <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Exterior wind speed in meters per second" />
         </div>
-      ` : `<label class="property-field"><span>Model</span><select class="property-input" data-object-model aria-label="Box model">${modelOptions}</select></label>`}
+      ` : isDevice ? '' : `<label class="property-field"><span>Type</span><select class="property-input" data-object-model aria-label="Object type">${modelOptions}</select></label>`}
       <div class="property-group">
         <div class="property-label">Position · m</div>
         <div class="property-fields">
@@ -332,7 +317,7 @@ function renderProperties() {
         </div>
       </div>
       ${sourceLabel ? `<div class="property-group">
-        ${object.model === 'fan' ? `<label class="window-open-toggle"><input type="checkbox" data-fan-enabled ${object.enabled !== false ? 'checked' : ''} /><span>${object.enabled !== false ? 'Fan running' : 'Fan off'}</span></label>` : ''}
+        <label class="window-open-toggle"><input type="checkbox" data-device-enabled aria-label="Device on" ${object.enabled !== false ? 'checked' : ''} /><span>On</span></label>
         <div class="range-heading"><span>${sourceLabel}</span><output data-range-output>${intensity.toFixed(2)}×</output></div>
         <input class="property-slider" type="range" min="0" max="2" step="0.05" value="${intensity}" data-source-intensity aria-label="${sourceLabel}" />
       </div>` : ''}
@@ -352,7 +337,6 @@ function renderProperties() {
           ${propertyField('z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
         </div>
       </div>`}
-      ${isOpening ? `<div class="properties-note">${openingLabel} opening · ${object.open ? 'direct light and airflow pass through' : 'closed'}</div>` : ''}
     </div>
   `;
   properties.querySelector('[data-object-name]').value = object.name;
@@ -360,7 +344,7 @@ function renderProperties() {
     properties.querySelector('[data-window-wall]').value = object.wall ?? 'back';
     properties.querySelector('[data-window-flow-direction]').value = object.flowDirection ?? 'exchange';
   }
-  else properties.querySelector('[data-object-model]').value = object.model;
+  else if (!isDevice) properties.querySelector('[data-object-model]').value = object.model;
 }
 
 function renderInspector() {
@@ -393,9 +377,21 @@ function refreshScene() {
   renderInspector();
 }
 
-function addBox() {
+function addRoomObject() {
   try {
     const result = addObject(roomScene);
+    updateScene(result.scene);
+    updateSelection(result.object.id);
+    setEditorStatus('');
+    refreshScene();
+  } catch (error) {
+    setEditorStatus(error.message);
+  }
+}
+
+function addRoomDevice(model) {
+  try {
+    const result = addDevice(roomScene, model);
     updateScene(result.scene);
     updateSelection(result.object.id);
     setEditorStatus('');
@@ -433,19 +429,19 @@ function toggleFieldMode(mode) {
   fieldController.setMode(fieldController.mode === mode ? null : mode);
 }
 
-$('#add-box').addEventListener('click', addBox);
+$('#add-object').addEventListener('click', addRoomObject);
+for (const model of DEVICE_MODELS) {
+  $(`#add-${model}`).addEventListener('click', () => addRoomDevice(model));
+}
 $('#add-window').addEventListener('click', addRoomWindow);
 $('#add-door').addEventListener('click', addRoomDoor);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
-fieldControls.display.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-display-style]');
-  if (button && !button.hidden) fieldController.setDisplayStyle(button.dataset.displayStyle);
-});
+fieldControls.displaySelect.addEventListener('change', () => fieldController.setDisplayStyle(fieldControls.displaySelect.value));
 fieldControls.sliceHeight.addEventListener('input', () => fieldController.setSliceHeight(Number(fieldControls.sliceHeight.value)));
 
-objectList.addEventListener('click', (event) => {
+$('.object-list-section').addEventListener('click', (event) => {
   const row = event.target.closest('[data-select-object]');
   if (!row) return;
   updateSelection(row.dataset.selectObject);
@@ -498,8 +494,8 @@ properties.addEventListener('change', (event) => {
       updateScene(setWindowOpen(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-wall]')) {
       updateScene(setWindowWall(roomScene, object.id, input.value).scene);
-    } else if (input.matches('[data-fan-enabled]')) {
-      updateScene(setFanEnabled(roomScene, object.id, input.checked).scene);
+    } else if (input.matches('[data-device-enabled]')) {
+      updateScene(setDeviceEnabled(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-flow-direction]')) {
       updateScene(setWindowFlow(roomScene, object.id, input.value, object.flowRate ?? 0.35).scene);
     } else if (input.matches('[data-window-flow-rate]')) {

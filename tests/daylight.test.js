@@ -3,7 +3,6 @@ import test from 'node:test';
 import { addWindow, createRoomScene, setWindowOpen } from '../src/model/room-scene.js';
 import {
   COMPASS,
-  LAMP_AUTO_ALTITUDE_DEGREES,
   clipPolygonToRectangle,
   describeDaylight,
   polygonArea,
@@ -103,35 +102,12 @@ test('a sun below the horizon contributes nothing', () => {
   assert.equal(state.sky.intensity, 0.3);
 });
 
-test('at midday the sun is up, the sky is bright and the lamps are off', () => {
+test('at midday the sun is up and the sky is bright', () => {
   const state = describeDaylight({ scene: sceneWithWindow(), timeMinutes: minutes('12:30') });
   assert.ok(state.sun.altitude > 60, `altitude was ${state.sun.altitude}`);
   assert.ok(state.sun.intensity > 2, `intensity was ${state.sun.intensity}`);
   assert.ok(state.sky.intensity > 0.7, `sky intensity was ${state.sky.intensity}`);
-  assert.equal(state.lampsOn, false);
   assert.ok(state.sun.warmth < 0.2, 'a high sun should be close to neutral');
-});
-
-test('lamps come on as the sun drops and can be overridden', () => {
-  const scene = sceneWithWindow();
-  const night = describeDaylight({ scene, timeMinutes: minutes('22:00') });
-  assert.equal(night.lampsOn, true);
-  assert.equal(night.sun.intensity, 0);
-
-  const dusk = describeDaylight({ scene, timeMinutes: minutes('18:20') });
-  assert.equal(dusk.lampsOn, true, 'lamps should run below the auto threshold');
-
-  const forced = describeDaylight({ scene, timeMinutes: minutes('12:30'), lampsOverride: true });
-  assert.equal(forced.lampsOn, true);
-  const suppressed = describeDaylight({ scene, timeMinutes: 0, lampsOverride: false });
-  assert.equal(suppressed.lampsOn, false);
-});
-
-test('a room with no lamps never claims to switch them on', () => {
-  const bare = { ...createRoomScene(), objects: [] };
-  const state = describeDaylight({ scene: bare, timeMinutes: 0 });
-  assert.equal(state.hasLamps, false);
-  assert.equal(state.lampsOn, false);
 });
 
 test('a closed window casts no patch', () => {
@@ -269,27 +245,6 @@ test('the reported day events come along with the state', () => {
   assert.equal(state.clock, '12:30');
   assert.ok(state.events.sunrise !== null && state.events.sunset !== null);
   assert.equal(state.site.name, 'Hong Kong');
-});
-
-test('lamps follow the altitude threshold, not the clock', () => {
-  const scene = sceneWithWindow();
-  // Find a time whose solar altitude straddles the threshold, then check the
-  // lamps switch at it.
-  const threshold = LAMP_AUTO_ALTITUDE_DEGREES;
-  let below = null;
-  let above = null;
-  for (let time = 0; time < 1440 && !(below && above); time += 2) {
-    const altitude = solarPosition({ timeMinutes: time }).altitude;
-    if (altitude < threshold && altitude > threshold - 1 && !below) {
-      below = describeDaylight({ scene, timeMinutes: time });
-    }
-    if (altitude > threshold && altitude < threshold + 1 && !above) {
-      above = describeDaylight({ scene, timeMinutes: time });
-    }
-  }
-  assert.ok(below && above, 'expected to find times on both sides of the threshold');
-  assert.equal(below.lampsOn, true);
-  assert.equal(above.lampsOn, false);
 });
 
 test('invalid input is rejected', () => {
