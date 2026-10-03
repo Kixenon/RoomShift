@@ -135,6 +135,7 @@ export function installScanImport(app) {
         app.toast(`Added “${result.object.name}” at ${dimensions.width} × ${dimensions.depth} × ${dimensions.height} m — set its type in the card`, { timeout: 6000 });
         return;
       }
+    app.track?.('room-size');
       app.apply(sceneFromScan(app.scene, scan), { select: null });
       app.viewport.setReference(scan.root, scan.bounds);
       app.viewport.fitRoom(true);

@@ -1015,6 +1015,91 @@ export class RoomViewport {
     return '3d';
   }
 
+  // A room-space point under the cursor: on a piece of furniture if there is one,
+  // otherwise on the floor.
+  pickPoint(clientX, clientY) {
+    if (!this.roomScene) return null;
+    const bounds = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((clientX - bounds.left) / bounds.width) * 2 - 1;
+    this.pointer.y = -((clientY - bounds.top) / bounds.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.raycaster.intersectObjects([...this.groups.values()], true)[0];
+    const point = hit?.point ?? this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+    if (!point) return null;
+    return { x: point.x + this.roomScene.room.width / 2, y: Math.max(0, point.y), z: point.z + this.roomScene.room.depth / 2 };
+  }
+
+  // Dimension lines between pairs of room-space points.
+  setMeasurements(pairs) {
+    if (this.measureGroup) {
+      this.scene.remove(this.measureGroup);
+      disposeTree(this.measureGroup);
+      this.measureGroup = null;
+    }
+    if (!pairs?.length || !this.roomScene) return;
+    const { width, depth } = this.roomScene.room;
+    const group = new THREE.Group();
+    const toWorld = (point) => new THREE.Vector3(point.x - width / 2, point.y + 0.004, point.z - depth / 2);
+    for (const [a, b] of pairs) {
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([toWorld(a), toWorld(b ?? a)]), new THREE.LineBasicMaterial({ color: 0xff5a36, depthTest: false }));
+      line.renderOrder = 7;
+      group.add(line);
+      for (const point of [a, b].filter(Boolean)) {
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff5a36, depthTest: false }));
+        dot.position.copy(toWorld(point));
+        dot.renderOrder = 7;
+        group.add(dot);
+      }
+    }
+    this.measureGroup = group;
+    this.scene.add(group);
+  }
+
+  // Clearance overlay on the floor: walkable area, access zones, door swings
+  // and heater keep-out circles.
+  setZones(zones) {
+    if (this.zoneGroup) {
+      this.sceneRoot.remove(this.zoneGroup);
+      disposeTree(this.zoneGroup);
+      this.zoneGroup = null;
+    }
+    if (!zones || !this.roomScene) return;
+    const { width, depth } = this.roomScene.room;
+    const group = new THREE.Group();
+    const flat = (geometry, color, opacity, x, z, rotation = 0, y = 0.008) => {
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.z = rotation;
+      mesh.position.set(x - width / 2, y, z - depth / 2);
+      mesh.raycast = () => {};
+      mesh.renderOrder = 1;
+      group.add(mesh);
+      return mesh;
+    };
+    if (zones.walkable) {
+      const { nx, nz, data } = zones.walkable;
+      const pixels = new Uint8Array(nx * nz * 4);
+      for (let index = 0; index < nx * nz; index += 1) {
+        pixels[index * 4] = 63; pixels[index * 4 + 1] = 207; pixels[index * 4 + 2] = 142; pixels[index * 4 + 3] = data[index] ? 120 : 0;
+      }
+      const texture = new THREE.DataTexture(pixels, nx, nz, THREE.RGBAFormat);
+      texture.needsUpdate = true;
+      texture.magFilter = THREE.LinearFilter;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false }));
+      mesh.rotation.x = Math.PI / 2;
+      mesh.position.y = 0.005;
+      mesh.raycast = () => {};
+      group.add(mesh);
+    }
+    for (const zone of zones.items ?? []) {
+      if (zone.kind === 'access') flat(new THREE.PlaneGeometry(zone.width, zone.depth), zone.ok ? 0x4f8dff : 0xff7a45, 0.28, zone.x, zone.z, zone.rotation);
+      else if (zone.kind === 'swing') flat(new THREE.CircleGeometry(zone.radius, 32, zone.start, Math.PI / 2), zone.ok ? 0xf5b83d : 0xff7a45, 0.3, zone.x, zone.z);
+      else if (zone.kind === 'keepout') flat(new THREE.RingGeometry(zone.inner, zone.radius, 48), zone.ok ? 0xf5b83d : 0xff5a36, 0.26, zone.x, zone.z);
+    }
+    this.zoneGroup = group;
+    this.sceneRoot.add(group);
+  }
+
   // Spinning blades and oscillating heads.
   animateFans(seconds) {
     if (this.prefersReducedMotion || !this.groups) return;
@@ -1180,6 +1265,8 @@ export class RoomViewport {
       this.selectionBox = null;
     }
     const keptLayers = [...(this.layers?.values() ?? [])];
+    this.zoneGroup = null;
+    this.surfaceMap = null;
     for (const child of [...this.sceneRoot.children]) {
       if (keptLayers.includes(child)) continue;
       this.sceneRoot.remove(child);
@@ -1724,6 +1811,7 @@ export class RoomViewport {
     const distance = Math.hypot(event.clientX - this.pointerStart.x, event.clientY - this.pointerStart.y);
     this.pointerStart = null;
     if (distance > 5) return;
+    if (this.clickInterceptor?.(event)) return;
     const selected = this.objectAtPointer(event.clientX, event.clientY);
     if (!selected && this.onEmptyClick?.(this.probeAtPointer(event.clientX, event.clientY))) return;
     this.select(selected);

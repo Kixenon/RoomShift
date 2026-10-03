@@ -77,6 +77,7 @@ export function installVariants(app) {
   }
 
   function compare() {
+    app.track?.('compare');
     const list = syncActive();
     const metrics = list.map((variant) => roomMetrics(variant.scene, app.project, app.weather));
     dialog.querySelector('#compare-body').innerHTML = `<div class="compare-scroll"><table class="compare-table">

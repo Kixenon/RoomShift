@@ -562,3 +562,31 @@ details.exact[open] summary::before { content: '▾ '; }
 .drawer-side { display: grid; align-content: start; gap: 10px; overflow-y: auto; }
 .drawer-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .drawer-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
+
+.measure-label { position: absolute; z-index: 8; top: 0; left: 0; padding: 3px 9px; border-radius: 999px; background: #ff5a36; color: #fff; font: 600 12px 'Geist Mono', monospace; box-shadow: var(--shadow); }
+.measure-label:hover { text-decoration: line-through; }
+.viewport.measuring #room-canvas { cursor: crosshair !important; }
+
+/* Guided plans */
+.journey-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.journey-card { display: grid; gap: 6px; align-content: start; padding: 16px; border-radius: 14px; background: var(--raise); text-align: left; border: 1.5px solid transparent; transition: border-color .15s, transform .2s var(--ease); }
+.journey-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.journey-card .persona { color: var(--accent); font: 600 11px 'Geist Mono', monospace; text-transform: uppercase; letter-spacing: .05em; }
+.journey-card strong { font-size: 15px; }
+.journey-card span:last-child { color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
+.journey-panel { padding: 2px 4px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+.journey-start { width: 100%; height: 32px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 12.5px; }
+.journey-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 6px; }
+.journey-head .label { font-size: 12px; font-weight: 600; color: var(--ink); }
+.journey-progress { height: 4px; margin: 0 4px 8px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.journey-progress i { display: block; height: 100%; background: var(--good); transition: width .5s var(--ease); }
+.journey-steps { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.journey-steps button { display: flex; gap: 8px; width: 100%; padding: 6px; border-radius: 8px; text-align: left; align-items: flex-start; }
+.journey-steps button:hover { background: var(--raise-2); }
+.journey-steps .tick { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--raise-2); font: 600 10.5px 'Geist Mono', monospace; color: var(--ink-3); }
+.journey-steps li.done .tick { background: var(--good); color: #fff; }
+.journey-steps li.done strong { color: var(--ink-3); text-decoration: line-through; font-weight: 500; }
+.journey-steps li.next .tick { background: var(--accent); color: #fff; }
+.journey-steps strong { display: block; font-size: 12.5px; font-weight: 500; }
+.journey-steps small { display: block; color: var(--ink-3); font-size: 11px; }
+.journey-done { margin: 6px 4px 0; color: var(--good); font-size: 12px; }

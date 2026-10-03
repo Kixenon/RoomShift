@@ -149,6 +149,7 @@ export function installFloorPlan(app) {
   const clampRoom = (room) => ({ width: Math.min(20, Math.max(2, room.width)), depth: Math.min(20, Math.max(2, room.depth)) });
   dialog.querySelector('#plan-apply').addEventListener('click', () => {
     const underlay = underlayFor(plan, corners);
+    app.track?.('room-size');
     app.apply(resizeRoom(app.scene, clampRoom(underlay.room)));
     app.setProject({ underlay });
     app.viewport.setUnderlay(underlay);

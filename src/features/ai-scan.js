@@ -254,6 +254,7 @@ export function installAiScan(app) {
   drop.addEventListener('drop', (event) => { event.preventDefault(); drop.classList.remove('over'); run(event.dataTransfer.files[0]); });
   dialog.querySelector('#ai-apply').addEventListener('click', () => {
     if (!pending) return;
+    app.track?.('room-size');
     app.apply(sceneFromLayout(app.scene, pending), { select: null });
     app.viewport.fitRoom(true);
     dialog.close();

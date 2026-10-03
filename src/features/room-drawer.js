@@ -337,6 +337,7 @@ export function installRoomDrawer(app) {
   });
   dialog.addEventListener('click', (event) => { if (event.target.closest('[data-close]') || event.target === dialog) dialog.close(); });
   dialog.querySelector('#drawer-apply').addEventListener('click', () => {
+    app.track?.('room-size');
     app.apply(applyPlan(app.scene, points, walls), { select: null });
     app.viewport.fitRoom(true);
     dialog.close();

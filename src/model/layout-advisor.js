@@ -1,6 +1,7 @@
 import { MODEL_PRESETS, floorContains, insidePartition, isWallItem, objectMaterial, moveObject, rotateObject } from './room-scene.js';
 import { lightContext, luxAt, roomAcoustics, wifiAt } from '../simulation/room-propagation.js';
 import { heatBalance, ventilation } from './environment.js';
+import { OUTDOOR_NOISE, indoorNoise, seatComfort } from './comfort.js';
 
 // Issue categories, in the order the Insights panel shows them.
 export const CATEGORIES = Object.freeze({
@@ -379,6 +380,19 @@ export function evaluateLayout(scene, { environment = null, weather = null } = {
     if (heat.indoor > 28) add('medium', `The room settles around ${heat.indoor.toFixed(1)} °C — shade sunny windows, open up, or add cooling`, null);
     else if (heat.indoor < 18) add('low', `The room settles around ${heat.indoor.toFixed(1)} °C — on the cold side`, null);
     if (heat.capacity > 0 && heat.coolingShort > 300) add('low', `The AC is ~${Math.round(heat.coolingShort)} W short of holding 24 °C`, scene.objects.find((object) => object.model === 'ac')?.id ?? null);
+    // ISO 7730 comfort at the places people spend time.
+    for (const seat of scene.objects.filter((object) => ['bed', 'desk', 'sofa'].includes(object.model))) {
+      const comfort = seatComfort(seat, { airTemperature: heat.indoor, humidity: weather?.humidity ?? 55 });
+      if (Math.abs(comfort.pmv) > 1) add('low', `${seat.name}: ${comfort.label.toLowerCase()} for ${comfort.activity} — about ${Math.round(comfort.ppd)}% of people would be uncomfortable`, seat.id);
+    }
+    // Outside noise at night, against the WHO guideline for sleep.
+    if (scene.objects.some((object) => object.model === 'bed')) {
+      area = 'sound';
+      const outdoor = OUTDOOR_NOISE[environment.noise ?? 'residential'];
+      const inside = indoorNoise(scene, outdoor.level, roomAcoustics(scene).absorption);
+      if (inside !== null && inside > 35) add('medium', `Outside noise reaches ~${Math.round(inside)} dB inside — above the WHO’s 30–35 dB for sleep; close the window or use thicker glazing`, null);
+      area = 'comfort';
+    }
     const sunnyWindow = heat.solarByWindow.reduce((best, entry) => (entry.watts > (best?.watts ?? 0) ? entry : best), null);
     if (sunnyWindow && sunnyWindow.watts > 400) add('low', `${sunnyWindow.window.name} lets in ${Math.round(sunnyWindow.watts)} W of sun right now — like a heater; a blind or curtain cuts it`, sunnyWindow.window.id);
   }
@@ -496,4 +510,35 @@ export async function suggestLayout(scene, { iterations = 1400, onProgress = () 
   const before = evaluateLayout(scene, { environment, weather });
   const after = evaluateLayout(best, { environment, weather });
   return { scene: best, before, after, improved: after.score > before.score };
+}
+
+// Shapes for the clearance overlay: where you need room to use each thing.
+export function clearanceZones(scene, report = evaluateLayout(scene)) {
+  const items = [];
+  const problems = new Set(report.issues.map((issue) => issue.objectId));
+  for (const object of scene.objects) {
+    const depth = ACCESS[object.model];
+    if (depth && object.position.y < 0.6) {
+      const fp = footprint(object);
+      items.push({
+        kind: 'access', ok: !problems.has(object.id),
+        x: fp.cx + fp.front.x * (fp.hd + depth / 2), z: fp.cz + fp.front.z * (fp.hd + depth / 2),
+        width: object.dimensions.width, depth, rotation: (object.rotation.y * Math.PI) / 180,
+      });
+    }
+    if (object.model === 'heater') items.push({ kind: 'keepout', ok: !problems.has(object.id), x: object.position.x, z: object.position.z, inner: Math.max(object.dimensions.width, object.dimensions.depth) / 2, radius: Math.max(object.dimensions.width, object.dimensions.depth) / 2 + 0.9 });
+    if (object.model === 'door' && object.props?.swing !== 'out') {
+      const n = inwardNormal(object.wall);
+      const half = object.dimensions.width / 2;
+      const right = object.props?.hinge === 'right';
+      // Hinge corner and the quarter circle the leaf sweeps into the room.
+      const along = { x: Math.abs(n.z), z: Math.abs(n.x) };
+      const sign = right ? 1 : -1;
+      const hinge = { x: object.position.x + along.x * sign * half, z: object.position.z + along.z * sign * half };
+      const facing = Math.atan2(n.z, n.x);
+      const start = -(facing + (right ? 0 : Math.PI / 2));
+      items.push({ kind: 'swing', ok: !problems.has(object.id) && !report.issues.some((issue) => /swing/.test(issue.text)), x: hinge.x, z: hinge.z, radius: object.dimensions.width - 0.08, start });
+    }
+  }
+  return { walkable: report.reachableMask, items };
 }

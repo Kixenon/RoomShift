@@ -36,7 +36,9 @@ import {
   TEMPLATES, createProject, deleteProject, duplicateProject, exportProjectFile, getProject, importProjectFile, listProjects, saveProject,
 } from './model/projects.js';
 import { CITIES, compassLabel, environmentOf, fetchWeather, sunlitWalls, ventilation, wallBearings, windwardWall } from './model/environment.js';
-import { evaluateLayout, suggestLayout } from './model/layout-advisor.js';
+import { clearanceZones, evaluateLayout, suggestLayout } from './model/layout-advisor.js';
+import { OUTDOOR_NOISE, indoorNoise, seatComfort, sunHours } from './model/comfort.js';
+import { heatBalance, bearingToRoomVector, sunPosition } from './model/environment.js';
 import {
   LIGHT_BANDS, SOUND_BANDS, WIFI_BANDS, bandFor, computePlaneField, computeVolumeField, lightContext, luxAt, profileAlong, roomAcoustics, sampleListeningSpots, soundAt, wifiAt,
 } from './simulation/room-propagation.js';
@@ -118,6 +120,9 @@ export const app = {
   renderAll: () => renderAll(),
 };
 const paletteProviders = [];
+app.onFrameHandlers = [];
+app.onChange = [];
+const notifyChange = () => { for (const handler of app.onChange) handler(); };
 const dockProviders = [];
 const fileMenuItems = [];
 
@@ -362,6 +367,7 @@ function ensureViewport() {
     },
     onProbe: renderProbe,
     onRoomResize(dimensions) {
+      app.track?.('room-size');
       try {
         apply(resizeRoom(roomScene, dimensions));
         toast(`Room is now ${fmt(roomScene.room.width, 2)} × ${fmt(roomScene.room.depth, 2)} m`, { action: 'Undo', onAction: undo });
@@ -374,7 +380,11 @@ function ensureViewport() {
     if (isWallItem(object)) toggleOpen(object.id);
   };
   viewport.onViewChange = syncViewButtons;
-  viewport.onFrame = () => { positionCard(); if (pins.length) positionPins(); };
+  viewport.onFrame = () => {
+    positionCard();
+    if (pins.length) positionPins();
+    for (const handler of app.onFrameHandlers) handler();
+  };
   viewport.onEmptyClick = (point) => (selectedId ? false : addPin(point));
   viewport.setTheme(resolvedTheme());
   fieldController = new RoomFieldController({
@@ -463,10 +473,32 @@ const selectedObject = () => roomScene?.objects.find((object) => object.id === s
 
 // The CFD solver knows fans, heaters and windows: a door is an opening and an AC
 // unit drives a jet like a fan.
+// Sun through each window lands as a warm patch on the floor: model it as a heat
+// source where the ray through the window centre meets the floor.
+function solarHeatSources() {
+  const environment = environmentOf(project);
+  const sun = sunPosition(environment);
+  if (sun.altitude <= 2) return [];
+  const heat = heatBalance(roomScene, environment, { outdoor: weather?.temperature ?? null, cloudCover: weather?.cloudCover });
+  const toSun = bearingToRoomVector(sun.azimuth, environment.backWallBearing, sun.altitude);
+  const { width, depth } = roomScene.room;
+  return heat.solarByWindow.filter((entry) => entry.watts > 120).map(({ window, watts }) => {
+    const centerY = window.position.y + window.dimensions.height / 2;
+    const t = centerY / Math.max(0.05, toSun.y);
+    const x = Math.min(width - 0.3, Math.max(0.3, window.position.x - toSun.x * t));
+    const z = Math.min(depth - 0.3, Math.max(0.3, window.position.z - toSun.z * t));
+    return {
+      id: `sun-${window.id}`, model: 'heater', primitive: 'box', name: 'Sun patch',
+      position: { x, y: 0, z }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.4, height: 0.05, depth: 0.4 },
+      props: { watts: Math.min(2500, watts) },
+    };
+  });
+}
+
 function solverScene() {
   return {
     ...roomScene,
-    objects: roomScene.objects.map((object) => {
+    objects: [...solarHeatSources(), ...roomScene.objects.map((object) => {
       if (object.model === 'door') return { ...object, model: 'window' };
       // The jet follows the fan head (yaw, tilt) or the AC louver.
       if (object.model === 'fan') {
@@ -485,7 +517,7 @@ function solverScene() {
         };
       }
       return object;
-    }),
+    })],
   };
 }
 function pushSolverScene() {
@@ -498,6 +530,7 @@ function afterChange() {
   scheduleSave();
   scheduleLayoutReport();
   refreshLensFields();
+  app.track?.('edit');
 }
 
 function updateScene(scene, { record = !isDragging } = {}) {
@@ -1053,6 +1086,7 @@ function setLens(mode, { additive = false } = {}) {
 
 function applyLenses() {
   document.body.dataset.lens = lens ?? 'none';
+  for (const item of lenses) app.track?.(`lens:${item}`);
   for (const button of $$('.lens[data-mode]')) {
     const on = lenses.has(button.dataset.mode);
     button.classList.toggle('active', on);
@@ -1454,14 +1488,17 @@ function openSheet(panel, { toggle = true } = {}) {
   $('#editor').classList.add('sheet-open');
   updateInsets();
   for (const item of $$('.sheet-panel')) item.hidden = item.dataset.panel !== panel;
+  if (panel !== 'insights') viewport.setZones(null);
   for (const tab of $$('.sheet-tabs [data-sheet]')) tab.classList.toggle('active', tab.dataset.sheet === panel);
   if (panel === 'insights') { renderLayoutReport(); renderModeInsights(); }
+  app.track?.(panel);
   app.onSheet?.forEach((handler) => handler(panel));
   positionCard();
 }
 app.openSheet = openSheet;
 app.onSheet = [];
 function closeSheet() {
+  viewport?.setZones(null);
   $('#sheet').hidden = true;
   $('#editor').classList.remove('sheet-open');
   updateInsets();
@@ -1508,6 +1545,9 @@ function renderLayoutReport() {
     ${issueList(filtered)}`;
   renderOutline();
   if (!lens) renderNarrator();
+  notifyChange();
+  const insightsOpen = !$('#sheet').hidden && $('#sheet').dataset.panel === 'insights';
+  viewport.setZones(insightsOpen ? clearanceZones(roomScene, layoutReport) : null);
 }
 let categoryFilter = '';
 $('#layout-report').addEventListener('click', (event) => {
@@ -1527,6 +1567,23 @@ $('#suggest-body').addEventListener('click', selectFromIssue);
 function spotsTable(spots, unit, bands, digits = 0) {
   if (!spots.length) return '<p>Add a bed, desk or sofa to see values where people sit.</p>';
   return `<table class="spot-table">${spots.map((spot) => `<tr><td>${escapeHtml(spot.object.name)}</td><td class="num">${fmt(spot.value, digits)} ${unit}</td><td><span class="band">${bandFor(bands, spot.value).label}</span></td></tr>`).join('')}</table>`;
+}
+
+// ISO 7730 comfort at each seat: the settled room temperature, plus the local
+// warming the 3D field shows, with the air speed there.
+function comfortTable() {
+  const environment = environmentOf(project);
+  const heat = heatBalance(roomScene, environment, { outdoor: weather?.temperature ?? null, windSpeed: weather?.windSpeed ?? null, cloudCover: weather?.cloudCover });
+  const seats = roomScene.objects.filter((object) => ['bed', 'desk', 'sofa', 'chair'].includes(object.model));
+  if (!seats.length) return '';
+  const rows = seats.map((seat) => {
+    const point = { x: seat.position.x, y: Math.min(1.1, seat.position.y + seat.dimensions.height + 0.25), z: seat.position.z };
+    const local = solverResult ? (sampleVolume(solverResult, point, 'temperature') ?? solverResult.ambientTemperature) - solverResult.ambientTemperature : 0;
+    const speed = solverResult ? sampleVolume(solverResult, point, 'speed') ?? 0.1 : 0.1;
+    const comfort = seatComfort(seat, { airTemperature: heat.indoor + local, airSpeed: Math.max(0.05, speed), humidity: weather?.humidity ?? 55 });
+    return `<tr><td>${escapeHtml(seat.name)}<br><span class="muted" style="font-size:11px">${comfort.activity}</span></td><td class="num">${fmt(heat.indoor + local, 1)} °C</td><td><span class="band">${comfort.label}</span><br><span class="muted" style="font-size:11px">${fmt(comfort.ppd)}% unhappy</span></td></tr>`;
+  }).join('');
+  return `<h3 class="sheet-h">Comfort where people are</h3><table class="spot-table">${rows}</table>`;
 }
 
 function renderModeInsights() {
@@ -1550,12 +1607,26 @@ function renderModeInsights() {
     const verdict = rt < 0.35 ? 'Very absorbent: speech is clear, music sounds flat.' : rt < 0.7 ? 'A comfortable living-room range.' : rt < 1.1 ? 'Some echo. A rug, curtains or a fabric sofa will calm it.' : 'Hard surfaces dominate. Add soft furnishings or acoustic panels.';
     body.innerHTML = `<div class="metric-row"><div class="metric"><span class="metric-value">${fmt(rt, 2)} s</span><span class="metric-label">Echo (RT60)</span></div><div class="metric"><span class="metric-value">${fmt(acoustics.absorption, 1)}</span><span class="metric-label">Absorption m²</span></div><div class="metric"><span class="metric-value">${Math.round(acoustics.meanAbsorption * 100)}%</span><span class="metric-label">Avg absorb</span></div></div>
       <p>${verdict}</p>${spotsTable(sampleListeningSpots(roomScene, 'sound'), 'dB', SOUND_BANDS)}
+      ${(() => {
+        const outdoor = OUTDOOR_NOISE[environment.noise ?? 'residential'];
+        const inside = indoorNoise(roomScene, outdoor.level, acoustics.absorption);
+        if (inside === null) return '';
+        return `<p><strong>Outside noise indoors: ${fmt(inside)} dB</strong> from a ${outdoor.label.toLowerCase()} (${outdoor.level} dB). ${inside > 35 ? 'Above the WHO’s 30–35 dB guideline for sleep — close or upgrade the windows.' : 'Quiet enough to sleep (WHO guideline: 30–35 dB at night).'}</p>`;
+      })()}
       <p>${acoustics.formula} reverberation from floor, wall and furniture materials. Level = direct field (with barrier loss behind objects) + diffuse field 4/R.</p>`;
   } else if (lens === 'light') {
     const { sun } = sunlitWalls(environment);
     const context = planeField?.light ?? lightContext(roomScene, environment, weather?.cloudCover);
     body.innerHTML = `<div class="metric-row"><div class="metric"><span class="metric-value">${sun.altitude > 0 ? `${fmt(sun.altitude)}°` : '—'}</span><span class="metric-label">Sun height</span></div><div class="metric"><span class="metric-value">${fmt(context.indirect)}</span><span class="metric-label">Bounce lux</span></div><div class="metric"><span class="metric-value">${Math.round(context.reflectance * 100)}%</span><span class="metric-label">Reflectance</span></div></div>
       ${spotsTable(sampleListeningSpots(roomScene, 'light', context), 'lux', LIGHT_BANDS)}
+      ${(() => {
+        const spots = roomScene.objects.filter((object) => ['bed', 'desk', 'sofa', 'plant'].includes(object.model));
+        if (!spots.length) return '';
+        return `<h3 class="sheet-h">Direct sun today</h3><table class="spot-table">${spots.map((spot) => {
+          const hours = sunHours(roomScene, environment, { x: spot.position.x, y: spot.position.y + spot.dimensions.height, z: spot.position.z });
+          return `<tr><td>${escapeHtml(spot.name)}</td><td class="num">${hours ? `${fmt(hours, 1)} h` : 'none'}</td></tr>`;
+        }).join('')}</table>`;
+      })()}
       <p>Point-source lamps (inverse-square and cosine law, shadowed), direct sun through glass (70% transmission), sky light through windows, and the lumen-method inter-reflection from your finishes. Desk work wants 300–500 lux (EN 12464-1).</p>`;
   } else if (lens === 'airflow') {
     const people = environment.people ?? 1;
@@ -1577,7 +1648,8 @@ function renderModeInsights() {
         const temperature = sampleVolume(fieldResult, { x: object.position.x, y: Math.min(1.1, object.position.y + object.dimensions.height + 0.25), z: object.position.z }, 'temperature');
         return `<tr><td>${escapeHtml(object.name)}</td><td class="num">${temperature === null ? '—' : `${fmt(temperature, 1)} °C`}</td></tr>`;
       }).join('')}</table>
-      <p>Heaters inject their watts as heat (P / ρcₚ into the plume), warm air rises by Boussinesq buoyancy, is carried by the flow and leaves through open windows. Baseline ${fmt(fieldResult.ambientTemperature, 1)} °C is set in Site.</p>`;
+      ${comfortTable()}
+      <p>Heaters inject their watts as heat (P / ρcₚ into the plume) and sun through windows warms the floor where it lands; warm air rises by Boussinesq buoyancy and leaves through open windows. Comfort is ISO 7730 PMV/PPD with seasonal clothing and the activity at each seat.</p>`;
   } else {
     body.innerHTML = '<p><span class="spinner"></span> Working…</p>';
   }
@@ -1608,6 +1680,7 @@ function renderRoomSheet() {
 app.onRoomSheet = [];
 for (const axis of ['width', 'depth', 'height']) {
   $(`#room-${axis}`).addEventListener('change', (event) => {
+    app.track?.('room-size');
     try { apply(resizeRoom(roomScene, { [axis]: Number(event.target.value) })); } catch (error) {
       event.target.value = roomScene.room[axis];
       toast(error.message, { tone: 'warn' });
@@ -1642,6 +1715,8 @@ function renderSiteSheet() {
   $('#env-day').value = environment.day;
   $('#env-baseline').value = environment.baselineTemperature;
   $('#env-people').value = environment.people ?? 1;
+  if (!$('#env-noise').options.length) $('#env-noise').innerHTML = Object.entries(OUTDOOR_NOISE).map(([key, item]) => `<option value="${key}">${item.label} · ${item.level} dB</option>`).join('');
+  $('#env-noise').value = environment.noise ?? 'residential';
   const bearings = wallBearings(environment.backWallBearing);
   $('#compass').innerHTML = `<div class="compass-room"><span class="w back">Back · ${compassLabel(bearings.back)}</span><span class="w front">Front · ${compassLabel(bearings.front)}</span><span class="w left">${compassLabel(bearings.left)}</span><span class="w right">${compassLabel(bearings.right)}</span></div>`;
   renderWeather();
@@ -1658,6 +1733,14 @@ function updateEnvironment(patch) {
   scheduleSave();
 }
 app.updateEnvironment = updateEnvironment;
+app.setLens = setLens;
+app.ventilation = () => ventilation(roomScene, { windSpeed: weather?.windSpeed ?? null, people: environmentOf(project).people ?? 1 });
+app.rt60 = () => roomAcoustics(roomScene).rt60;
+app.selectModel = (model) => {
+  const object = roomScene.objects.find((item) => item.model === model);
+  if (object) select(object.id);
+  else toast(`There’s no ${MODEL_PRESETS[model]?.label.toLowerCase() ?? model} in the room yet`);
+};
 $('#env-city').addEventListener('change', (event) => {
   const city = CITIES.find((item) => item.id === event.target.value);
   weather = null;
@@ -1666,6 +1749,7 @@ $('#env-city').addEventListener('change', (event) => {
 $('#env-bearing').addEventListener('change', (event) => updateEnvironment({ backWallBearing: Number(event.target.value) }));
 $('#env-month').addEventListener('change', (event) => updateEnvironment({ month: Math.min(12, Math.max(1, Number(event.target.value) || 1)) }));
 $('#env-day').addEventListener('change', (event) => updateEnvironment({ day: Math.min(31, Math.max(1, Number(event.target.value) || 1)) }));
+$('#env-noise').addEventListener('change', (event) => updateEnvironment({ noise: event.target.value }));
 $('#env-people').addEventListener('change', (event) => updateEnvironment({ people: Math.min(12, Math.max(0, Math.round(Number(event.target.value) || 0))) }));
 $('#env-baseline').addEventListener('change', (event) => updateEnvironment({ baselineTemperature: Math.min(40, Math.max(0, Number(event.target.value) || 20)) }));
 
@@ -1688,6 +1772,7 @@ $('#weather-refresh').addEventListener('click', async () => {
   $('#weather').innerHTML = '<span class="muted"><span class="spinner"></span> Fetching…</span>';
   try {
     weather = await fetchWeather(environmentOf(project));
+    app.track?.('weather');
     renderWeather();
     scheduleLensFrame();
   } catch (error) {
@@ -1756,6 +1841,7 @@ $('#context-menu').addEventListener('click', (event) => {
 let suggestion = null;
 let suggestRun = 0;
 async function runSuggestion() {
+  app.track?.('suggest');
   const dialog = $('#suggest-dialog');
   if (!dialog.open) dialog.showModal();
   const run = ++suggestRun;
@@ -2041,10 +2127,10 @@ const ACTIONS = {
   'duplicate-selected': () => { for (const id of filesSelection) duplicateProject(id); filesSelection.clear(); renderFiles(); },
   'export-selected': () => { for (const id of filesSelection) downloadFile(getProject(id)); },
   'delete-selected': deleteSelectedFiles,
-  report: () => app.openReport?.(),
+  report: () => { app.track?.('report'); app.openReport?.(); },
   'ar-usdz': () => app.exportAr?.('usdz'),
   'ar-glb': () => app.exportAr?.('glb'),
-  compare: () => app.compareLayouts?.(),
+  compare: () => { app.track?.('compare'); app.compareLayouts?.(); },
   'draw-room': () => app.openRoomDrawer?.(),
 };
 app.actions = ACTIONS;
