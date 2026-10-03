@@ -578,11 +578,9 @@ function renderNarrator() {
   const narrator = $('#narrator');
   if (!roomScene) return;
   if (!lens) {
-    if (!layoutReport) { narrator.innerHTML = ''; return; }
-    const high = layoutReport.issues.filter((issue) => issue.severity !== 'low').length;
-    narrator.innerHTML = high
-      ? `Livability <strong>${layoutReport.score}</strong> · ${high} thing${high > 1 ? 's' : ''} to fix — click the score`
-      : `Livability <strong>${layoutReport.score}</strong> · pick a lens to see air, heat, light, WiFi or sound`;
+    // The score orb lives in the lens bar, so the idle livability summary is
+    // redundant; the narrator only speaks while a lens is on.
+    narrator.innerHTML = '';
     return;
   }
   if (VOLUME_LENSES.has(lens)) {

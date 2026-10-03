@@ -27,7 +27,9 @@ export const TEMPLATES = Object.freeze([
       // the day, west-facing for the afternoon (the default 15:00 demo time).
       let scene = createRoomScene();
       const south = addWindow(scene, 'back');
-      scene = moveObject(south.scene, south.object.id, { x: 2.0, y: 0.9 }).scene;
+      // x=3.3: behind the sofa, and clear of the sightline from the default
+      // camera to the fan, so clicking the fan doesn't hit the glass first.
+      scene = moveObject(south.scene, south.object.id, { x: 3.3, y: 0.9 }).scene;
       const west = addWindow(scene, 'left');
       scene = moveObject(west.scene, west.object.id, { z: 2.6, y: 0.9 }).scene;
       return scene;
