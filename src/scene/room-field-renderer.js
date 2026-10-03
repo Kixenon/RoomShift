@@ -4,7 +4,7 @@ import { rotationMatrixXYZ } from '../model/room-scene.js';
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const indexOf = (i, j, k, grid) => (j * grid.nz + k) * grid.nx + i;
 const AIRFLOW_DISPLAY_RANGE = 1.2;
-const HEAT_DISPLAY_RANGE = 8;
+const HEAT_DISPLAY_RANGE = 12;
 
 export function getAirflowColor(speed, maximumSpeed) {
   const intensity = clamp(Number.isFinite(speed) ? speed / Math.max(0.001, maximumSpeed) : 0, 0, 1);
@@ -60,7 +60,7 @@ function sampleVelocity(result, point, target = new THREE.Vector3()) {
 
 function normalizeScalar(result, mode, value) {
   if (mode === 'airflow') return clamp(value / AIRFLOW_DISPLAY_RANGE, 0, 1);
-  if (mode === 'temperature') return clamp((value - result.ambientTemperature) / HEAT_DISPLAY_RANGE, 0, 1);
+  if (mode === 'temperature') return clamp((value - (result.ambientTemperature - 4)) / HEAT_DISPLAY_RANGE, 0, 1);
   return clamp((value - result.ambientLevel) / Math.max((result.stats.maxLevel ?? result.stats.maxLight) - result.ambientLevel, 0.05), 0, 1);
 }
 
@@ -101,7 +101,7 @@ export function createFieldVolume(result, mode) {
       uField: { value: texture },
       uVolumeSize: { value: new THREE.Vector3(grid.width, grid.height, grid.depth) },
       uStepLength: { value: stepLength },
-      uOpacity: { value: mode === 'airflow' ? 1.8 : 2.1 },
+      uOpacity: { value: mode === 'airflow' ? 1.8 : mode === 'temperature' ? 1.1 : 2.1 },
       uFieldMode: { value: mode === 'airflow' ? 0 : mode === 'temperature' ? 1 : 2 },
     },
     side: THREE.FrontSide,
@@ -132,14 +132,18 @@ export function createFieldVolume(result, mode) {
 
       vec3 palette(float value) {
         if (uFieldMode == 1) {
-          vec3 cold = vec3(0.015, 0.035, 0.22);
-          vec3 cyan = vec3(0.0, 0.65, 1.0);
-          vec3 yellow = vec3(1.0, 0.88, 0.03);
-          vec3 red = vec3(1.0, 0.12, 0.015);
-          if (value < 0.28) return mix(cold, cyan, value / 0.28);
-          if (value < 0.58) return mix(cyan, yellow, (value - 0.28) / 0.3);
-          if (value < 0.84) return mix(yellow, red, (value - 0.58) / 0.26);
-          return mix(red, vec3(1.0), (value - 0.84) / 0.16);
+          vec3 cold = vec3(0.094, 0.043, 0.247);
+          vec3 blue = vec3(0.149, 0.231, 0.71);
+          vec3 cyan = vec3(0.031, 0.659, 0.847);
+          vec3 green = vec3(0.212, 0.843, 0.639);
+          vec3 yellow = vec3(0.941, 0.843, 0.22);
+          vec3 red = vec3(0.91, 0.29, 0.157);
+          if (value < 0.2) return mix(cold, blue, value / 0.2);
+          if (value < 0.4) return mix(blue, cyan, (value - 0.2) / 0.2);
+          if (value < 0.58) return mix(cyan, green, (value - 0.4) / 0.18);
+          if (value < 0.73) return mix(green, yellow, (value - 0.58) / 0.15);
+          if (value < 0.88) return mix(yellow, red, (value - 0.73) / 0.15);
+          return mix(red, vec3(1.0, 0.949, 0.835), (value - 0.88) / 0.12);
         }
         vec3 navy = vec3(0.015, 0.025, 0.11);
         vec3 blue = vec3(0.02, 0.22, 0.95);
@@ -175,7 +179,7 @@ export function createFieldVolume(result, mode) {
           vec3 textureCoordinate = vec3(roomCoordinate.x, roomCoordinate.z, roomCoordinate.y);
           vec4 field = texture(uField, textureCoordinate);
           float density = smoothstep(0.006, 0.28, field.r);
-          if (uFieldMode == 1) { density = pow(smoothstep(0.002, 0.24, field.r), 0.66); }
+          if (uFieldMode == 1) { density = 0.065 + 0.16 * smoothstep(0.34, 0.95, field.r); }
           density *= 1.0 - step(0.5, field.g);
           float alpha = 1.0 - exp(-density * 2.35 * stepLength * uOpacity);
           float contribution = (1.0 - accumulated.a) * alpha;
@@ -529,6 +533,72 @@ export function createTemperatureSurfaceLayer(result, roomScene) {
   layer.name = 'infrared-temperature-surfaces';
   for (const wall of ['floor', 'front', 'back', 'left', 'right']) {
     layer.add(createInfraredPlane(result, roomScene, wall));
+  }
+  return layer;
+}
+
+export function createTemperatureObjectLayer(result, objectGroups = new Map()) {
+  const layer = new THREE.Group();
+  layer.name = 'infrared-object-surfaces';
+  if (!objectGroups?.size) return layer;
+  const { grid } = result;
+  const offset = Math.max(0.05, Math.min(grid.dx, grid.dy, grid.dz) * 0.62);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const point = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const color = new THREE.Color();
+  const normalMatrix = new THREE.Matrix3();
+
+  for (const [id, source] of objectGroups) {
+    source.updateWorldMatrix(true, true);
+    const overlay = source.clone(true);
+    overlay.name = `infrared-object-${id}`;
+    const sourceMeshes = [];
+    const overlayMeshes = [];
+    source.traverse((child) => { if (child.isMesh) sourceMeshes.push(child); });
+    overlay.traverse((child) => { if (child.isMesh) overlayMeshes.push(child); });
+
+    for (let meshIndex = 0; meshIndex < sourceMeshes.length; meshIndex += 1) {
+      const sourceMesh = sourceMeshes[meshIndex];
+      const overlayMesh = overlayMeshes[meshIndex];
+      const geometry = sourceMesh.geometry.clone();
+      const vertices = geometry.attributes.position;
+      const normals = geometry.attributes.normal;
+      const colors = new Float32Array(vertices.count * 3);
+      normalMatrix.getNormalMatrix(sourceMesh.matrixWorld);
+      for (let vertex = 0; vertex < vertices.count; vertex += 1) {
+        point.fromBufferAttribute(vertices, vertex).applyMatrix4(sourceMesh.matrixWorld);
+        if (normals) {
+          normal.fromBufferAttribute(normals, vertex).applyMatrix3(normalMatrix).normalize();
+          point.addScaledVector(normal, offset);
+        }
+        const temperature = sampleField(
+          result.fields.temperature,
+          point.x + grid.width / 2,
+          point.y,
+          point.z + grid.depth / 2,
+          grid,
+          result.fields.solid,
+          result.ambientTemperature,
+        );
+        infraredColor(temperature, result.ambientTemperature, color).toArray(colors, vertex * 3);
+      }
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      overlayMesh.geometry = geometry;
+      overlayMesh.material = material;
+      overlayMesh.renderOrder = 3;
+    }
+    layer.add(overlay);
   }
   return layer;
 }

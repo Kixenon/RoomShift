@@ -462,13 +462,13 @@ export class RoomViewport {
     if (showLighting) this.setLightingPreview(true);
   }
 
-  setFields(result, mode) {
+  setFields(result, mode, options = {}) {
     this.clearFields();
     if (mode === 'light') {
       this.setLightingPreview(true);
       this.fieldLayer = null;
     } else {
-      this.fieldLayer = createRoomFieldLayer(result, mode, this.roomScene);
+      this.fieldLayer = createRoomFieldLayer(result, mode, this.roomScene, { ...options, objectGroups: this.groups });
       this.sceneRoot.add(this.fieldLayer);
     }
     this.renderer.domElement.dataset.fieldMode = mode;

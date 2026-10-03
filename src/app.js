@@ -42,6 +42,7 @@ const objectList = $('#object-list');
 const properties = $('#object-properties');
 const fieldControls = {
   airflow: $('#show-airflow'),
+  volume: $('#show-volume'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
   status: $('#field-status'),
@@ -85,18 +86,25 @@ function updateScene(scene, { record = !isDragging } = {}) {
 
 function renderFieldState({ mode, loading, result, error }) {
   const viewportElement = $('#viewport');
+  const volumetric = fieldController?.isVolumetricView ?? false;
   for (const [name, button] of Object.entries({
     airflow: fieldControls.airflow,
     temperature: fieldControls.temperature,
     light: fieldControls.light,
   })) setPressed(button, mode === name);
+  fieldControls.volume.hidden = mode !== 'airflow' && mode !== 'temperature';
+  setPressed(fieldControls.volume, fieldController?.isVolumetricView ?? false);
+  fieldControls.volume.setAttribute(
+    'aria-label',
+    mode === 'temperature' ? 'Show volumetric heat field' : 'Show volumetric airflow field',
+  );
   viewportElement.classList.toggle('field-active', Boolean(mode));
   viewportElement.setAttribute('aria-busy', String(loading));
   fieldControls.legend.hidden = !mode || (mode !== 'light' && !result);
-  fieldControls.status.textContent = loading ? 'Solving…' : error ? 'Unavailable' : '';
+  fieldControls.status.textContent = loading ? (mode === 'light' ? 'Preparing…' : 'Solving…') : error ? 'Unavailable' : '';
   fieldControls.status.title = error?.message ?? '';
   if (mode === 'light') {
-    fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : 'Realtime shadows';
+    if (!loading && !error) fieldControls.status.textContent = 'Realtime shadows';
     fieldControls.status.title = error?.message ?? 'Monochrome room render with lamp point lights and cast shadows.';
     fieldControls.gradient.dataset.mode = 'light';
     fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
@@ -106,27 +114,17 @@ function renderFieldState({ mode, loading, result, error }) {
   }
   if (!result) return;
 
-  const cellSize = result.grid.cellSize ?? Math.max(result.grid.dx, result.grid.dy, result.grid.dz);
-  const resolution = cellSize < 0.1 ? `${Math.round(cellSize * 100)} cm` : `${cellSize.toFixed(2)} m`;
-  const backend = result.backend === 'webgpu' ? 'GPU' : result.backend === 'cpu-preview' ? 'CPU preview' : 'CPU';
-  const duration = `${result.durationSeconds.toFixed(1)} s`;
-  fieldControls.status.textContent = `${backend} · ${resolution} · ${duration}`;
-  const previewNote = result.backend === 'cpu-preview'
-    ? ' WebGPU is unavailable, so this lower-resolution CPU preview may miss fine details.'
-    : '';
-  fieldControls.status.title = `${result.assumptions?.model ?? 'Room field estimate'}. Simulated ${duration}; peak airflow ${result.stats.maxSpeed.toFixed(2)} m/s; peak temperature ${result.stats.maxTemperature.toFixed(1)} °C.${previewNote}`;
-
   fieldControls.gradient.dataset.mode = mode;
   let legend;
   if (mode === 'airflow') {
     legend = {
-      title: 'Airflow · advected gas',
+      title: volumetric ? 'Airflow · static volume' : 'Airflow · advected gas',
       minimum: '0 m/s',
       maximum: '1.2+ m/s',
     };
   } else if (mode === 'temperature') {
     legend = {
-      title: 'Infrared · air temperature estimate',
+      title: volumetric ? 'Infrared · volumetric air temperature' : 'Infrared · room surfaces and objects',
       minimum: `${(result.ambientTemperature - 4).toFixed(1)} °C`,
       maximum: `${(result.ambientTemperature + 8).toFixed(1)}+ °C`,
     };
@@ -316,9 +314,14 @@ function toggleFieldMode(mode) {
   fieldController.setMode(fieldController.mode === mode ? null : mode);
 }
 
+function toggleFieldVolume() {
+  fieldController.setVolumetricView(!fieldController.isVolumetricView);
+}
+
 $('#add-box').addEventListener('click', addBox);
 $('#add-window').addEventListener('click', addRoomWindow);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
+fieldControls.volume.addEventListener('click', toggleFieldVolume);
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
 

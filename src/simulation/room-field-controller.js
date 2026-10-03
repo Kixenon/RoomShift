@@ -9,6 +9,8 @@ export class RoomFieldController {
     this.debounceMs = debounceMs;
     this.scene = null;
     this.mode = null;
+    this.volumetricViews = { airflow: false, temperature: false };
+    this.result = null;
     this.latestRequestId = 0;
     this.inFlight = null;
     this.pendingRequest = null;
@@ -27,6 +29,7 @@ export class RoomFieldController {
   setMode(mode) {
     if (mode !== null && !MODES.has(mode)) throw new RangeError(`Unsupported room field mode: ${mode}`);
     this.mode = mode;
+    this.result = null;
     this.viewport.clearFields();
     if (!mode) {
       this.cancelInFlight();
@@ -50,10 +53,29 @@ export class RoomFieldController {
     this.scheduleUpdate();
   }
 
+  get isVolumetricView() {
+    return this.volumetricViews[this.mode] ?? false;
+  }
+
+  setVolumetricView(enabled) {
+    if (!Object.hasOwn(this.volumetricViews, this.mode)) return;
+    this.volumetricViews[this.mode] = Boolean(enabled);
+    if (this.result) {
+      this.viewport.setFields(this.result, this.mode, { volumetric: this.isVolumetricView });
+    }
+    this.onState({
+      mode: this.mode,
+      loading: Boolean(this.pendingRequest || this.inFlight),
+      result: this.result,
+      error: null,
+    });
+  }
+
   scheduleUpdate() {
     if (!this.scene || !this.mode) return;
     this.cancelInFlight();
     this.latestRequestId += 1;
+    this.result = null;
     this.pendingRequest = {
       requestId: this.latestRequestId,
       mode: this.mode,
@@ -91,7 +113,11 @@ export class RoomFieldController {
       if (response.error) {
         this.onState({ mode: this.mode, loading: false, result: null, error: response.error });
       } else {
-        this.viewport.setFields(response.result, this.mode);
+        this.result = response.result;
+        this.viewport.setFields(response.result, this.mode, {
+          volumetric: this.isVolumetricView,
+          objectGroups: this.viewport.groups,
+        });
         this.onState({ mode: this.mode, loading: false, result: response.result, error: null });
       }
     }
