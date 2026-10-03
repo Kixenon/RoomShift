@@ -188,9 +188,7 @@ function redo() {
   if (snapshot) restoreSnapshot(snapshot);
 }
 
-function updateRoomSummary() {
-  const { width, depth, height } = roomScene.room;
-  $('#room-summary').textContent = `${width.toFixed(1)} × ${depth.toFixed(1)} × ${height.toFixed(1)} m`;
+function syncRoomInputs() {
   for (const [dimension, input] of Object.entries(roomInputs)) input.value = roomScene.room[dimension];
 }
 
@@ -283,7 +281,7 @@ function renderProperties() {
 }
 
 function renderInspector() {
-  updateRoomSummary();
+  syncRoomInputs();
   renderObjectList();
   renderProperties();
 }
@@ -293,7 +291,7 @@ function handleTransform(objectId, position, rotation) {
     ? rotateObject(roomScene, objectId, rotation)
     : moveObject(roomScene, objectId, position);
   updateScene(result.scene, { record: false });
-  updateRoomSummary();
+  syncRoomInputs();
   syncPropertyInputs(result.object);
   return result;
 }

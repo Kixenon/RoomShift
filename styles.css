@@ -28,7 +28,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .topbar {
   height: 56px;
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 1fr;
   align-items: center;
   padding: 0 20px;
   border-bottom: 1px solid var(--line);
@@ -36,14 +36,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
   position: relative;
   z-index: 4;
 }
-.brand { display: inline-flex; align-items: center; gap: 8px; width: max-content; color: var(--ink); text-decoration: none; font: 800 17px 'Manrope', sans-serif; letter-spacing: -.8px; }
+.brand { display: inline-flex; align-items: center; width: max-content; color: var(--ink); text-decoration: none; }
 .brand-mark { width: 25px; height: 25px; display: inline-flex; color: var(--accent); }
 .brand-mark svg { width: 100%; height: 100%; }
-.brand-period { color: #77ae86; }
-.scene-title { justify-self: center; display: flex; align-items: center; gap: 8px; color: #596d68; font-size: 11px; font-weight: 500; }
-.scene-dot { width: 7px; height: 7px; border-radius: 50%; background: #70a982; }
-.title-divider { color: #bcc6bf; }
-#room-summary { color: #8a9993; font-size: 10px; font-variant-numeric: tabular-nums; }
 
 .editor-layout { height: calc(100dvh - 56px); min-height: 500px; display: grid; grid-template-columns: 74px minmax(0, 1fr) 298px; }
 .asset-rail { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 18px 8px 12px; border-right: 1px solid var(--line); background: #fff; overflow-y: auto; }
@@ -135,7 +130,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .properties-note { color: #a4aea7; font-size: 8px; }
 
 @media (max-width: 1020px) {
-  .topbar { grid-template-columns: 180px 1fr; padding: 0 14px; }
+  .topbar { padding: 0 14px; }
   .editor-layout { grid-template-columns: 65px minmax(0, 1fr) 270px; }
   .asset-rail { padding-right: 5px; padding-left: 5px; }
   .inspector-section { padding-right: 11px; padding-left: 11px; }
@@ -144,9 +139,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 @media (max-width: 760px) {
   body { overflow: auto; }
   .topbar { position: sticky; top: 0; height: 52px; grid-template-columns: 1fr; padding: 0 12px; }
-  .brand { font-size: 15px; }
   .brand-mark { width: 23px; height: 23px; }
-  .scene-title { display: none; }
   .editor-layout { height: auto; min-height: calc(100dvh - 52px); grid-template-columns: 56px minmax(0, 1fr); grid-template-rows: minmax(400px, 52dvh) auto; }
   .asset-rail { grid-column: 1; grid-row: 1; padding-top: 58px; }
   .viewport-wrap { grid-column: 2; grid-row: 1; min-height: 400px; }
