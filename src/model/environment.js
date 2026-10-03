@@ -1,3 +1,4 @@
+import { openArea, windowCovering } from './room-scene.js';
 // Site, orientation and weather for a project. The sun uses the NOAA low-precision
 // solar position equations (about ±0.5° for 1950–2050), which is far finer than the
 // room model needs.
@@ -110,13 +111,10 @@ export async function fetchWeather({ lat, lon }, fetchImpl = globalThis.fetch) {
 export function ventilation(scene, { windSpeed = null, people = 1 } = {}) {
   const { width, depth, height } = scene.room;
   const volume = width * depth * height;
-  const open = scene.objects.filter((object) => (object.model === 'window' || object.model === 'door') && object.open);
+  const open = scene.objects.filter((object) => openArea(object) > 0.001);
   const speed = windSpeed ?? 2;
   const byWall = {};
-  for (const opening of open) {
-    const area = opening.dimensions.width * opening.dimensions.height * (opening.model === 'window' ? 0.5 : 1);
-    byWall[opening.wall] = (byWall[opening.wall] ?? 0) + area;
-  }
+  for (const opening of open) byWall[opening.wall] = (byWall[opening.wall] ?? 0) + openArea(opening);
   const areas = Object.values(byWall).sort((a, b) => b - a);
   let flow = 0;
   let mode = 'closed';
@@ -186,7 +184,7 @@ export function heatBalance(scene, environment, { outdoor = null, windSpeed = nu
     const azimuthGap = Math.abs((((sun.azimuth - bearings[window.wall]) % 360) + 540) % 360 - 180) * Math.PI / 180;
     const incidence = Math.cos(sun.altitude * Math.PI / 180) * Math.cos(azimuthGap);
     const irradiance = Math.max(0, directNormal * incidence) + diffuse * 0.5;
-    const watts = window.dimensions.width * window.dimensions.height * 0.7 * irradiance;
+    const watts = window.dimensions.width * window.dimensions.height * 0.7 * irradiance * windowCovering(window).solar;
     solar += watts;
     solarByWindow.push({ window, watts });
   }

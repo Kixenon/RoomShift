@@ -111,18 +111,20 @@ export function createFieldVolume(result, mode) {
       uField: { value: texture },
       uVolumeSize: { value: new THREE.Vector3(grid.width, grid.height, grid.depth) },
       uStepLength: { value: stepLength },
-      uOpacity: { value: mode === 'airflow' ? 1.2 : 1.55 },
+      uOpacity: { value: mode === 'airflow' ? 0.55 : 1.55 },
       uFieldMode: { value: { airflow: 0, temperature: 1, light: 2, wifi: 3, sound: 4, lux: 5 }[mode] ?? 2 },
       uTime: { value: 0 },
-      uSources: { value: Array.from({ length: 4 }, (_, index) => {
+      uSources: { value: Array.from({ length: 8 }, (_, index) => {
         const source = result.sources?.[index];
         return source ? new THREE.Vector3(source.x - grid.width / 2, source.y - grid.height / 2, source.z - grid.depth / 2) : new THREE.Vector3();
       }) },
-      uSourceCount: { value: Math.min(4, result.sources?.length ?? 0) },
+      // Per-source strength: 1 for real sources, the wall's reflection factor for image sources.
+      uSourceGain: { value: Array.from({ length: 8 }, (_, index) => result.sources?.[index]?.gain ?? 1) },
+      uSourceCount: { value: Math.min(8, result.sources?.length ?? 0) },
       // Visual wavelength (m) and phase speed: sound uses a real 500 Hz wavelength
       // (0.69 m) slowed down; WiFi's 6 cm wave is drawn at 0.3 m to stay visible.
-      uWaveNumber: { value: mode === 'sound' ? 2 * Math.PI / 0.69 : 2 * Math.PI / 0.3 },
-      uWaveSpeed: { value: mode === 'sound' ? 4.5 : 9 },
+      uWaveNumber: { value: mode === 'sound' ? 2 * Math.PI / 0.69 : 2 * Math.PI / 0.6 },
+      uWaveSpeed: { value: mode === 'sound' ? 3.5 : 5 },
     },
     side: THREE.DoubleSide,
     transparent: true,
@@ -149,7 +151,8 @@ export function createFieldVolume(result, mode) {
       uniform float uOpacity;
       uniform int uFieldMode;
       uniform float uTime;
-      uniform vec3 uSources[4];
+      uniform vec3 uSources[8];
+      uniform float uSourceGain[8];
       uniform int uSourceCount;
       uniform float uWaveNumber;
       uniform float uWaveSpeed;
@@ -262,14 +265,14 @@ export function createFieldVolume(result, mode) {
             // the local field strength, so they fade with distance and in the
             // shadow of absorbing or blocking furniture.
             float wave = 0.0;
-            for (int s = 0; s < 4; s++) {
+            for (int s = 0; s < 8; s++) {
               if (s >= uSourceCount) break;
               float d = length(point - uSources[s]);
-              wave += pow(0.5 + 0.5 * sin(d * uWaveNumber - uTime * uWaveSpeed), 28.0) * smoothstep(0.05, 0.3, d);
+              // Shells thin out and fade with distance like a spreading wavefront.
+              wave += uSourceGain[s] * pow(0.5 + 0.5 * sin(d * uWaveNumber - uTime * uWaveSpeed), 48.0) * smoothstep(0.05, 0.3, d) / (1.0 + d * 0.35);
             }
             float strength = field.r;
-            // A faint body shows the level; bright thin shells are the travelling waves.
-            density = 0.015 + strength * strength * 0.09 + wave * strength * 1.9;
+            density = 0.01 + strength * strength * 0.06 + wave * strength * 1.2;
             color = mix(color, vec3(1.0), wave * strength * 0.35);
           }
           density *= 1.0 - step(0.5, field.g);
@@ -427,7 +430,7 @@ function createStreamlineMaterial() {
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
     toneMapped: false,
-    uniforms: { uTime: { value: 0 }, uOpacity: { value: 0.45 } },
+    uniforms: { uTime: { value: 0 }, uOpacity: { value: 0.16 } },
     vertexShader: `
       attribute float aProgress;
       attribute float aSpeed;
@@ -468,11 +471,18 @@ function samplePath(path, progress, target) {
 // emitted where the air moves fastest (fan and AC jets, window inflow), travel at
 // the simulated speed, and fade as the flow slows, so direction and dissipation
 // read directly. Positions are kept in grid space and offset to the room centre.
-function createParticleLayer(result, count = 1600) {
+// Air as smoke: thousands of short streaks advected through the solved velocity
+// field. Most are emitted where the air moves (fans, AC, open windows), the rest
+// anywhere in the room so slow drift is visible too. Each streak points along the
+// flow, stretches with speed and fades as the jet dissipates. Positions are kept
+// in grid space and offset to the room centre.
+const TRAIL_SECONDS = 0.14;
+function createParticleLayer(result, count = 4500) {
   const { grid, fields, stats } = result;
   const maximumSpeed = Math.max(stats.maxSpeed, 0.001);
-  const candidates = [];
-  const weights = [];
+  const fast = [];
+  const fastWeights = [];
+  const anywhere = [];
   let total = 0;
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
@@ -480,15 +490,19 @@ function createParticleLayer(result, count = 1600) {
         const index = indexOf(i, j, k, grid);
         if (fields.solid[index]) continue;
         const speed = Math.hypot(fields.u[index], fields.v[index], fields.w[index]) / maximumSpeed;
-        if (speed < 0.12) continue;
-        total += speed ** 3;
-        candidates.push(i, j, k);
-        weights.push(total);
+        if ((i + j + k) % 3 === 0) anywhere.push(i, j, k);
+        if (speed < 0.08) continue;
+        total += speed ** 2;
+        fast.push(i, j, k);
+        fastWeights.push(total);
       }
     }
   }
-  if (!weights.length) return null;
-  const positions = new Float32Array(count * 3);
+  if (!fastWeights.length && !anywhere.length) return null;
+  const heads = new Float32Array(count * 3);
+  const trail = new Float32Array(count * 6);
+  const trailAlpha = new Float32Array(count * 2);
+  const trailSpeed = new Float32Array(count * 2);
   const grid3 = new Float32Array(count * 3);
   const alpha = new Float32Array(count);
   const speedValues = new Float32Array(count);
@@ -500,34 +514,53 @@ function createParticleLayer(result, count = 1600) {
     return seed / 2 ** 32;
   };
   const spawn = (index) => {
-    const target = random() * total;
-    let lo = 0;
-    let hi = weights.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (weights[mid] < target) lo = mid + 1;
-      else hi = mid;
+    let cell;
+    if (fastWeights.length && random() < 0.72) {
+      const target = random() * total;
+      let lo = 0;
+      let hi = fastWeights.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (fastWeights[mid] < target) lo = mid + 1;
+        else hi = mid;
+      }
+      cell = [fast[lo * 3], fast[lo * 3 + 1], fast[lo * 3 + 2]];
+    } else {
+      const pick = Math.floor(random() * (anywhere.length / 3)) * 3;
+      cell = [anywhere[pick], anywhere[pick + 1], anywhere[pick + 2]];
     }
-    grid3[index * 3] = (candidates[lo * 3] + random()) * grid.dx;
-    grid3[index * 3 + 1] = (candidates[lo * 3 + 1] + random()) * grid.dy;
-    grid3[index * 3 + 2] = (candidates[lo * 3 + 2] + random()) * grid.dz;
+    grid3[index * 3] = (cell[0] + random()) * grid.dx;
+    grid3[index * 3 + 1] = (cell[1] + random()) * grid.dy;
+    grid3[index * 3 + 2] = (cell[2] + random()) * grid.dz;
     age[index] = 0;
-    life[index] = 2.5 + random() * 3.5;
+    life[index] = 2 + random() * 4;
   };
   for (let index = 0; index < count; index += 1) {
     spawn(index);
     age[index] = random() * life[index];
   }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('aLife', new THREE.BufferAttribute(alpha, 1));
-  geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speedValues, 1));
-  const material = new THREE.ShaderMaterial({
+
+  const headGeometry = new THREE.BufferGeometry();
+  headGeometry.setAttribute('position', new THREE.BufferAttribute(heads, 3));
+  headGeometry.setAttribute('aLife', new THREE.BufferAttribute(alpha, 1));
+  headGeometry.setAttribute('aSpeed', new THREE.BufferAttribute(speedValues, 1));
+  const shared = {
     transparent: true,
     depthWrite: false,
     depthTest: true,
     toneMapped: false,
-    uniforms: { uSize: { value: 26 } },
+    blending: THREE.AdditiveBlending,
+  };
+  const colorFn = `
+    vec3 airColor(float speed) {
+      vec3 still = vec3(0.35, 0.62, 0.95);
+      vec3 breeze = vec3(0.45, 0.95, 0.95);
+      vec3 jet = vec3(1.0, 0.62, 0.32);
+      return speed < 0.5 ? mix(still, breeze, speed * 2.0) : mix(breeze, jet, (speed - 0.5) * 2.0);
+    }`;
+  const points = new THREE.Points(headGeometry, new THREE.ShaderMaterial({
+    ...shared,
+    uniforms: { uSize: { value: 9 } },
     vertexShader: `
       uniform float uSize;
       attribute float aLife;
@@ -539,31 +572,64 @@ function createParticleLayer(result, count = 1600) {
         vSpeed = aSpeed;
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = clamp(uSize * (0.55 + aSpeed * 0.6) / max(0.5, -mvPosition.z), 1.5, 14.0);
+        gl_PointSize = clamp(uSize / max(0.5, -mvPosition.z), 1.0, 5.0);
       }
     `,
     fragmentShader: `
       varying float vLife;
       varying float vSpeed;
+      ${colorFn}
       void main() {
         float radius = length(gl_PointCoord - vec2(0.5));
-        float alpha = (1.0 - smoothstep(0.15, 0.5, radius)) * vLife;
+        float alpha = (1.0 - smoothstep(0.1, 0.5, radius)) * vLife * 0.8;
         if (alpha < 0.02) discard;
-        vec3 slow = vec3(0.16, 0.48, 0.86);
-        vec3 fast = vec3(0.98, 0.42, 0.18);
-        gl_FragColor = vec4(mix(slow, fast, clamp(vSpeed, 0.0, 1.0)), alpha);
+        gl_FragColor = vec4(airColor(clamp(vSpeed, 0.0, 1.0)) * alpha, alpha);
       }
     `,
-  });
-  const layer = new THREE.Points(geometry, material);
-  layer.name = 'airflow-tracers';
-  layer.renderOrder = 3;
-  layer.frustumCulled = false;
+  }));
+  points.name = 'airflow-tracers';
+  points.renderOrder = 3;
+  points.frustumCulled = false;
+
+  const trailGeometry = new THREE.BufferGeometry();
+  trailGeometry.setAttribute('position', new THREE.BufferAttribute(trail, 3));
+  trailGeometry.setAttribute('aAlpha', new THREE.BufferAttribute(trailAlpha, 1));
+  trailGeometry.setAttribute('aSpeed', new THREE.BufferAttribute(trailSpeed, 1));
+  const streaks = new THREE.LineSegments(trailGeometry, new THREE.ShaderMaterial({
+    ...shared,
+    vertexShader: `
+      attribute float aAlpha;
+      attribute float aSpeed;
+      varying float vAlpha;
+      varying float vSpeed;
+      void main() {
+        vAlpha = aAlpha;
+        vSpeed = aSpeed;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying float vAlpha;
+      varying float vSpeed;
+      ${colorFn}
+      void main() {
+        if (vAlpha < 0.01) discard;
+        gl_FragColor = vec4(airColor(clamp(vSpeed, 0.0, 1.0)) * vAlpha, vAlpha);
+      }
+    `,
+  }));
+  streaks.name = 'airflow-streaks';
+  streaks.renderOrder = 3;
+  streaks.frustumCulled = false;
+  points.userData.streaks = streaks;
+
   const point = new THREE.Vector3();
   let lastTime = null;
-  layer.userData.step = (time) => {
+  points.userData.step = (time) => {
     const dt = lastTime === null ? 0.016 : clamp(time - lastTime, 0, 0.05);
     lastTime = time;
+    const offsetX = grid.width / 2;
+    const offsetZ = grid.depth / 2;
     for (let index = 0; index < count; index += 1) {
       point.set(grid3[index * 3], grid3[index * 3 + 1], grid3[index * 3 + 2]);
       const velocity = sampleVelocity(result, point);
@@ -571,22 +637,40 @@ function createParticleLayer(result, count = 1600) {
       grid3[index * 3] += velocity.x * dt;
       grid3[index * 3 + 1] += velocity.y * dt;
       grid3[index * 3 + 2] += velocity.z * dt;
-      // Slow air ages faster: particles visibly die out where the jet dissipates.
-      age[index] += dt * (1 + 2.5 * (1 - Math.min(1, speed * 4)));
+      // Slow air ages faster, so particles die out where the jet dissipates.
+      age[index] += dt * (1 + 1.5 * (1 - Math.min(1, speed * 4)));
       point.set(grid3[index * 3], grid3[index * 3 + 1], grid3[index * 3 + 2]);
-      if (age[index] > life[index] || speed < 0.01 || !isFluidPoint(point, grid, fields.solid)) spawn(index);
+      if (age[index] > life[index] || !isFluidPoint(point, grid, fields.solid)) spawn(index);
       const t = age[index] / life[index];
-      alpha[index] = smoothstep01(t / 0.12) * (1 - smoothstep01((t - 0.6) / 0.4)) * Math.min(1, 0.35 + speed * 2.2) * 0.9;
+      const visibility = smoothstep01(t / 0.15) * (1 - smoothstep01((t - 0.65) / 0.35)) * Math.min(1, 0.22 + speed * 2.4);
+      alpha[index] = visibility;
       speedValues[index] = speed;
-      positions[index * 3] = grid3[index * 3] - grid.width / 2;
-      positions[index * 3 + 1] = grid3[index * 3 + 1];
-      positions[index * 3 + 2] = grid3[index * 3 + 2] - grid.depth / 2;
+      const x = grid3[index * 3] - offsetX;
+      const y = grid3[index * 3 + 1];
+      const z = grid3[index * 3 + 2] - offsetZ;
+      heads[index * 3] = x;
+      heads[index * 3 + 1] = y;
+      heads[index * 3 + 2] = z;
+      const base = index * 6;
+      trail[base] = x;
+      trail[base + 1] = y;
+      trail[base + 2] = z;
+      trail[base + 3] = x - velocity.x * TRAIL_SECONDS;
+      trail[base + 4] = y - velocity.y * TRAIL_SECONDS;
+      trail[base + 5] = z - velocity.z * TRAIL_SECONDS;
+      trailAlpha[index * 2] = visibility * 0.9;
+      trailAlpha[index * 2 + 1] = 0;
+      trailSpeed[index * 2] = speed;
+      trailSpeed[index * 2 + 1] = speed;
     }
-    geometry.attributes.position.needsUpdate = true;
-    geometry.attributes.aLife.needsUpdate = true;
-    geometry.attributes.aSpeed.needsUpdate = true;
+    headGeometry.attributes.position.needsUpdate = true;
+    headGeometry.attributes.aLife.needsUpdate = true;
+    headGeometry.attributes.aSpeed.needsUpdate = true;
+    trailGeometry.attributes.position.needsUpdate = true;
+    trailGeometry.attributes.aAlpha.needsUpdate = true;
+    trailGeometry.attributes.aSpeed.needsUpdate = true;
   };
-  return layer;
+  return points;
 }
 
 export function createAirflowLayers(result) {

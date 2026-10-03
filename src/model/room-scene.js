@@ -41,6 +41,41 @@ export const MODEL_PRESETS = Object.freeze({
   door: preset('Door', '⌸', { width: 0.85, height: 2.05, depth: 0.06 }, { category: 'opening', wall: true }),
 });
 
+// What hangs over a window: how much light and solar heat get through, and how
+// much sound it soaks up (sound absorption coefficient).
+export const WINDOW_COVERINGS = Object.freeze({
+  none: { label: 'None', light: 1, solar: 1, absorption: 0 },
+  sheer: { label: 'Sheer curtain', light: 0.6, solar: 0.7, absorption: 0.15 },
+  blinds: { label: 'Blinds', light: 0.35, solar: 0.45, absorption: 0.1 },
+  blackout: { label: 'Blackout', light: 0.03, solar: 0.25, absorption: 0.45 },
+});
+export const windowCovering = (object) => WINDOW_COVERINGS[object?.props?.covering] ?? WINDOW_COVERINGS.none;
+
+// How an opening opens, and what fraction of its frame becomes free area when
+// fully open (a slider can only ever open half the frame).
+export const WINDOW_TYPES = Object.freeze({
+  sliding: { label: 'Sliding', maxArea: 0.5 },
+  casement: { label: 'Casement', maxArea: 0.9 },
+  awning: { label: 'Top-hung', maxArea: 0.35 },
+  fixed: { label: 'Fixed', maxArea: 0 },
+});
+
+// 0…1: how far the opening is open right now.
+export function openFraction(object) {
+  if (!object?.open) return 0;
+  if (object.model === 'door') return Math.min(1, (object.props?.angle ?? 90) / 90);
+  if ((object.props?.type ?? 'sliding') === 'fixed') return 0;
+  return object.props?.amount ?? 1;
+}
+
+// Free area for air (m²): frame area × how the type opens × how far it is open.
+export function openArea(object) {
+  if (!object || !(object.model === 'window' || object.model === 'door')) return 0;
+  const frame = object.dimensions.width * object.dimensions.height;
+  if (object.model === 'door') return frame * openFraction(object);
+  return frame * (WINDOW_TYPES[object.props?.type ?? 'sliding']?.maxArea ?? 0.5) * openFraction(object);
+}
+
 export const isWallItem = (object) => Boolean(MODEL_PRESETS[object?.model]?.wall);
 
 export function objectMaterial(object) {
@@ -272,6 +307,7 @@ export function addObject(scene, options = {}) {
     rotation: { x: 0, y: 0, z: 0 },
   };
   if (model !== 'box') object.id = `${model}-${idNumber}`;
+  for (const key of ['style', 'color', 'color2', 'material', 'props']) if (options[key]) object[key] = structuredClone(options[key]);
   // Mounted items start where they normally live.
   const mountedY = model === 'ceilingLight' ? scene.room.height - boxDimensions.height
     : model === 'ac' ? scene.room.height - boxDimensions.height - 0.25

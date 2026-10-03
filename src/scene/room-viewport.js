@@ -3,10 +3,19 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
-import { floorContains, floorOutline, isWallItem, objectMaterial } from '../model/room-scene.js';
+import { floorContains, floorOutline, isWallItem, objectMaterial, openFraction } from '../model/room-scene.js';
 import { MATERIALS, SURFACE_MATERIALS, sceneSurfaces } from '../model/materials.js';
 import { bearingToRoomVector, sunPosition } from '../model/environment.js';
 import { gsap } from 'gsap';
+import {
+  buildBed, buildChair, buildDesk, buildFan, buildFridge, buildLamp, buildShelf, buildSofa, buildTable, buildTv, buildWardrobe, styleOf,
+} from './furniture-builders.js';
+
+// Parametric builders take the object's style; these replace the simple ones.
+const STYLED_BUILDERS = Object.freeze({
+  table: buildTable, desk: buildDesk, sofa: buildSofa, chair: buildChair, bed: buildBed, wardrobe: buildWardrobe,
+  shelf: buildShelf, lamp: buildLamp, tv: buildTv, fridge: buildFridge,
+});
 
 const COLORS = Object.freeze({
   fan: 0x6d9c85,
@@ -164,29 +173,55 @@ function createHeater(group, dimensions) {
   }
 }
 
-// Sliding sash: the glass panel slides across when the window opens.
-function createWindow(group, dimensions) {
+// Windows by type. Each sets `openPart.apply(fraction)` so opening animates.
+function createWindow(group, dimensions, props = {}) {
   const { width, height, depth } = dimensions;
   const frame = 0.045;
+  const type = props.type ?? 'sliding';
   const rail = (size, position) => box(group, size, position, COLORS.windowFrame);
   rail({ width: frame, height, depth }, { x: -width / 2 + frame / 2, y: 0, z: 0 });
   rail({ width: frame, height, depth }, { x: width / 2 - frame / 2, y: 0, z: 0 });
   rail({ width, height: frame, depth }, { x: 0, y: -height / 2 + frame / 2, z: 0 });
   rail({ width, height: frame, depth }, { x: 0, y: height / 2 - frame / 2, z: 0 });
-  const paneWidth = (width - frame * 2) / 2;
-  const glass = (x, z) => {
-    const pane = new THREE.Group();
-    pane.position.set(x, 0, z);
-    box(pane, { width: frame * 0.6, height: height - frame * 2, depth: 0.03 }, { x: paneWidth / 2 - frame * 0.3, y: 0, z: 0 }, COLORS.windowFrame);
-    box(pane, { width: paneWidth, height: height - frame * 2, depth: 0.01 }, { x: 0, y: 0, z: 0 }, COLORS.windowGlass, {
-      transparent: true, opacity: 0.34, roughness: 0.18, depthWrite: false,
-    }).castShadow = false;
-    group.add(pane);
-    return pane;
+  const glassPane = (parent, paneWidth, paneHeight, x, y) => {
+    box(parent, { width: paneWidth, height: paneHeight, depth: 0.01 }, { x, y, z: 0 }, COLORS.windowGlass, { transparent: true, opacity: 0.34, roughness: 0.18, depthWrite: false }).castShadow = false;
+    box(parent, { width: paneWidth, height: 0.025, depth: 0.03 }, { x, y: y + paneHeight / 2, z: 0 }, COLORS.windowFrame);
+    box(parent, { width: paneWidth, height: 0.025, depth: 0.03 }, { x, y: y - paneHeight / 2, z: 0 }, COLORS.windowFrame);
   };
-  glass(-paneWidth / 2, -0.012);
-  const sliding = glass(paneWidth / 2, 0.012);
-  group.userData.openPart = { target: sliding.position, key: 'x', closed: paneWidth / 2, open: -paneWidth / 2 + 0.02 };
+  const innerWidth = width - frame * 2;
+  const innerHeight = height - frame * 2;
+  if (type === 'fixed') {
+    glassPane(group, innerWidth, innerHeight, 0, 0);
+    return;
+  }
+  if (type === 'sliding') {
+    const paneWidth = innerWidth / 2;
+    const fixedPane = new THREE.Group();
+    fixedPane.position.z = -0.012;
+    glassPane(fixedPane, paneWidth, innerHeight, -paneWidth / 2, 0);
+    group.add(fixedPane);
+    const sliding = new THREE.Group();
+    sliding.position.z = 0.012;
+    glassPane(sliding, paneWidth, innerHeight, 0, 0);
+    group.add(sliding);
+    group.userData.openPart = { apply: (f) => { sliding.position.x = paneWidth / 2 - f * (paneWidth - 0.02); } };
+    return;
+  }
+  if (type === 'casement') {
+    // Hinged at the left jamb, swinging into the room.
+    const hinge = new THREE.Group();
+    hinge.position.set(-innerWidth / 2, 0, depth / 2);
+    glassPane(hinge, innerWidth, innerHeight, innerWidth / 2, 0);
+    group.add(hinge);
+    group.userData.openPart = { apply: (f) => { hinge.rotation.y = -f * Math.PI * 0.45; } };
+    return;
+  }
+  // Top-hung (awning): hinged along the top, bottom tilts into the room.
+  const hinge = new THREE.Group();
+  hinge.position.set(0, innerHeight / 2, depth / 2);
+  glassPane(hinge, innerWidth, innerHeight, 0, -innerHeight / 2);
+  group.add(hinge);
+  group.userData.openPart = { apply: (f) => { hinge.rotation.x = f * Math.PI * 0.2; } };
 }
 
 function createChair(group, { width: w, height: h, depth: d }) {
@@ -259,20 +294,25 @@ function createSpeaker(group, { width: w, height: h, depth: d }) {
   }
 }
 
-function createDoor(group, dimensions) {
+function createDoor(group, dimensions, props = {}) {
   const { width, height, depth } = dimensions;
   const frame = 0.05;
+  const rightHinge = props.hinge === 'right';
+  const outward = props.swing === 'out';
   const rail = (size, position) => box(group, size, position, 0xd6cbb5);
   rail({ width: frame, height, depth: depth * 1.6 }, { x: -width / 2 + frame / 2, y: 0, z: 0 });
   rail({ width: frame, height, depth: depth * 1.6 }, { x: width / 2 - frame / 2, y: 0, z: 0 });
   rail({ width, height: frame, depth: depth * 1.6 }, { x: 0, y: height / 2 - frame / 2, z: 0 });
   const hinge = new THREE.Group();
-  hinge.position.set(-width / 2 + frame, 0, depth * 0.3);
-  group.userData.openPart = { target: hinge.rotation, key: 'y', closed: 0, open: -Math.PI * 0.45 };
+  const side = rightHinge ? 1 : -1;
+  hinge.position.set(side * (width / 2 - frame), 0, (outward ? -1 : 1) * depth * 0.3);
   const leafWidth = width - frame * 2;
-  box(hinge, { width: leafWidth, height: height - frame, depth: 0.04 }, { x: leafWidth / 2, y: -frame / 2, z: 0 }, 0xb8936a);
-  box(hinge, { width: 0.1, height: 0.02, depth: 0.05 }, { x: leafWidth - 0.1, y: 0, z: 0.04 }, 0x75877d);
+  box(hinge, { width: leafWidth, height: height - frame, depth: 0.04 }, { x: -side * leafWidth / 2, y: -frame / 2, z: 0 }, 0xb8936a);
+  box(hinge, { width: 0.1, height: 0.02, depth: 0.05 }, { x: -side * (leafWidth - 0.1), y: 0, z: 0.04 }, 0x75877d);
   group.add(hinge);
+  // Positive angle swings into the room (local +z); "out" swings the other way.
+  const direction = (outward ? 1 : -1) * side;
+  group.userData.openPart = { apply: (f) => { hinge.rotation.y = direction * f * Math.PI / 2; } };
 }
 
 function createMonitor(group, { width: w, height: h, depth: d }) {
@@ -330,6 +370,24 @@ const PLANE_RAMPS = Object.freeze({
   wifi: [[0.86, 0.29, 0.25], [0.95, 0.66, 0.26], [0.55, 0.78, 0.42], [0.18, 0.62, 0.52], [0.12, 0.42, 0.62]],
   sound: [[0.16, 0.22, 0.42], [0.36, 0.33, 0.62], [0.72, 0.38, 0.6], [0.95, 0.55, 0.38], [0.99, 0.86, 0.5]],
 });
+
+// Lighting-design false colour on a log scale, with darker contour bands at
+// 100, 300, 500 and 1000 lux so the thresholds read at a glance.
+const LUX_STOPS = [[0, [0.12, 0.1, 0.32]], [50, [0.38, 0.2, 0.6]], [150, [0.85, 0.3, 0.45]], [300, [0.98, 0.55, 0.25]], [600, [1, 0.82, 0.3]], [1500, [1, 0.96, 0.62]], [5000, [1, 1, 0.95]]];
+export function luxColor(lux) {
+  let color = LUX_STOPS.at(-1)[1];
+  for (let index = 1; index < LUX_STOPS.length; index += 1) {
+    if (lux <= LUX_STOPS[index][0]) {
+      const [l0, c0] = LUX_STOPS[index - 1];
+      const [l1, c1] = LUX_STOPS[index];
+      const t = (Math.log(lux + 10) - Math.log(l0 + 10)) / (Math.log(l1 + 10) - Math.log(l0 + 10));
+      color = c0.map((value, channel) => value + (c1[channel] - value) * t);
+      break;
+    }
+  }
+  const contour = [100, 300, 500, 1000].some((level) => Math.abs(Math.log(lux + 1) - Math.log(level)) < 0.035);
+  return contour ? color.map((value) => value * 0.55) : color;
+}
 
 function rampColor(ramp, t) {
   const scaled = Math.min(0.9999, Math.max(0, t)) * (ramp.length - 1);
@@ -907,6 +965,19 @@ export class RoomViewport {
     return '3d';
   }
 
+  // Spinning blades and oscillating heads.
+  animateFans(seconds) {
+    if (this.prefersReducedMotion || !this.groups) return;
+    const delta = Math.min(0.05, seconds - (this.lastFanTime ?? seconds));
+    this.lastFanTime = seconds;
+    for (const group of this.groups.values()) {
+      const fan = group.userData.fan;
+      if (!fan) continue;
+      fan.blades.rotation.z += delta * (6 + fan.speed * 7);
+      if (fan.oscillate) fan.head.rotation.y = fan.yaw + Math.sin(seconds * 0.55) * 0.75;
+    }
+  }
+
   // ─── Reference layers: a 3D scan ghost and a floor-plan underlay ──────────
   setReference(root, bounds) {
     if (this.reference) {
@@ -983,28 +1054,29 @@ export class RoomViewport {
     group.userData.model = object.model;
     const builder = BUILDERS[object.model];
     const materialKey = objectMaterial(object);
-    if (object.model === 'window') createWindow(group, object.dimensions);
-    else if (object.model === 'door') createDoor(group, object.dimensions);
+    if (object.model === 'window') createWindow(group, object.dimensions, object.props);
+    else if (object.model === 'door') createDoor(group, object.dimensions, object.props);
+    else if (object.model === 'fan') buildFan(group, object.dimensions, object.props);
+    else if (STYLED_BUILDERS[object.model]) STYLED_BUILDERS[object.model](group, object.dimensions, styleOf(object));
     else if (builder) builder(group, object.dimensions, object.variant);
     else box(group, object.dimensions, { x: 0, y: 0, z: 0 }, MATERIAL_TINTS[materialKey] ?? COLORS.metal);
-    if (object.color && !isWallItem(object)) {
-      const tint = new THREE.Color(object.color);
+    // Main colour → 'primary' parts (and untagged ones); second colour → legs and frames.
+    if ((object.color || object.color2) && !isWallItem(object)) {
+      const primary = object.color ? new THREE.Color(object.color) : null;
+      const secondary = object.color2 ? new THREE.Color(object.color2) : null;
       group.traverse((child) => {
         const item = child.material;
-        if (!item?.color || item.metalness > 0.5 || child.userData.noTint || item.emissiveIntensity > 0.5) return;
-        const hsl = {};
-        item.color.getHSL(hsl);
-        // Keep each part's light/dark shading but take the chosen hue.
-        const target = tint.clone();
-        const targetHsl = {};
-        target.getHSL(targetHsl);
-        item.color.setHSL(targetHsl.h, targetHsl.s, Math.min(0.92, targetHsl.l * (0.75 + hsl.l * 0.5)));
+        if (!item?.color || child.userData.noTint || item.emissiveIntensity > 0.5) return;
+        const role = child.userData.part;
+        if (['decor', 'mirror', 'screen', 'shade'].includes(role)) return;
+        const tint = role === 'secondary' ? secondary : primary;
+        if (tint) item.color.copy(tint);
       });
     }
     const surface = MATERIALS[materialKey];
     if (surface && !isWallItem(object)) {
       group.traverse((child) => {
-        if (!child.material?.isMeshStandardMaterial || child.material.transparent) return;
+        if (!child.material?.isMeshStandardMaterial || child.material.transparent || child.userData.part === 'secondary' || child.userData.part === 'mirror') return;
         child.material.roughness = surface.roughness;
         child.material.metalness = surface.metalness;
       });
@@ -1012,14 +1084,16 @@ export class RoomViewport {
     group.userData.open = object.open;
     const part = group.userData.openPart;
     if (part) {
-      // Animate from the last state this viewport showed, so toggling reads as motion.
+      // Animate from the last state this viewport showed, so changes read as motion.
       this.openStates ??= new Map();
+      const target = openFraction(object);
       const was = this.openStates.get(object.id);
-      part.target[part.key] = (was ?? object.open) ? part.open : part.closed;
-      if (was !== undefined && was !== Boolean(object.open)) {
-        gsap.to(part.target, { [part.key]: object.open ? part.open : part.closed, duration: this.prefersReducedMotion ? 0 : 0.7, ease: 'power2.inOut', onUpdate: () => this.selectionBox?.update() });
+      const state = { f: was ?? target };
+      part.apply(state.f);
+      if (was !== undefined && Math.abs(was - target) > 0.001) {
+        gsap.to(state, { f: target, duration: this.prefersReducedMotion ? 0 : 0.7, ease: 'power2.inOut', onUpdate: () => { part.apply(state.f); this.selectionBox?.update(); } });
       }
-      this.openStates.set(object.id, Boolean(object.open));
+      this.openStates.set(object.id, target);
     }
     this.applyObjectTransform(group, object);
     this.sceneRoot.add(group);
@@ -1152,34 +1226,81 @@ export class RoomViewport {
     delete this.renderer.domElement.dataset.streamlineVertices;
   }
 
+  // Light lens: the same full-colour room, lit only by what is physically there
+  // (sky through windows, sun, lamps) instead of the studio fill light.
   setLightingPreview(enabled) {
     if (enabled === this.lightingPreview) return;
     this.lightingPreview = enabled;
-    this.renderer.toneMappingExposure = enabled ? 0.92 : 1.04;
-    this.sceneRoot.traverse((child) => {
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const item of materials) {
-        if (!item?.color || item.userData?.label) continue;
-        item.userData.roomShiftColor ??= item.color.clone();
-        item.userData.roomShiftOpacity ??= item.opacity;
-        if (enabled) {
-          const { r, g, b } = item.userData.roomShiftColor;
-          const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          item.color.setRGB(luminance, luminance, luminance);
-          if (item.transparent && item.userData.roomShiftOpacity <= 0.25) item.opacity = 0.38;
-        } else {
-          item.color.copy(item.userData.roomShiftColor);
-          item.opacity = item.userData.roomShiftOpacity;
-        }
-        item.needsUpdate = true;
-      }
-    });
+    this.renderer.toneMappingExposure = enabled ? 1.15 : 1.04;
     this.rebuildLights();
     this.renderer.domElement.dataset.lightingPreview = String(enabled);
     if (enabled) {
       this.renderer.domElement.dataset.fieldMode = 'light';
       this.renderer.domElement.dataset.fieldVolumeVoxels = '0';
+    } else this.setSurfaceMap(null);
+  }
+
+  // False-colour illuminance painted onto the floor and walls, like a lighting
+  // designer's isolux render. `sample(point, normal)` returns lux.
+  setSurfaceMap(sample) {
+    if (this.surfaceMap) {
+      this.sceneRoot.remove(this.surfaceMap);
+      disposeTree(this.surfaceMap);
+      this.surfaceMap = null;
     }
+    if (!sample || !this.roomScene) return;
+    const { width, depth, height } = this.roomScene.room;
+    const group = new THREE.Group();
+    group.name = 'lux-map';
+    const material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    const surface = (origin, u, v, normal, step, inset) => {
+      const nu = Math.max(2, Math.round(Math.hypot(u.x, u.y, u.z) / step));
+      const nv = Math.max(2, Math.round(Math.hypot(v.x, v.y, v.z) / step));
+      const positions = [];
+      const colors = [];
+      const alphaMask = [];
+      for (let j = 0; j <= nv; j += 1) {
+        for (let i = 0; i <= nu; i += 1) {
+          const point = {
+            x: origin.x + u.x * i / nu + v.x * j / nv + normal.x * inset,
+            y: origin.y + u.y * i / nu + v.y * j / nv + normal.y * inset,
+            z: origin.z + u.z * i / nu + v.z * j / nv + normal.z * inset,
+          };
+          const inside = floorContains(this.roomScene.room, Math.min(width - 1e-3, Math.max(1e-3, point.x)), Math.min(depth - 1e-3, Math.max(1e-3, point.z)), -0.02);
+          const lux = inside ? sample(point, normal) : 0;
+          const [r, g, b] = luxColor(lux);
+          positions.push(point.x - width / 2, point.y, point.z - depth / 2);
+          colors.push(r, g, b);
+          alphaMask.push(inside);
+        }
+      }
+      const indices = [];
+      for (let j = 0; j < nv; j += 1) {
+        for (let i = 0; i < nu; i += 1) {
+          const a0 = j * (nu + 1) + i;
+          const a1 = a0 + 1;
+          const b0 = a0 + nu + 1;
+          const b1 = b0 + 1;
+          if (!(alphaMask[a0] && alphaMask[a1] && alphaMask[b0] && alphaMask[b1])) continue;
+          indices.push(a0, b0, a1, a1, b0, b1);
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geometry.setIndex(indices);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.raycast = () => {};
+      mesh.renderOrder = 1;
+      group.add(mesh);
+    };
+    surface({ x: 0, y: 0, z: 0 }, { x: width, y: 0, z: 0 }, { x: 0, y: 0, z: depth }, { x: 0, y: 1, z: 0 }, 0.1, 0.004);
+    surface({ x: 0, y: 0, z: 0 }, { x: width, y: 0, z: 0 }, { x: 0, y: height, z: 0 }, { x: 0, y: 0, z: 1 }, 0.15, 0.01);
+    surface({ x: 0, y: 0, z: depth }, { x: width, y: 0, z: 0 }, { x: 0, y: height, z: 0 }, { x: 0, y: 0, z: -1 }, 0.15, 0.01);
+    surface({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: depth }, { x: 0, y: height, z: 0 }, { x: 1, y: 0, z: 0 }, 0.15, 0.01);
+    surface({ x: width, y: 0, z: 0 }, { x: 0, y: 0, z: depth }, { x: 0, y: height, z: 0 }, { x: -1, y: 0, z: 0 }, 0.15, 0.01);
+    this.surfaceMap = group;
+    this.sceneRoot.add(group);
   }
 
   // Sun, lamps and daylight shafts are part of every view; Light mode dims the
@@ -1196,8 +1317,10 @@ export class RoomViewport {
     const preview = this.lightingPreview;
     const sun = this.sunState();
     const sunUp = sun && sun.altitude > 0.5;
-    this.hemisphereLight.intensity = preview ? 0.3 : sunUp ? 1.45 : 1.15;
-    this.keyLight.intensity = preview ? 0.05 : sunUp ? 0.7 : 0.9;
+    // In the Light lens the fill is the sky: bright by day, near-dark at night.
+    const daylight = sun ? Math.max(0, Math.min(1, (sun.altitude + 4) / 30)) : 0;
+    this.hemisphereLight.intensity = preview ? 0.12 + daylight * 1.1 : sunUp ? 1.45 : 1.15;
+    this.keyLight.intensity = preview ? 0 : sunUp ? 0.7 : 0.9;
     if (sunUp) this.addSunLight(sun);
     for (const object of this.roomScene.objects.filter((item) => LIGHT_SOURCES[item.model])) {
       const group = this.groups.get(object.id);
@@ -1645,6 +1768,7 @@ export class RoomViewport {
     this.hoverBox?.update();
     this.updateFieldVolumeDepthTest();
     if (this.planeMesh) this.planeMesh.material.uniforms.uTime.value = this.prefersReducedMotion ? 0 : time / 1000;
+    this.animateFans?.(time / 1000);
     this.renderer.render(this.scene, this.camera);
     this.renderViewCube?.();
     this.updateDimLabels?.();

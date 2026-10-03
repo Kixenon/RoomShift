@@ -197,7 +197,7 @@ export function evaluateLayout(scene, { environment = null } = {}) {
   }
 
   // Door swing
-  for (const door of scene.objects.filter((object) => object.model === 'door')) {
+  for (const door of scene.objects.filter((object) => object.model === 'door' && object.props?.swing !== 'out')) {
     const n = inwardNormal(door.wall);
     const cx = door.position.x + n.x * door.dimensions.width / 2;
     const cz = door.position.z + n.z * door.dimensions.width / 2;

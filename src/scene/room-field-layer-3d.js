@@ -40,7 +40,10 @@ export function createRoomFieldLayer(result, mode) {
   if (mode === 'airflow') {
     const airflow = createAirflowLayers(result);
     if (airflow.streamlines) layer.add(airflow.streamlines);
-    if (airflow.tracers) layer.add(airflow.tracers);
+    if (airflow.tracers) {
+      layer.add(airflow.tracers);
+      if (airflow.tracers.userData.streaks) layer.add(airflow.tracers.userData.streaks);
+    }
     layer.userData.streamlineVertexCount = airflow.streamlines?.geometry.getAttribute('position').count ?? 0;
     layer.userData.animate = airflow.update;
   } else if (mode === 'wifi' || mode === 'sound') {

@@ -117,6 +117,119 @@ export async function classifyFurniture(image) {
   });
 }
 
+// ─── Silhouette analysis ──────────────────────────────────────────────────
+// Separates the object from a plain background (product shots) by colour
+// distance from the border, then reads its proportions, the colour of its upper
+// part (top/upholstery) and lower part (legs/frame), and how many separate leg
+// columns touch the floor (two wide feet = T-legs, three or four = four legs).
+const hex = ([r, g, b]) => `#${[r, g, b].map((value) => Math.round(value).toString(16).padStart(2, '0')).join('')}`;
+
+export function analyseSilhouette(image, box = { x: 0, y: 0, w: 1, h: 1 }) {
+  const width = 160;
+  const scale = width / (image.naturalWidth || image.width);
+  const height = Math.max(8, Math.round((image.naturalHeight || image.height) * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  context.drawImage(image, 0, 0, width, height);
+  const { data } = context.getImageData(0, 0, width, height);
+  const at = (x, y) => (y * width + x) * 4;
+  const x0 = Math.floor(box.x * width);
+  const y0 = Math.floor(box.y * height);
+  const x1 = Math.min(width - 1, Math.ceil((box.x + box.w) * width));
+  const y1 = Math.min(height - 1, Math.ceil((box.y + box.h) * height));
+  // Background = median-ish colour of the crop's border.
+  const border = [];
+  for (let x = x0; x <= x1; x += 2) border.push(at(x, y0), at(x, y1));
+  for (let y = y0; y <= y1; y += 2) border.push(at(x0, y), at(x1, y));
+  const background = [0, 1, 2].map((channel) => {
+    const values = border.map((index) => data[index + channel]).sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)];
+  });
+  const mask = new Uint8Array(width * height);
+  let minX = width; let maxX = 0; let minY = height; let maxY = 0;
+  for (let y = y0; y <= y1; y += 1) {
+    for (let x = x0; x <= x1; x += 1) {
+      const index = at(x, y);
+      const r = data[index];
+      const g = data[index + 1];
+      const b = data[index + 2];
+      const distance = Math.hypot(r - background[0], g - background[1], b - background[2]);
+      if (distance < 48) continue;
+      // Cast shadows are grey, mid-bright and colourless; black legs are much darker.
+      const brightest = Math.max(r, g, b);
+      const saturation = brightest ? (brightest - Math.min(r, g, b)) / brightest : 0;
+      if (saturation < 0.12 && brightest > 105 && brightest < Math.max(...background) - 10) continue;
+      mask[y * width + x] = 1;
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+  }
+  if (maxX <= minX || maxY <= minY) return null;
+  const average = (fromY, toY) => {
+    const sum = [0, 0, 0];
+    let count = 0;
+    for (let y = Math.floor(fromY); y <= toY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        if (!mask[y * width + x]) continue;
+        const index = at(x, y);
+        sum[0] += data[index]; sum[1] += data[index + 1]; sum[2] += data[index + 2];
+        count += 1;
+      }
+    }
+    return count ? sum.map((value) => value / count) : null;
+  };
+  const spanY = maxY - minY;
+  const top = average(minY, minY + spanY * 0.3);
+  const bottom = average(minY + spanY * 0.55, maxY);
+  // Leg columns: runs of masked columns in bands below the top. In a 3/4 view
+  // the back legs end higher, so take the most runs any band sees.
+  let runs = 0;
+  for (const fraction of [0.6, 0.68, 0.76, 0.84]) {
+    const bandY = Math.round(minY + spanY * fraction);
+    let count = 0;
+    let inside = false;
+    for (let x = minX; x <= maxX; x += 1) {
+      let hit = false;
+      for (let y = bandY - 1; y <= bandY + 1; y += 1) if (mask[y * width + x]) hit = true;
+      if (hit && !inside) count += 1;
+      inside = hit;
+    }
+    runs = Math.max(runs, count);
+  }
+  return {
+    aspect: (maxX - minX) / Math.max(1, spanY),
+    color: top ? hex(top) : null,
+    color2: bottom ? hex(bottom) : null,
+    contrast: top && bottom ? Math.hypot(top[0] - bottom[0], top[1] - bottom[1], top[2] - bottom[2]) : 0,
+    legRuns: runs,
+  };
+}
+
+// Size and style from what the photo shows, per type.
+export function shapeFromSilhouette(model, silhouette) {
+  if (!silhouette) return {};
+  const { aspect, color, color2, contrast, legRuns } = silhouette;
+  const colours = { color, ...(contrast > 60 ? { color2 } : {}) };
+  if (model === 'table' || model === 'desk') {
+    const legs = legRuns === 2 ? 'tleg' : legRuns >= 3 ? 'four' : 'panel';
+    const style = model === 'table' ? { shape: 'rect', legs } : { legs };
+    if (aspect > 2.1) return { ...colours, style, dimensions: { width: 1.8, depth: 0.8, height: 0.74 } };
+    if (aspect > 1.45) return { ...colours, style, dimensions: { width: 1.4, depth: 0.7, height: 0.74 } };
+    if (aspect > 1.1) return { ...colours, style, dimensions: { width: 1.2, depth: 0.75, height: 0.74 } };
+    return { ...colours, style, dimensions: { width: 0.9, depth: 0.55, height: 0.45 } };
+  }
+  if (model === 'sofa') {
+    if (aspect > 2.6) return { ...colours, dimensions: { width: 2.3, depth: 0.95, height: 0.82 } };
+    if (aspect > 1.8) return { ...colours, dimensions: { width: 1.8, depth: 0.9, height: 0.82 } };
+    return { ...colours, dimensions: { width: 0.85, depth: 0.85, height: 0.9 } };
+  }
+  if (model === 'shelf' || model === 'wardrobe') {
+    return { ...colours, dimensions: { width: Math.max(0.4, Math.min(2, aspect * 1.9)), height: 1.9, depth: model === 'shelf' ? 0.35 : 0.58 } };
+  }
+  return colours;
+}
+
 // Turn detections into object placements. Horizontal position in the photo maps to
 // the room's width, and lower in the frame means nearer the camera (front wall).
 export function placementsFromDetections(detections, room) {
@@ -129,10 +242,14 @@ export function placementsFromDetections(detections, room) {
       ...preset.dimensions,
       width: Number(Math.min(room.width - 0.1, preset.dimensions.width * (detection.model === 'box' ? 1 : widthScale)).toFixed(2)),
     };
+    const shaped = detection.shape ?? {};
     return {
       model: detection.model,
       name: preset.label,
-      dimensions,
+      ...(shaped.style ? { style: shaped.style } : {}),
+      ...(shaped.color ? { color: shaped.color } : {}),
+      ...(shaped.color2 ? { color2: shaped.color2 } : {}),
+      dimensions: shaped.dimensions ? { ...shaped.dimensions } : dimensions,
       position: {
         x: Number((centerX * room.width).toFixed(2)),
         z: Number(((1 - Math.min(1, Math.max(0, (bottom - 0.45) / 0.55))) * room.depth).toFixed(2)),

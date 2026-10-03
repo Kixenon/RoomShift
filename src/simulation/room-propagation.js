@@ -1,4 +1,4 @@
-import { MODEL_PRESETS, floorContains, isWallItem, objectMaterial, objectProps, rotationMatrixXYZ } from '../model/room-scene.js';
+import { MODEL_PRESETS, floorContains, isWallItem, objectMaterial, objectProps, openArea, rotationMatrixXYZ, windowCovering } from '../model/room-scene.js';
 import { bearingToRoomVector, sunPosition } from '../model/environment.js';
 import { MATERIALS, SURFACE_MATERIALS, sceneSurfaces } from '../model/materials.js';
 
@@ -64,6 +64,119 @@ function opaqueBoxes(scene) {
   return obstacleBoxes(scene, null).filter((box) => !LAMP_LUMENS[box.object.model] && objectMaterial(box.object) !== 'glass');
 }
 
+const UP = Object.freeze({ x: 0, y: 1, z: 0 });
+const GLASS = 0.7;
+// Glass passes 70%; the open part of the frame passes everything.
+const windowTransmission = (window) => {
+  const frame = window.dimensions.width * window.dimensions.height;
+  const free = Math.min(1, openArea(window) / frame);
+  return (window.model === 'door' ? free : GLASS + (1 - GLASS) * free) * windowCovering(window).light;
+};
+
+function lampBulb(lamp) {
+  return lamp.model === 'ceilingLight'
+    ? { x: lamp.position.x, y: lamp.position.y - 0.02, z: lamp.position.z }
+    : { x: lamp.position.x, y: lamp.position.y + lamp.dimensions.height * 0.72, z: lamp.position.z };
+}
+
+// Direct light only (lamps, sun through glass, sky through windows) on a surface
+// with the given normal.
+function directLux(context, point, normal) {
+  const { scene, lamps, windows, toSun, boxes } = context;
+  let lux = 0;
+  for (const lamp of lamps) {
+    const bulb = lampBulb(lamp);
+    const dx = bulb.x - point.x;
+    const dy = bulb.y - point.y;
+    const dz = bulb.z - point.z;
+    const distanceSquared = Math.max(0.04, dx * dx + dy * dy + dz * dz);
+    const distance = Math.sqrt(distanceSquared);
+    const cosine = (dx * normal.x + dy * normal.y + dz * normal.z) / distance;
+    if (cosine <= 0) continue;
+    if (boxes.some((box) => box.object.id !== lamp.id && segmentHitsBox(point, bulb, box))) continue;
+    const intensity = (objectProps(lamp).lumens ?? LAMP_LUMENS[lamp.model]) / (4 * Math.PI) * (lamp.model === 'ceilingLight' ? 1.6 : 1);
+    lux += intensity * cosine / distanceSquared;
+  }
+  for (const window of windows) {
+    const rect = windowRect(window, scene.room);
+    const transmit = windowTransmission(window);
+    if (transmit <= 0) continue;
+    // Direct sun through the opening
+    if (toSun && toSun.y > 0 && rayThroughWindow(point, toSun, rect)) {
+      const cosine = toSun.x * normal.x + toSun.y * normal.y + toSun.z * normal.z;
+      const far = { x: point.x + toSun.x * 20, y: point.y + toSun.y * 20, z: point.z + toSun.z * 20 };
+      if (cosine > 0 && !boxes.some((box) => segmentHitsBox(point, far, box))) lux += context.directNormal * cosine * transmit;
+    }
+    // Sky seen through the window: the window as a diffuse emitter (form factor).
+    const center = rect.alongX
+      ? { x: window.position.x, y: (rect.bottom + rect.top) / 2, z: rect.plane }
+      : { x: rect.plane, y: (rect.bottom + rect.top) / 2, z: window.position.z };
+    const vx = center.x - point.x;
+    const vy = center.y - point.y;
+    const vz = center.z - point.z;
+    const distanceSquared = Math.max(0.25, vx * vx + vy * vy + vz * vz);
+    const distance = Math.sqrt(distanceSquared);
+    const atWindow = Math.abs(rect.alongX ? vz : vx) / distance;
+    const atPoint = (vx * normal.x + vy * normal.y + vz * normal.z) / distance;
+    if (atPoint <= 0 || boxes.some((box) => segmentHitsBox(point, center, box))) continue;
+    // The sky's luminance is highest overhead: a window seen from below looks brighter.
+    const skyLuminance = context.skyLuminance * (0.6 + 0.4 * Math.max(0, vy / distance + 0.3));
+    lux += skyLuminance * transmit * window.dimensions.width * window.dimensions.height * atWindow * atPoint / distanceSquared;
+  }
+  return lux;
+}
+
+// Radiosity patches on the floor, ceiling and four walls (~0.45 m). Each gets its
+// direct light, then re-emits ρ·E as a diffuse (Lambertian) surface.
+function buildPatches(context, size = 0.45) {
+  const { width, depth, height } = context.scene.room;
+  const patches = [];
+  const add = (origin, u, v, normal, reflectance) => {
+    const nu = Math.max(1, Math.round(Math.hypot(u.x, u.y, u.z) / size));
+    const nv = Math.max(1, Math.round(Math.hypot(v.x, v.y, v.z) / size));
+    const area = Math.hypot(u.x, u.y, u.z) * Math.hypot(v.x, v.y, v.z) / (nu * nv);
+    for (let i = 0; i < nu; i += 1) {
+      for (let j = 0; j < nv; j += 1) {
+        const point = {
+          x: origin.x + u.x * (i + 0.5) / nu + v.x * (j + 0.5) / nv,
+          y: origin.y + u.y * (i + 0.5) / nu + v.y * (j + 0.5) / nv,
+          z: origin.z + u.z * (i + 0.5) / nu + v.z * (j + 0.5) / nv,
+        };
+        if (!floorContains(context.scene.room, point.x, point.z, -0.01)) continue;
+        // Nudge off the surface so the patch sees the room, not itself.
+        const probe = { x: point.x + normal.x * 0.02, y: point.y + normal.y * 0.02, z: point.z + normal.z * 0.02 };
+        patches.push({ point: probe, normal, area, reflectance, exitance: 0 });
+      }
+    }
+  };
+  add({ x: 0, y: 0, z: 0 }, { x: width, y: 0, z: 0 }, { x: 0, y: 0, z: depth }, UP, context.floorReflectance);
+  add({ x: 0, y: height, z: 0 }, { x: width, y: 0, z: 0 }, { x: 0, y: 0, z: depth }, { x: 0, y: -1, z: 0 }, 0.8);
+  add({ x: 0, y: 0, z: 0 }, { x: width, y: 0, z: 0 }, { x: 0, y: height, z: 0 }, { x: 0, y: 0, z: 1 }, context.wallReflectance);
+  add({ x: 0, y: 0, z: depth }, { x: width, y: 0, z: 0 }, { x: 0, y: height, z: 0 }, { x: 0, y: 0, z: -1 }, context.wallReflectance);
+  add({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: depth }, { x: 0, y: height, z: 0 }, { x: 1, y: 0, z: 0 }, context.wallReflectance);
+  add({ x: width, y: 0, z: 0 }, { x: 0, y: 0, z: depth }, { x: 0, y: height, z: 0 }, { x: -1, y: 0, z: 0 }, context.wallReflectance);
+  for (const patch of patches) patch.exitance = patch.reflectance * directLux(context, patch.point, patch.normal);
+  return patches;
+}
+
+// First bounce gathered from every patch (point-to-patch form factor), scaled by
+// the geometric series 1 / (1 − ρ̄) for the bounces after it.
+function bounceLux(context, point, normal) {
+  let lux = 0;
+  for (const patch of context.patches) {
+    const dx = patch.point.x - point.x;
+    const dy = patch.point.y - point.y;
+    const dz = patch.point.z - point.z;
+    const distanceSquared = Math.max(0.09, dx * dx + dy * dy + dz * dz);
+    const distance = Math.sqrt(distanceSquared);
+    const atPoint = (dx * normal.x + dy * normal.y + dz * normal.z) / distance;
+    const atPatch = -(dx * patch.normal.x + dy * patch.normal.y + dz * patch.normal.z) / distance;
+    if (atPoint <= 0 || atPatch <= 0) continue;
+    lux += patch.exitance * patch.area * atPoint * atPatch / (Math.PI * distanceSquared);
+  }
+  return lux / (1 - context.reflectance * 0.6);
+}
+
 export function lightContext(scene, environment, cloudCover = 20) {
   const surfaces = sceneSurfaces(scene);
   const floor = SURFACE_MATERIALS.floor[surfaces.floor] ?? SURFACE_MATERIALS.floor.wood;
@@ -79,61 +192,28 @@ export function lightContext(scene, environment, cloudCover = 20) {
   const clear = 1 - Math.min(1, Math.max(0, cloudCover / 100)) * 0.75;
   const toSun = environment ? bearingToRoomVector(sun.azimuth, environment.backWallBearing, sun.altitude) : null;
   const sunAltitude = Math.max(0, Math.sin(sun.altitude * Math.PI / 180));
-  // Clear-sky direct normal ≈ 90 klx; diffuse sky on a horizontal plane ≈ 5–20 klx.
+  // Clear-sky direct normal ≈ 90 klx; diffuse sky horizontal ≈ 5–20 klx, i.e. a
+  // sky luminance of E/π.
   const directNormal = sun.altitude > 0 ? 90000 * clear * Math.min(1, sunAltitude * 3) : 0;
   const skyHorizontal = sun.altitude > -3 ? (4000 + 14000 * sunAltitude) * (0.6 + 0.4 * (1 - clear)) : 0;
-  let lumens = lamps.reduce((sum, lamp) => sum + (objectProps(lamp).lumens ?? LAMP_LUMENS[lamp.model]), 0);
-  for (const window of windows) {
-    const glass = window.open || window.model === 'door' ? 1 : 0.7;
-    lumens += window.dimensions.width * window.dimensions.height * glass * (skyHorizontal * 0.5 + directNormal * 0.1 * (toSun ? 1 : 0));
-  }
-  return {
+  const context = {
     scene, lamps, windows, toSun, directNormal, skyHorizontal, sun,
+    skyLuminance: skyHorizontal / Math.PI,
     boxes: opaqueBoxes(scene),
-    indirect: lumens * reflectance / (area * (1 - reflectance)),
     reflectance,
+    floorReflectance: floor.reflectance,
+    wallReflectance: walls.reflectance,
   };
+  context.patches = buildPatches(context);
+  // Headline number for the UI: bounce light on the floor at the room's centre.
+  context.indirect = bounceLux(context, { x: width / 2, y: 0.75, z: depth / 2 }, UP);
+  return context;
 }
 
-export function luxAt(context, point) {
-  const { scene, lamps, windows, toSun, boxes } = context;
-  let lux = context.indirect;
-  for (const lamp of lamps) {
-    const bulb = lamp.model === 'ceilingLight'
-      ? { x: lamp.position.x, y: lamp.position.y - 0.02, z: lamp.position.z }
-      : { x: lamp.position.x, y: lamp.position.y + lamp.dimensions.height * 0.72, z: lamp.position.z };
-    const dx = bulb.x - point.x;
-    const dy = bulb.y - point.y;
-    const dz = bulb.z - point.z;
-    const distanceSquared = Math.max(0.04, dx * dx + dy * dy + dz * dz);
-    if (dy <= 0) continue; // horizontal work plane only sees light from above
-    if (boxes.some((box) => box.object.id !== lamp.id && segmentHitsBox(point, bulb, box))) continue;
-    const intensity = (objectProps(lamp).lumens ?? LAMP_LUMENS[lamp.model]) / (4 * Math.PI) * (lamp.model === 'ceilingLight' ? 1.6 : 1);
-    lux += intensity * (dy / Math.sqrt(distanceSquared)) / distanceSquared;
-  }
-  for (const window of windows) {
-    const rect = windowRect(window, scene.room);
-    const transmit = window.open || window.model === 'door' ? 1 : 0.7;
-    // Direct sun patch
-    if (toSun && toSun.y > 0 && rayThroughWindow(point, toSun, rect)) {
-      const far = { x: point.x + toSun.x * 20, y: point.y + toSun.y * 20, z: point.z + toSun.z * 20 };
-      if (!boxes.some((box) => segmentHitsBox(point, far, box))) lux += context.directNormal * toSun.y * transmit;
-    }
-    // Sky seen through the window (solid-angle approximation from the window centre)
-    const center = rect.alongX
-      ? { x: window.position.x, y: (rect.bottom + rect.top) / 2, z: rect.plane }
-      : { x: rect.plane, y: (rect.bottom + rect.top) / 2, z: window.position.z };
-    const vx = center.x - point.x;
-    const vy = center.y - point.y;
-    const vz = center.z - point.z;
-    const distanceSquared = Math.max(0.25, vx * vx + vy * vy + vz * vz);
-    const distance = Math.sqrt(distanceSquared);
-    const facing = Math.abs(rect.alongX ? vz : vx) / distance; // cosine at the window
-    const upward = Math.max(0.15, vy / distance + 0.35); // horizontal plane sees the upper sky best
-    if (boxes.some((box) => segmentHitsBox(point, center, box))) continue;
-    lux += context.skyHorizontal * transmit * (window.dimensions.width * window.dimensions.height * facing * upward) / (Math.PI * distanceSquared) * 0.5;
-  }
-  return lux;
+// Total illuminance (lux) on a surface at `point` facing `normal` (default: a
+// horizontal work plane): direct light plus radiosity bounce.
+export function luxAt(context, point, normal = UP) {
+  return directLux(context, point, normal) + bounceLux(context, point, normal);
 }
 
 // ITU-R P.1238 indoor site-general model: L = 20·log10(f) + N·log10(d) + Lf − 28,
@@ -239,7 +319,9 @@ export function roomAcoustics(scene) {
     if (isWallItem(object)) {
       const area = w * h;
       openingArea += area;
-      absorption += area * (object.open ? 1 : object.model === 'window' ? 0.04 : 0.1);
+      // An open area absorbs everything (the sound leaves); glass and doors reflect.
+      const free = openArea(object);
+      absorption += free + (area - free) * Math.min(1, (object.model === 'window' ? 0.04 : 0.1) + windowCovering(object).absorption);
       continue;
     }
     const exposed = w * d + 2 * (w * h + d * h); // top + sides; the base sits on the floor
@@ -263,6 +345,23 @@ export function roomAcoustics(scene) {
   };
 }
 
+// First-order image sources (Allen & Berkley): the speaker mirrored in each of
+// the six room surfaces. Each reflection arrives with (1 − α) of the energy.
+export function imageSources(scene, source) {
+  const { width, depth, height } = scene.room;
+  const surfaces = sceneSurfaces(scene);
+  const floor = SURFACE_MATERIALS.floor[surfaces.floor] ?? SURFACE_MATERIALS.floor.wood;
+  const walls = SURFACE_MATERIALS.walls[surfaces.walls] ?? SURFACE_MATERIALS.walls.paint;
+  return [
+    { x: -source.x, y: source.y, z: source.z, reflect: 1 - walls.absorption },
+    { x: 2 * width - source.x, y: source.y, z: source.z, reflect: 1 - walls.absorption },
+    { x: source.x, y: source.y, z: -source.z, reflect: 1 - walls.absorption },
+    { x: source.x, y: source.y, z: 2 * depth - source.z, reflect: 1 - walls.absorption },
+    { x: source.x, y: -source.y, z: source.z, reflect: 1 - floor.absorption },
+    { x: source.x, y: 2 * height - source.y, z: source.z, reflect: 0.97 },
+  ];
+}
+
 export function soundAt(scene, point, acoustics = roomAcoustics(scene), boxes = null) {
   const speakers = scene.objects.filter((object) => object.model === 'speaker');
   if (!speakers.length) return null;
@@ -274,8 +373,14 @@ export function soundAt(scene, point, acoustics = roomAcoustics(scene), boxes = 
     const powerLevel = objectProps(speaker).level + 8;
     const barrier = blockingLoss(source, point, boxes ?? obstacleBoxes(scene, speaker.id), 'soundBlockDb');
     const direct = (2 / (4 * Math.PI * distance * distance)) * 10 ** (-barrier / 10);
+    // Early reflections off walls, floor and ceiling, then the diffuse tail.
+    let early = 0;
+    for (const image of imageSources(scene, source)) {
+      const reflected = Math.max(0.3, Math.hypot(point.x - image.x, point.y - image.y, point.z - image.z));
+      early += image.reflect * 2 / (4 * Math.PI * reflected * reflected);
+    }
     const reverberant = 4 / acoustics.roomConstant;
-    energy += 10 ** (powerLevel / 10) * (direct + reverberant);
+    energy += 10 ** (powerLevel / 10) * (direct + early + reverberant * 0.85);
   }
   return 10 * Math.log10(energy);
 }
@@ -388,7 +493,12 @@ export function computeVolumeField(scene, mode, { cellSize = 0.12 } = {}) {
     unit: mode === 'wifi' ? 'dBm' : 'dB',
     backend: 'analytic',
     stats: { maxSpeed: 0, maxLevel: max },
-    sources: sources.map((object) => emitterPoint(object, mode === 'wifi' ? 0.9 : 0.6)),
+    // Sound also draws its wall reflections as image sources, so the waves bounce.
+    sources: sources.flatMap((object) => {
+      const point = emitterPoint(object, mode === 'wifi' ? 0.9 : 0.6);
+      if (mode !== 'sound') return [{ ...point, gain: 1 }];
+      return [{ ...point, gain: 1 }, ...imageSources(scene, point).filter((image) => image.y > 0).slice(0, 5).map((image) => ({ x: image.x, y: image.y, z: image.z, gain: image.reflect * 0.6 }))];
+    }).slice(0, 8),
   };
 }
 

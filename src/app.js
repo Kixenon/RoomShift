@@ -24,19 +24,21 @@ import {
   setWindowWall,
 } from './model/room-scene.js';
 import { MATERIALS, SURFACE_MATERIALS, sceneSurfaces } from './model/materials.js';
+import { STYLE_OPTIONS, styleOf } from './scene/furniture-builders.js';
+import { WINDOW_COVERINGS, WINDOW_TYPES } from './model/room-scene.js';
 import { CATALOG } from './model/catalog.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
 import { RoomViewport } from './scene/room-viewport.js';
 import { createRoomPhotoPanel } from './scene/room-photo-panel.js';
-import { classifyFurniture, detectFurniture, loadDetector, placementsFromDetections } from './scene/photo-furniture.js';
+import { analyseSilhouette, classifyFurniture, detectFurniture, loadDetector, placementsFromDetections, shapeFromSilhouette } from './scene/photo-furniture.js';
 import {
   TEMPLATES, createProject, deleteProject, duplicateProject, exportProjectFile, getProject, importProjectFile, listProjects, saveProject,
 } from './model/projects.js';
 import { CITIES, compassLabel, environmentOf, fetchWeather, sunlitWalls, ventilation, wallBearings, windwardWall } from './model/environment.js';
 import { evaluateLayout, suggestLayout } from './model/layout-advisor.js';
 import {
-  LIGHT_BANDS, SOUND_BANDS, WIFI_BANDS, bandFor, computeLightVolume, computePlaneField, computeVolumeField, lightContext, luxAt, profileAlong, roomAcoustics, sampleListeningSpots, soundAt, wifiAt,
+  LIGHT_BANDS, SOUND_BANDS, WIFI_BANDS, bandFor, computePlaneField, computeVolumeField, lightContext, luxAt, profileAlong, roomAcoustics, sampleListeningSpots, soundAt, wifiAt,
 } from './simulation/room-propagation.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -64,7 +66,8 @@ const SIZE_PRESETS = {
   fridge: [['Under-counter', { width: 0.6, depth: 0.6, height: 0.85 }], ['Standard', { width: 0.6, depth: 0.65, height: 1.75 }], ['Side-by-side', { width: 0.9, depth: 0.7, height: 1.8 }]],
   window: [['Narrow', { width: 0.8 }], ['Standard', { width: 1.4 }], ['Wide', { width: 2.2 }]],
 };
-const VARIANTS = { table: [['rect', 'Rectangular'], ['round', 'Round']] };
+// Parts that take the second colour (legs, frames, handles).
+const SECOND_COLOUR = { table: 'Legs', desk: 'Base', sofa: 'Feet', chair: 'Legs', bed: 'Frame', wardrobe: 'Handles', shelf: 'Back', lamp: 'Stand', tv: 'Stand', fridge: 'Handles', fan: 'Stand' };
 const STACKABLE = new Set(['deskLamp', 'router', 'speaker', 'tv', 'plant', 'lamp', 'box', 'monitor', 'laptop', 'bottle', 'books']);
 const SURFACES = new Set(['desk', 'table', 'shelf', 'wardrobe', 'fridge']);
 const SHAPE_ICONS = {
@@ -462,8 +465,16 @@ const selectedObject = () => roomScene?.objects.find((object) => object.id === s
 function solverScene() {
   return {
     ...roomScene,
-    objects: roomScene.objects.map((object) => (object.model === 'door' ? { ...object, model: 'window' }
-      : object.model === 'ac' ? { ...object, model: 'fan' } : object)),
+    objects: roomScene.objects.map((object) => {
+      if (object.model === 'door') return { ...object, model: 'window' };
+      // The jet follows the fan head (yaw, tilt) or the AC louver.
+      if (object.model === 'fan' || object.model === 'ac') {
+        const yaw = object.model === 'fan' ? object.props?.yaw ?? 0 : 0;
+        const tilt = object.model === 'fan' ? object.props?.tilt ?? 0 : object.props?.louver ?? 30;
+        return { ...object, model: 'fan', rotation: { ...object.rotation, x: (object.rotation.x ?? 0) + tilt, y: object.rotation.y + yaw } };
+      }
+      return object;
+    }),
   };
 }
 function pushSolverScene() {
@@ -634,7 +645,6 @@ function renderCard() {
   const props = objectProps(object);
   const value = props[spec?.key] ?? spec?.default;
   const sizes = SIZE_PRESETS[object.model];
-  const variants = VARIANTS[object.model];
   const isLight = ['lamp', 'deskLamp', 'ceilingLight'].includes(object.model);
   const on = object.props?.on !== 0;
   const activeSize = sizes?.find(([, dims]) => Object.entries(dims).every(([axis, size]) => Math.abs(object.dimensions[axis] - size) < 0.011))?.[0];
@@ -651,11 +661,11 @@ function renderCard() {
       <input class="range" type="range" min="${spec.min}" max="${spec.max}" step="${spec.step}" value="${value}" data-prop="${spec.key}" /></div>` : ''}
     ${object.model === 'router' ? `<div><div class="prop-label">Band</div><div class="chip-row">${[2.4, 5].map((band) => `<button type="button" class="chip-option ${(props.band ?? 5) === band ? 'active' : ''}" data-band="${band}">${band} GHz</button>`).join('')}</div></div>` : ''}
     ${sizes ? `<div><div class="prop-label">Size</div><div class="chip-row">${sizes.map(([label]) => `<button type="button" class="chip-option ${label === activeSize ? 'active' : ''}" data-size="${escapeHtml(label)}">${escapeHtml(label)}</button>`).join('')}</div></div>` : ''}
-    ${variants ? `<div><div class="prop-label">Style</div><div class="chip-row">${variants.map(([key, label]) => `<button type="button" class="chip-option ${(object.variant ?? variants[0][0]) === key ? 'active' : ''}" data-variant="${key}">${label}</button>`).join('')}</div></div>` : ''}
-    ${opening ? '' : `<div><div class="prop-label">Colour</div><div class="swatches">
-      <button type="button" class="swatch none ${object.color ? '' : 'active'}" data-color="" title="Default"></button>
-      ${SWATCHES.map((color) => `<button type="button" class="swatch ${object.color === color ? 'active' : ''}" style="background:${color}" data-color="${color}" title="${color}"></button>`).join('')}
-      <label class="swatch custom" title="Custom colour"><input type="color" data-color-custom value="${object.color ?? '#888888'}" /></label></div></div>
+    ${styleControls(object)}
+    ${openingControls(object)}
+    ${fanControls(object)}
+    ${opening ? '' : `${colourRow(object, 'color', SECOND_COLOUR[object.model] ? 'Main colour' : 'Colour')}
+      ${SECOND_COLOUR[object.model] ? colourRow(object, 'color2', SECOND_COLOUR[object.model]) : ''}
       <div><div class="prop-label">Material <b>${escapeHtml(MATERIALS[objectMaterial(object)]?.label ?? '')}</b></div><div class="chip-row">${Object.entries(MATERIALS).map(([key, item]) => `<button type="button" class="chip-option ${objectMaterial(object) === key ? 'active' : ''}" data-material="${key}" title="WiFi −${item.wifiLossDb} dB · absorbs ${Math.round(item.absorption * 100)}% of sound · reflects ${Math.round(item.reflectance * 100)}% of light">${escapeHtml(item.label.split(' ')[0])}</button>`).join('')}</div></div>`}
     <details class="exact" ${localStorage.getItem('roomshift.exact') === '1' ? 'open' : ''}>
       <summary>Exact position &amp; size</summary>
@@ -669,6 +679,56 @@ function renderCard() {
   const modelSelect = $('[data-object-model]');
   if (modelSelect) modelSelect.value = object.model;
   positionCard();
+}
+
+function colourRow(object, key, label) {
+  const current = object[key];
+  return `<div><div class="prop-label">${label}</div><div class="swatches">
+    <button type="button" class="swatch none ${current ? '' : 'active'}" data-colour-key="${key}" data-color="" title="Default"></button>
+    ${SWATCHES.map((color) => `<button type="button" class="swatch ${current === color ? 'active' : ''}" style="background:${color}" data-colour-key="${key}" data-color="${color}" title="${color}"></button>`).join('')}
+    <label class="swatch custom" title="Custom colour"><input type="color" data-color-custom="${key}" value="${current ?? '#888888'}" /></label></div></div>`;
+}
+
+function chipGroup(label, attribute, choices, current) {
+  return `<div><div class="prop-label">${label}</div><div class="chip-row">${choices.map(([value, text]) => `<button type="button" class="chip-option ${String(current) === String(value) ? 'active' : ''}" ${attribute}="${escapeHtml(value)}">${escapeHtml(text)}</button>`).join('')}</div></div>`;
+}
+
+function styleControls(object) {
+  const options = STYLE_OPTIONS[object.model];
+  if (!options) return '';
+  const style = styleOf(object);
+  return options.map(([key, label, choices]) => chipGroup(label, `data-style-${key}`, choices, style[key] === 'auto' ? '' : style[key])).join('');
+}
+
+function sliderRow(label, prop, value, min, max, step, unit) {
+  return `<div><div class="prop-label">${label}<b data-slider-label="${prop}">${value}${unit}</b></div><input class="range" type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-slider="${prop}" data-unit="${unit}" /></div>`;
+}
+
+function openingControls(object) {
+  const props = object.props ?? {};
+  if (object.model === 'window') {
+    const type = props.type ?? 'sliding';
+    return `${chipGroup('Type', 'data-window-type', Object.entries(WINDOW_TYPES).map(([key, item]) => [key, item.label]), type)}
+      ${type === 'fixed' ? '' : sliderRow('Opened', 'amount', Math.round((props.amount ?? 1) * 100), 0, 100, 5, '%')}
+      ${chipGroup('Covering', 'data-covering', Object.entries(WINDOW_COVERINGS).map(([key, item]) => [key, item.label]), props.covering ?? 'none')}`;
+  }
+  if (object.model === 'door') {
+    return `${sliderRow('Opened to', 'angle', props.angle ?? 90, 10, 110, 5, '°')}
+      ${chipGroup('Hinge', 'data-hinge', [['left', 'Left'], ['right', 'Right']], props.hinge ?? 'left')}
+      ${chipGroup('Swings', 'data-swing', [['in', 'Into the room'], ['out', 'Outwards']], props.swing ?? 'in')}`;
+  }
+  return '';
+}
+
+function fanControls(object) {
+  const props = object.props ?? {};
+  if (object.model === 'fan') {
+    return `${sliderRow('Head turned', 'yaw', props.yaw ?? 0, -90, 90, 5, '°')}
+      ${sliderRow('Head tilted up', 'tilt', props.tilt ?? 0, -20, 30, 5, '°')}
+      <button class="toggle" type="button" data-toggle-prop="oscillate"><span>Oscillate</span><span class="switch ${props.oscillate ? 'on' : ''}"></span></button>`;
+  }
+  if (object.model === 'ac') return sliderRow('Louver aimed down', 'louver', props.louver ?? 30, 0, 60, 5, '°');
+  return '';
 }
 
 function cardNote(object) {
@@ -721,8 +781,16 @@ properties.addEventListener('click', (event) => {
     else if (target.dataset.band) apply(setObjectProp(roomScene, object.id, 'band', Number(target.dataset.band)));
     else if (target.dataset.wall) apply(setWindowWall(roomScene, object.id, target.dataset.wall));
     else if (target.dataset.size) apply(resizeObject(roomScene, object.id, SIZE_PRESETS[object.model].find(([label]) => label === target.dataset.size)[1]));
-    else if (target.dataset.variant) apply(patchObject(object.id, { variant: target.dataset.variant }));
-    else if (target.dataset.color !== undefined) apply(patchObject(object.id, { color: target.dataset.color || undefined }));
+    else if (target.dataset.color !== undefined) apply(patchObject(object.id, { [target.dataset.colourKey ?? 'color']: target.dataset.color || undefined }));
+    else if (Object.keys(target.dataset).some((key) => key.startsWith('style'))) {
+      const key = Object.keys(target.dataset).find((name) => name.startsWith('style'));
+      const option = key.slice(5).toLowerCase();
+      apply(patchObject(object.id, { style: { ...(object.style ?? {}), [option]: target.dataset[key] } }));
+    } else if (target.dataset.windowType) apply(patchObject(object.id, { props: { ...(object.props ?? {}), type: target.dataset.windowType }, open: target.dataset.windowType === 'fixed' ? false : object.open }));
+    else if (target.dataset.covering) apply(patchObject(object.id, { props: { ...(object.props ?? {}), covering: target.dataset.covering } }));
+    else if (target.dataset.hinge) apply(patchObject(object.id, { props: { ...(object.props ?? {}), hinge: target.dataset.hinge } }));
+    else if (target.dataset.swing) apply(patchObject(object.id, { props: { ...(object.props ?? {}), swing: target.dataset.swing } }));
+    else if (target.dataset.toggleProp) apply(patchObject(object.id, { props: { ...(object.props ?? {}), [target.dataset.toggleProp]: !object.props?.[target.dataset.toggleProp] } }));
     else if (target.dataset.material) apply(setObjectMaterial(roomScene, object.id, target.dataset.material));
   } catch (error) {
     toast(error.message, { tone: 'warn' });
@@ -731,6 +799,10 @@ properties.addEventListener('click', (event) => {
 properties.addEventListener('input', (event) => {
   const input = event.target;
   const object = selectedObject();
+  if (input.dataset.slider) {
+    $(`[data-slider-label="${input.dataset.slider}"]`).textContent = `${input.value}${input.dataset.unit}`;
+    return;
+  }
   if (!object || !input.dataset.prop) return;
   const spec = INTENSITY[object.model];
   $('[data-intensity-label]').textContent = spec.labels ? spec.labels[Number(input.value) - 1] : `${input.value} ${spec.unit}`;
@@ -750,7 +822,15 @@ properties.addEventListener('change', (event) => {
   try {
     if (input.matches('[data-object-name]')) apply(renameObject(roomScene, object.id, input.value));
     else if (input.matches('[data-object-model]')) apply(setObjectModel(roomScene, object.id, input.value));
-    else if (input.matches('[data-color-custom]')) apply(patchObject(object.id, { color: input.value }));
+    else if (input.matches('[data-color-custom]')) apply(patchObject(object.id, { [input.dataset.colorCustom || 'color']: input.value }));
+    else if (input.dataset.slider) {
+      const raw = Number(input.value);
+      const value = input.dataset.slider === 'amount' ? raw / 100 : raw;
+      const patch = { props: { ...(object.props ?? {}), [input.dataset.slider]: value } };
+      // Opening a window or door by any amount opens it; zero closes it.
+      if (input.dataset.slider === 'amount' || input.dataset.slider === 'angle') patch.open = raw > 0;
+      apply(patchObject(object.id, patch));
+    }
     else if (input.dataset.prop) {
       history.record({ scene: getProject(project.id)?.scene ?? roomScene, selectedId });
       roomScene = setObjectProp(roomScene, object.id, input.dataset.prop, Number(input.value)).scene;
@@ -938,6 +1018,7 @@ function setLens(mode) {
   viewport.probeHeight = mode ? Math.min(roomScene.room.height - 0.1, probeHeights[mode] ?? DEFAULT_PROBE_HEIGHT[mode]) : undefined;
   viewport.clearPlaneField();
   viewport.setOverlayField(null);
+  viewport.setSurfaceMap(null);
   fieldController.setMode(SOLVER_LENSES.has(mode) || mode === 'light' ? mode : null);
   if (!mode) legend.box.hidden = true;
   $('#sun-dock').hidden = mode !== 'light';
@@ -983,8 +1064,11 @@ function refreshLensFields() {
   } else if (lens === 'light') {
     const environment = environmentOf(project);
     planeField = computePlaneField(roomScene, 'light', { environment, cloudCover: weather?.cloudCover, cellSize: 0.2 });
-    volumeField = computeLightVolume(roomScene, environment, { cloudCover: weather?.cloudCover, cellSize: isDragging || sunPlaying ? 0.24 : 0.15 });
-    viewport.setOverlayField(volumeField, 'lux');
+    const context = planeField.light;
+    volumeField = { light: context, min: planeField.min, max: planeField.max };
+    // Repaint the lux map when a drag ends; mid-drag the last map stays put.
+    if (luxMapOn && !isDragging) viewport.setSurfaceMap((point, normal) => luxAt(context, point, normal));
+    else if (!luxMapOn) viewport.setSurfaceMap(null);
     renderLightLegend();
   }
   refreshPins();
@@ -1027,10 +1111,19 @@ function renderVolumeLegend() {
   showLegend(lens, lens === 'wifi' ? 'WiFi signal · ITU-R P.1238' : 'Sound pressure level', `${fmt(volumeField.min)} ${volumeField.unit}`, `${fmt(volumeField.max)} ${volumeField.unit}`,
     `Wavefronts fade as the ${lens === 'wifi' ? 'signal' : 'sound'} weakens · hover to measure`);
 }
+let luxMapOn = true;
 function renderLightLegend() {
-  if (!volumeField) return;
-  showLegend('light', 'Illuminance (log scale)', `${fmt(volumeField.min)} lux`, `${fmt(volumeField.max)} lux`, `Includes ${fmt(volumeField.light.indirect)} lux of light bounced off walls &amp; floor`);
+  if (!volumeField?.light) return;
+  showLegend('light', 'Illuminance · lux', '50', '1500+',
+    `<div class="segmented legend-toggle"><button type="button" data-luxmap="off" class="${luxMapOn ? '' : 'active'}">Rendered</button><button type="button" data-luxmap="on" class="${luxMapOn ? 'active' : ''}">Lux map</button></div>
+    <span>Dark bands at 100 · 300 · 500 · 1000 lux. ${fmt(volumeField.light.indirect)} lux here is light reflected off your walls, floor and ceiling.</span>`);
 }
+legend.box.addEventListener('click', (event) => {
+  const toggle = event.target.closest('[data-luxmap]');
+  if (!toggle) return;
+  luxMapOn = toggle.dataset.luxmap === 'on';
+  refreshLensFields();
+});
 
 function renderFieldState({ mode, loading, result, error }) {
   if (VOLUME_LENSES.has(lens) || lens !== mode) return;
@@ -1621,7 +1714,9 @@ async function handleFurniturePhoto(file) {
       <select class="select" data-detection-model="${index}">${options(detection.model)}</select>
       ${detection.confidence ? `<span class="muted">${escapeHtml(detection.detectedAs)} · ${Math.round(detection.confidence * 100)}%</span>` : ''}</label>`).join('')}`;
   $('#furniture-add').disabled = false;
+  furnitureImage = image;
 }
+let furnitureImage = null;
 $('#furniture-file').addEventListener('change', (event) => handleFurniturePhoto(event.target.files[0]));
 $('#furniture-drop').addEventListener('dragover', (event) => { event.preventDefault(); event.currentTarget.classList.add('over'); });
 $('#furniture-drop').addEventListener('dragleave', (event) => event.currentTarget.classList.remove('over'));
@@ -1633,7 +1728,10 @@ $('#furniture-drop').addEventListener('drop', (event) => {
 $('#furniture-add').addEventListener('click', () => {
   const chosen = $$('[data-detection]').filter((input) => input.checked).map((input) => {
     const index = Number(input.dataset.detection);
-    return { ...detections[index], model: $(`[data-detection-model="${index}"]`).value };
+    const model = $(`[data-detection-model="${index}"]`).value;
+    // Read proportions, colours and leg style from the photo itself.
+    const silhouette = furnitureImage ? analyseSilhouette(furnitureImage, detections[index].whole ? undefined : detections[index].box) : null;
+    return { ...detections[index], model, shape: shapeFromSilhouette(model, silhouette) };
   });
   let scene = roomScene;
   for (const placement of placementsFromDetections(chosen, roomScene.room)) {
