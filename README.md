@@ -40,7 +40,7 @@ The light preview is driven by the real solar position for a fixed site: **Hong 
 
 - Drag the clock (or press the time control) and the sun's altitude and azimuth change. Colour and intensity follow: warm and low at dawn and dusk, near-neutral and high at midday, nothing below the horizon.
 - **Sun patches.** Each open window projects a parallelogram of direct sun onto the floor, clipped to the room. A patch is dropped when the sun is below the horizon, is on the wrong side of the wall, or the window is closed. Patches pull away from their wall as the sun climbs, and graze it dimly when the light is oblique.
-- **Lamps** switch on when the sun drops below 6°, and the **Lamps** button overrides that in either direction.
+- **Lamps** switch on by themselves when the sun drops below 6°, and the **Lamps** button reads as lit whenever they are. It is a plain on/off switch: it flips whatever the lamps are doing now, so you can turn them off at night as well as on during the day. Until you press it, the dusk threshold decides.
 - The site being inside the tropics is not incidental: between the solstices the sun passes north of the zenith, so its azimuth sweeps through the whole compass and a room's aspect changes through the day. In June it stays in the northern half of the sky all day.
 
 This is still a **visual preview, not lux-calibrated photometry**. The solar position is geometric and meaningful; the light intensities are hand-tuned curves chosen to read well, not measured irradiance. The room is a rectangular box with flat walls, and the sun patches are parallel projections with no occlusion by furniture. A near-overhead sun barely reaches any vertical wall, so patches shrink to slivers around local noon.

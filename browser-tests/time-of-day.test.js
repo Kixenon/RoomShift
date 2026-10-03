@@ -124,22 +124,54 @@ test('the sun sweeps across the compass through the day', async () => {
   assert.ok(morning.altitude > 0 && afternoon.altitude > 0);
 });
 
-test('lamps follow dusk and can be forced on during the day', async () => {
+test('the lamp button is a plain on and off switch', async () => {
   await setClock(13 * 60);
   assert.equal((await canvasState()).lampsOn, 'false');
+  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'false');
 
+  // Switch them on during the day.
   await page.locator('#lamps-toggle').click();
   await page.waitForTimeout(220);
-  assert.equal((await canvasState()).lampsOn, 'true', 'the override should beat the daylight');
+  assert.equal((await canvasState()).lampsOn, 'true');
   assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'true');
 
+  // A manual choice survives a change of time in either direction.
+  await setClock(22 * 60);
+  assert.equal((await canvasState()).lampsOn, 'true');
+
+  // And now the important half: at night, with the lamps lit, the switch turns
+  // them off rather than only ever being able to force them on.
   await page.locator('#lamps-toggle').click();
   await page.waitForTimeout(220);
   assert.equal((await canvasState()).lampsOn, 'false');
   assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'false');
 
+  await setClock(13 * 60);
+  assert.equal((await canvasState()).lampsOn, 'false', 'the switch stays off through the day');
+
+  await page.locator('#lamps-toggle').click();
+  await page.waitForTimeout(220);
+  assert.equal((await canvasState()).lampsOn, 'true');
+});
+
+test('the lamp button follows dusk until it is touched', async () => {
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#room-canvas');
+  await page.locator('#show-light').click();
+  await page.waitForTimeout(800);
+
+  await setClock(13 * 60);
+  assert.equal((await canvasState()).lampsOn, 'false');
+  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'false');
+
+  // Crossing dusk lights the lamps and the button reflects it with no click.
   await setClock(22 * 60);
-  assert.equal((await canvasState()).lampsOn, 'true', 'lamps should come on after dusk');
+  assert.equal((await canvasState()).lampsOn, 'true');
+  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'true');
+
+  // The button explains whether the state came from dusk or from the user.
+  assert.match(await page.locator('#lamps-toggle').getAttribute('title'), /following dusk/);
+  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-label'), 'Switch the lamps off');
 });
 
 test('a closed window casts no sun patch but an open sunward one does', async () => {

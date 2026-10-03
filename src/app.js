@@ -94,12 +94,14 @@ function renderTimeOfDay() {
   timeControls.clock.title = state.sun.altitude > 0
     ? `Sun ${state.sun.altitude.toFixed(0)}° up, bearing ${Math.round(state.sun.azimuth)}°. ${state.site.name}.`
     : `Sun below the horizon. ${state.site.name}.`;
-  // "Auto" means follow the dusk threshold, so the button only reads as pressed
-  // when the user has taken the lamps over.
-  const forced = timeControls.lamps.getAttribute('aria-pressed') === 'true';
-  timeControls.lamps.title = forced
-    ? `Lamps forced on, overriding the dusk threshold. Sun altitude ${state.sun.altitude.toFixed(0)}°.`
-    : `Lamps follow dusk automatically. Currently ${state.lampsOn ? 'on' : 'off'}.`;
+  // The button is a lamp switch, so it reads as on whenever the lamps are lit,
+  // whether dusk turned them on or the user did. Only the explanation differs.
+  setPressed(timeControls.lamps, state.lampsOn);
+  timeControls.lamps.setAttribute('aria-label', state.lampsOn ? 'Switch the lamps off' : 'Switch the lamps on');
+  const manual = viewport.lampsOverride !== null;
+  timeControls.lamps.title = state.lampsOn
+    ? `Lamps on${manual ? ', set by hand' : ', following dusk'}. Click to switch them off.`
+    : `Lamps off${manual ? ', set by hand' : ''}. Click to switch them on.`;
 }
 
 timeControls.slider.addEventListener('input', () => {
@@ -107,9 +109,11 @@ timeControls.slider.addEventListener('input', () => {
   renderTimeOfDay();
 });
 timeControls.lamps.addEventListener('click', () => {
-  const forced = timeControls.lamps.getAttribute('aria-pressed') !== 'true';
-  setPressed(timeControls.lamps, forced);
-  viewport.setTimeOfDay({ lampsOverride: forced ? true : null });
+  // A plain on/off switch. It flips whatever the lamps are doing now, so it can
+  // switch them off at night as well as on during the day; the dusk threshold
+  // only decides the state until the first click.
+  const next = !(viewport?.daylightState?.lampsOn ?? false);
+  viewport.setTimeOfDay({ lampsOverride: next });
   renderTimeOfDay();
 });
 
