@@ -35,7 +35,7 @@ import { analyseSilhouette, classifyFurniture, detectFurniture, loadDetector, pl
 import {
   TEMPLATES, createProject, deleteProject, duplicateProject, exportProjectFile, getProject, importProjectFile, listProjects, saveProject,
 } from './model/projects.js';
-import { CITIES, compassLabel, environmentOf, fetchWeather, sunlitWalls, ventilation, wallBearings, windwardWall } from './model/environment.js';
+import { CITIES, compassLabel, environmentOf, fetchWeather, formatHour, sunlitWalls, ventilation, wallBearings, windwardWall } from './model/environment.js';
 import { evaluateLayout, suggestLayout } from './model/layout-advisor.js';
 import {
   LIGHT_BANDS, SOUND_BANDS, WIFI_BANDS, bandFor, computePlaneField, computeVolumeField, lightContext, luxAt, profileAlong, roomAcoustics, sampleListeningSpots, soundAt, wifiAt,
@@ -1107,7 +1107,8 @@ function refreshLensFields() {
   }
   if (lenses.has('light')) {
     const environment = environmentOf(project);
-    const plane = computePlaneField(roomScene, 'light', { environment, cloudCover: weather?.cloudCover, cellSize: 0.2 });
+    const lampsOn = viewport?.lampsOnState() ?? true;
+    const plane = computePlaneField(roomScene, 'light', { environment, cloudCover: weather?.cloudCover, cellSize: 0.2, lampsOn });
     const context = plane.light;
     lensFields.light = { plane, volume: { light: context, min: plane.min, max: plane.max } };
     // Repaint the lux map when a drag ends; mid-drag the last map stays put.
@@ -1383,17 +1384,30 @@ $('#viewport').addEventListener('pointerleave', () => { $('#probe').hidden = tru
 
 // ─── Sun ──────────────────────────────────────────────────────────────────
 let sunPlaying = null;
-function formatHour(hour) {
-  const minutes = Math.round(hour * 60);
-  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
-}
 function renderSunDock() {
   const environment = environmentOf(project);
   $('#sun-hour').value = environment.hour;
   $('#sun-time').textContent = formatHour(environment.hour);
   const { sun, walls } = sunlitWalls(environment);
   $('#sun-info').textContent = sun.altitude > 0 ? `Sun ${fmt(sun.altitude)}° high in the ${compassLabel(sun.azimuth)}${walls.length ? ` · on the ${walls.join(' & ')} wall${walls.length > 1 ? 's' : ''}` : ''}` : 'Night';
+  // The lamps switch reads as on whenever the lamps are lit, whether dusk
+  // turned them on or the user did. Only the explanation differs.
+  const lampsOn = viewport?.lampsOnState() ?? true;
+  const manual = viewport?.lampsOverride !== null && viewport?.lampsOverride !== undefined;
+  const lampsButton = $('#lamps-toggle');
+  lampsButton.classList.toggle('active', lampsOn);
+  lampsButton.setAttribute('aria-pressed', String(lampsOn));
+  lampsButton.setAttribute('aria-label', lampsOn ? 'Switch the lamps off' : 'Switch the lamps on');
+  lampsButton.title = `Lamps ${lampsOn ? 'on' : 'off'}${manual ? ', set by hand' : ', following dusk'}. Click to switch them ${lampsOn ? 'off' : 'on'}.`;
 }
+$('#lamps-toggle').addEventListener('click', () => {
+  // A plain on/off switch. It flips whatever the lamps are doing now, so it can
+  // switch them off at night as well as on during the day; the dusk threshold
+  // only decides the state until the first click.
+  viewport.setLampsOverride(!viewport.lampsOnState());
+  renderSunDock();
+  scheduleLensFrame();
+});
 function setHour(hour) {
   project = { ...project, environment: { ...environmentOf(project), hour } };
   viewport.setEnvironment(environmentOf(project));

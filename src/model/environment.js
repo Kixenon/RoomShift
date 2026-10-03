@@ -30,6 +30,23 @@ export function environmentOf(project) {
   return { ...DEFAULT_ENVIRONMENT, ...(project?.environment ?? {}) };
 }
 
+// Lamps take over from the sun once it drops this close to the horizon.
+export const LAMP_AUTO_ALTITUDE_DEGREES = 6;
+
+// Effective lamp state. The manual override wins once the user has touched the
+// lamps switch; until then the lamps follow dusk. A null altitude (no site set)
+// keeps the lamps on, which is how the room behaved before there was a sun.
+export function lampsOnAt(altitude, override = null) {
+  if (override !== null && override !== undefined) return override;
+  return altitude === null || altitude === undefined ? true : altitude < LAMP_AUTO_ALTITUDE_DEGREES;
+}
+
+/** Decimal hours (e.g. 13.5) as a "13:30" clock string. */
+export function formatHour(hour) {
+  const minutes = Math.round(hour * 60);
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
 const rad = (degrees) => degrees * Math.PI / 180;
 const deg = (radians) => radians * 180 / Math.PI;
 
