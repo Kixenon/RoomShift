@@ -123,16 +123,17 @@
           <button id="show-wifi" class="lens" data-mode="wifi" type="button" aria-pressed="false" aria-label="WiFi lens" title="WiFi · 4"><i>⌔</i><span>WiFi</span></button>
           <button id="show-sound" class="lens" data-mode="sound" type="button" aria-pressed="false" aria-label="Sound lens" title="Sound · 5"><i>♪</i><span>Sound</span></button>
           <button id="lens-clear" class="lens clear" type="button" title="Clear · 0" hidden><span>Clear</span></button>
+          <span class="divider" aria-hidden="true"></span>
+          <button class="orb" id="score-orb" type="button" data-sheet="insights" title="Livability — open insights">
+            <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="16" class="orb-track" /><circle cx="20" cy="20" r="16" class="orb-value" id="orb-value" /></svg>
+            <span id="orb-score" class="mono">–</span>
+          </button>
         </nav>
         <p id="narrator" class="narrator" aria-live="polite"></p>
       </div>
 
       <!-- top-right -->
       <div class="top-right">
-        <button class="island orb" id="score-orb" type="button" data-sheet="insights" title="Livability — open insights">
-          <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="16" class="orb-track" /><circle cx="20" cy="20" r="16" class="orb-value" id="orb-value" /></svg>
-          <span id="orb-score" class="mono">–</span>
-        </button>
         <div class="island tool-island">
           <button class="text-btn share-btn" type="button" data-action="report" title="Printable room report">Report</button>
           <button class="icon-btn" type="button" data-action="palette" title="Search everything ⌘K" aria-label="Command palette">⌕</button>
@@ -177,6 +178,9 @@
         <button id="sun-play" class="icon-btn" type="button" aria-label="Play the day" title="Play the day · Space">▶</button>
         <span id="sun-time" class="mono">15:00</span>
         <input id="sun-hour" type="range" min="5" max="20" step="0.25" value="15" aria-label="Time of day" />
+        <button id="lamps-toggle" class="icon-btn" type="button" aria-pressed="false" aria-label="Switch the lamps off" title="Lamps">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10.5c.8.7 1 1.5 1 2.5h6c0-1 .2-1.8 1-2.5A6 6 0 0 0 12 3Z"/></svg>
+        </button>
         <span id="sun-info" class="sun-info"></span>
       </div>
 

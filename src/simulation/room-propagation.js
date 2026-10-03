@@ -177,7 +177,7 @@ function bounceLux(context, point, normal) {
   return lux / (1 - context.reflectance * 0.6);
 }
 
-export function lightContext(scene, environment, cloudCover = 20) {
+export function lightContext(scene, environment, cloudCover = 20, lampsOn = true) {
   const surfaces = sceneSurfaces(scene);
   const floor = SURFACE_MATERIALS.floor[surfaces.floor] ?? SURFACE_MATERIALS.floor.wood;
   const walls = SURFACE_MATERIALS.walls[surfaces.walls] ?? SURFACE_MATERIALS.walls.paint;
@@ -186,7 +186,7 @@ export function lightContext(scene, environment, cloudCover = 20) {
   const wallArea = 2 * (width + depth) * height;
   const area = 2 * floorArea + wallArea;
   const reflectance = (floorArea * floor.reflectance + floorArea * 0.8 + wallArea * walls.reflectance) / area;
-  const lamps = scene.objects.filter((object) => LAMP_LUMENS[object.model] && object.props?.on !== 0);
+  const lamps = lampsOn ? scene.objects.filter((object) => LAMP_LUMENS[object.model] && object.props?.on !== 0) : [];
   const windows = scene.objects.filter((object) => object.model === 'window' || (object.model === 'door' && object.open));
   const sun = environment ? sunPosition(environment) : { altitude: -10, azimuth: 0 };
   const clear = 1 - Math.min(1, Math.max(0, cloudCover / 100)) * 0.75;
@@ -388,7 +388,7 @@ export function soundAt(scene, point, acoustics = roomAcoustics(scene), boxes = 
 const PLANE_HEIGHTS = Object.freeze({ wifi: 1.0, sound: 1.2, light: 0.75 });
 const SOURCE_MODELS = Object.freeze({ wifi: ['router'], sound: ['speaker'], light: null });
 
-export function computePlaneField(scene, mode, { height = PLANE_HEIGHTS[mode], cellSize = 0.08, environment = null, cloudCover } = {}) {
+export function computePlaneField(scene, mode, { height = PLANE_HEIGHTS[mode], cellSize = 0.08, environment = null, cloudCover, lampsOn = true } = {}) {
   const plane = buildPlane(scene.room, height, cellSize);
   const values = new Float32Array(plane.nx * plane.nz);
   const acoustics = mode === 'sound' ? roomAcoustics(scene) : null;
@@ -398,7 +398,7 @@ export function computePlaneField(scene, mode, { height = PLANE_HEIGHTS[mode], c
   if (!sources.length) return { ...plane, mode, values: null, acoustics, empty: true, sources: [] };
   const sourceIds = new Set(sources.map((object) => object.id));
   const boxes = obstacleBoxes(scene, null).filter((box) => !sourceIds.has(box.object.id));
-  const light = mode === 'light' ? lightContext(scene, environment, cloudCover) : null;
+  const light = mode === 'light' ? lightContext(scene, environment, cloudCover, lampsOn) : null;
   let min = Infinity;
   let max = -Infinity;
   for (let k = 0; k < plane.nz; k += 1) {
@@ -505,13 +505,13 @@ export function computeVolumeField(scene, mode, { cellSize = 0.12 } = {}) {
 // 3D illuminance field for the Light lens volume. Values are lux; the signal is
 // log-scaled (10 lux → 0, the room's brightest point → 1) because the eye and
 // the lighting standards both work on ratios.
-export function computeLightVolume(scene, environment, { cellSize = 0.15, cloudCover = 20 } = {}) {
+export function computeLightVolume(scene, environment, { cellSize = 0.15, cloudCover = 20, lampsOn = true } = {}) {
   const { width, depth, height } = scene.room;
   const nx = Math.max(2, Math.round(width / cellSize));
   const ny = Math.max(2, Math.round(height / cellSize));
   const nz = Math.max(2, Math.round(depth / cellSize));
   const grid = { nx, ny, nz, dx: width / nx, dy: height / ny, dz: depth / nz, width, height, depth, cellSize };
-  const context = lightContext(scene, environment, cloudCover);
+  const context = lightContext(scene, environment, cloudCover, lampsOn);
   const count = nx * ny * nz;
   const raw = new Float32Array(count);
   const solid = new Uint8Array(count);

@@ -5,7 +5,7 @@ import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
 import { floorContains, floorOutline, isWallItem, objectMaterial, openFraction } from '../model/room-scene.js';
 import { MATERIALS, SURFACE_MATERIALS, sceneSurfaces } from '../model/materials.js';
-import { bearingToRoomVector, sunPosition } from '../model/environment.js';
+import { bearingToRoomVector, formatHour, lampsOnAt, sunPosition } from '../model/environment.js';
 import { gsap } from 'gsap';
 import {
   buildBed, buildChair, buildDesk, buildFan, buildFridge, buildLamp, buildShelf, buildSofa, buildTable, buildTv, buildWardrobe, styleOf,
@@ -153,10 +153,14 @@ function createLamp(group, dimensions) {
   shade.position.y = shadeY;
   shade.castShadow = true;
   shade.userData.shade = true;
+  shade.userData.bulb = true;
+  shade.userData.bulbIntensity = 0.18;
   group.add(shade);
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(Math.min(0.045, footprint * 0.14), 16, 12), material(0xfff4d6, { emissive: 0xffe7b0, emissiveIntensity: 1.4 }));
   bulb.position.y = shadeY - shadeHeight * 0.1;
   bulb.userData.noTint = true;
+  bulb.userData.bulb = true;
+  bulb.userData.bulbIntensity = 1.4;
   group.add(bulb);
 }
 
@@ -279,6 +283,8 @@ function createCeilingLight(group, { width: w, height: h }) {
   const glow = cylinder(group, w * 0.4, w * 0.4, 0.004, { x: 0, y: -h / 2, z: 0 }, 0xfff3c4, 28);
   glow.material.emissive = new THREE.Color(0xffe9a8);
   glow.material.emissiveIntensity = 0.6;
+  glow.userData.bulb = true;
+  glow.userData.bulbIntensity = 0.6;
 }
 
 function createRouter(group, { width: w, height: h, depth: d }) {
@@ -461,6 +467,9 @@ export class RoomViewport {
     this.planeField = null;
     this.planeMesh = null;
     this.sunLight = null;
+    // null = lamps follow dusk; a boolean once the user flips the lamps switch.
+    this.lampsOverride = null;
+    this.sunShaftCount = 0;
     this.onSelect = onSelect;
     this.onTransform = onTransform;
     this.onDragChange = onDragChange;
@@ -1345,14 +1354,24 @@ export class RoomViewport {
     const preview = this.lightingPreview;
     const sun = this.sunState();
     const sunUp = sun && sun.altitude > 0.5;
+    const lampsOn = this.lampsOnState();
     // In the Light lens the fill is the sky: bright by day, near-dark at night.
     const daylight = sun ? Math.max(0, Math.min(1, (sun.altitude + 4) / 30)) : 0;
     this.hemisphereLight.intensity = preview ? 0.12 + daylight * 1.1 : sunUp ? 1.45 : 1.15;
     this.keyLight.intensity = preview ? 0 : sunUp ? 0.7 : 0.9;
-    if (sunUp) this.addSunLight(sun);
+    this.sunShaftCount = sunUp ? this.addSunLight(sun) : 0;
     for (const object of this.roomScene.objects.filter((item) => LIGHT_SOURCES[item.model])) {
       const group = this.groups.get(object.id);
-      if (!group || object.props?.on === 0) continue;
+      const lit = lampsOn && object.props?.on !== 0;
+      // The glow on shades and bulbs follows the switch, so a lamp that is off
+      // reads as off even in daylight. Covers both the simple builders
+      // (userData.bulb) and the parametric ones (shade parts).
+      group?.traverse((child) => {
+        if (!(child.userData.bulb || child.userData.part === 'shade') || !child.material?.emissive) return;
+        child.userData.bulbIntensity ??= child.material.emissiveIntensity;
+        child.material.emissiveIntensity = lit ? child.userData.bulbIntensity : 0;
+      });
+      if (!group || !lit) continue;
       const spec = LIGHT_SOURCES[object.model];
       const source = new THREE.PointLight(0xffe2b8, 1, preview ? 9 : 6, 2);
       source.power = (preview ? spec.power : spec.power * 0.35) * (object.props?.lumens ?? spec.lumens) / spec.lumens;
@@ -1371,6 +1390,7 @@ export class RoomViewport {
       this.scene.add(source);
       this.dynamicLights.push(source);
     }
+    this.updateDaylightDataset();
   }
 
   updateLightingLightPositions() {
@@ -1389,8 +1409,40 @@ export class RoomViewport {
     this.rebuildLights();
   }
 
+  /**
+   * The lamps switch is a plain on/off: it flips whatever the lamps are doing
+   * now, and the dusk threshold only decides the state until the first flip.
+   */
+  setLampsOverride(override) {
+    this.lampsOverride = override;
+    this.rebuildLights();
+  }
+
+  lampsOnState() {
+    return lampsOnAt(this.sunState()?.altitude ?? null, this.lampsOverride);
+  }
+
   sunState() {
     return this.environment ? sunPosition(this.environment) : null;
+  }
+
+  /** Publish the daylight state so tests and the DOM can read it. */
+  updateDaylightDataset() {
+    const data = this.renderer.domElement.dataset;
+    if (!this.lightingPreview || !this.roomScene) {
+      delete data.sunAltitude;
+      delete data.sunAzimuth;
+      delete data.clockTime;
+      delete data.lampsOn;
+      delete data.sunShafts;
+      return;
+    }
+    const sun = this.sunState();
+    data.sunAltitude = String(Number((sun?.altitude ?? 0).toFixed(1)));
+    data.sunAzimuth = String(Number((sun?.azimuth ?? 0).toFixed(1)));
+    data.clockTime = this.environment ? formatHour(this.environment.hour) : '';
+    data.lampsOn = String(this.lampsOnState());
+    data.sunShafts = String(this.sunShaftCount);
   }
 
   addSunLight(sun) {
@@ -1411,6 +1463,7 @@ export class RoomViewport {
     this.dynamicLights.push(light, light.target);
 
     // Visible shafts of daylight through each window facing the sun.
+    let shafts = 0;
     const travel = new THREE.Vector3(-toSun.x, -toSun.y, -toSun.z);
     const clipping = ROOM_PLANES(this.roomScene.room);
     for (const window of this.roomScene.objects.filter((object) => object.model === 'window' || (object.model === 'door' && object.open))) {
@@ -1445,7 +1498,9 @@ export class RoomViewport {
       shaft.renderOrder = 1;
       this.sceneRoot.add(shaft);
       this.dynamicLights.push(shaft);
+      shafts += 1;
     }
+    return shafts;
   }
 
   setPlaneField(field) {

@@ -226,6 +226,10 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 .orb-value { stroke: var(--good); stroke-linecap: round; stroke-dasharray: 100.5; stroke-dashoffset: 100.5; transition: stroke-dashoffset .7s var(--ease), stroke .3s; }
 .orb #orb-score { position: relative; font-size: 12.5px; font-weight: 500; }
 .orb:hover { transform: scale(1.04); }
+/* The score lives in the lens bar now: shrink it to the bar's 36 px rhythm. */
+.lens-bar .orb { width: 36px; height: 36px; margin-left: 1px; }
+.lens-bar .orb svg { inset: 2px; width: 32px; height: 32px; }
+.lens-bar .orb #orb-score { font-size: 11px; }
 
 .outline { position: absolute; z-index: 8; top: 106px; left: 12px; bottom: 112px; width: 228px; display: flex; flex-direction: column; padding: 8px 6px; animation: rise .3s var(--ease); }
 .outline-head { display: flex; align-items: center; gap: 6px; padding: 2px 6px 8px; }
