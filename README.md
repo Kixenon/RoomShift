@@ -33,6 +33,10 @@ They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a brow
 - **Livability**: walkway, door-swing, clearance, daylight, WiFi and comfort checks with a score, plus a simulated-annealing layout suggestion that respects locked objects.
 - **Capture**: room size from a photo (corner clicks), on-device furniture detection and classification (TensorFlow.js), Claude AI room scan and shop-link product import (bring your own API key, browser only), Polycam / RoomPlan 3D-scan import (GLB, OBJ, USDZ, PLY), and floor-plan underlays.
 - **Share**: layout variants with side-by-side comparison, printable room report, USDZ (iPhone AR Quick Look) and GLB export.
+- **Room drawing**: any outline with snapping and typed edge lengths, interior walls (drywall, brick, glass) with doorways that the airflow, WiFi, sound, light and walkway checks all respect.
+- **Furniture**: parametric styles per type (table tops and legs, sofa arms and chaise, headboards, chair kinds, wardrobe doors, shelf kinds, lamp kinds, TV mounts, fridge layouts) with main and frame colours; photo detection reads proportions, colours and leg style; doors (angle, hinge, swing), windows (sliding, casement, top-hung, fixed, open amount, coverings), fans (head yaw, tilt, oscillation), AC louver.
+- **More physics**: radiosity bounce light and a lux map on surfaces, image-source sound reflections, ISO 7730 comfort at seats, façade noise against the WHO night guideline, direct sun hours, sun patches as heat sources.
+- **Guidance**: eight-category livability analysis with a clearance overlay, guided plans for five personas, a measuring tape (M), combinable lenses (Shift-click).
 
 ## Simulation scope and limits
 

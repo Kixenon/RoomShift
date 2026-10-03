@@ -397,7 +397,8 @@ export function computePlaneField(scene, mode, { height = PLANE_HEIGHTS[mode], c
   const sources = SOURCE_MODELS[mode]
     ? scene.objects.filter((object) => SOURCE_MODELS[mode].includes(object.model))
     : scene.objects.filter((object) => LAMP_LUMENS[object.model] || object.model === 'window');
-  if (!sources.length) return { ...plane, mode, values: null, acoustics, empty: true, sources: [] };
+  // Light always has a context (a room with no lamps or windows is simply dark).
+  if (!sources.length && mode !== 'light') return { ...plane, mode, values: null, acoustics, empty: true, sources: [] };
   const sourceIds = new Set(sources.map((object) => object.id));
   const boxes = obstacleBoxes(scene, null).filter((box) => !sourceIds.has(box.object.id));
   const light = mode === 'light' ? lightContext(scene, environment, cloudCover) : null;

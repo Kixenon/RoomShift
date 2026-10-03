@@ -19,6 +19,7 @@
       <nav class="site-nav" aria-label="Pages">
         <a href="./" aria-current="page">Product</a>
         <a href="./science.html">Science</a>
+        <a href="./design.html">Design</a>
         <a href="./pricing.html">Pricing</a>
         <a href="./vision.html">Vision</a>
         <a href="./slides/">Deck</a>
@@ -70,6 +71,24 @@
         </div>
       </section>
 
+      <!-- Who -->
+      <section class="section" aria-labelledby="who-title" style="padding-top: 0">
+        <div class="wrap">
+          <div class="section-head">
+            <p class="eyebrow">Who it’s for</p>
+            <h2 id="who-title" data-split>Pick your situation. Get a plan.</h2>
+            <p>Each of these is a guided plan inside the app: a short checklist that ticks itself off as the room improves.</p>
+          </div>
+          <div class="persona-row" data-reveal>
+            <a class="persona" href="./design.html#journeys" style="--c: var(--wifi)"><span>Student</span><strong>Moving into a hall</strong><em>Real size → your stuff → a path to the door → fan → WiFi → report</em></a>
+            <a class="persona" href="./design.html#journeys" style="--c: var(--heat-c)"><span>Renter in summer</span><strong>Too hot or stuffy</strong><em>Weather → air + heat → cross-breeze → fan → comfort → shade</em></a>
+            <a class="persona" href="./design.html#journeys" style="--c: var(--light-c)"><span>Remote worker</span><strong>Working from home</strong><em>Daylight without glare → 300 lux → WiFi → chair → quiet calls</em></a>
+            <a class="persona" href="./design.html#journeys" style="--c: var(--sound)"><span>Light sleeper</span><strong>Sleeping better</strong><em>Headboard → blackout → street noise → comfort → no hum</em></a>
+            <a class="persona" href="./design.html#journeys" style="--c: var(--good)"><span>Designer</span><strong>Comparing layouts</strong><em>Layout B → let RoomShift try → compare → client report</em></a>
+          </div>
+        </div>
+      </section>
+
       <!-- Lenses -->
       <section class="section" id="lenses" aria-labelledby="lenses-title" style="padding-top: 0">
         <div class="wrap">
@@ -82,20 +101,20 @@
               <article class="lens-step is-active" data-lens-step="air" style="--c: var(--air)">
                 <span class="tag">1 · Air</span>
                 <h3>Watch the breeze travel.</h3>
-                <p>Particles ride the solved airflow out of the fan or AC, curl around the furniture and fade where the jet dies. Hover anywhere for the speed at head height, and see how many air changes an hour your windows really give you.</p>
+                <p>Thousands of streaks ride the solved airflow out of the fan or AC, curl around the furniture and fade where the jet dies. Turn the fan’s head, open a window halfway, and see how many air changes an hour you really get.</p>
                 <p class="model">3D incompressible Navier–Stokes · 5 cm grid on WebGPU · BS 5925 ventilation</p>
               </article>
               <article class="lens-step" data-lens-step="heat" style="--c: var(--heat-c)">
                 <span class="tag">2 · Heat</span>
                 <h3>Know where the warmth goes.</h3>
-                <p>Heaters inject their real watts; warm air rises and leaves through open windows. A steady-state heat balance adds sun through the glass, people and appliances, then tells you what the room settles at and what it costs to run.</p>
-                <p class="model">Boussinesq buoyancy · U-values · solar gain · running cost per month</p>
+                <p>Heaters inject their real watts and sun through the glass warms the floor where it lands. A heat balance tells you what the room settles at and what it costs to run, and every seat gets a comfort verdict.</p>
+                <p class="model">Boussinesq buoyancy · solar gain · ISO 7730 comfort · running cost</p>
               </article>
               <article class="lens-step" data-lens-step="light" style="--c: var(--light-c)">
                 <span class="tag">3 · Light &amp; sun</span>
                 <h3>Play the day across your floor.</h3>
-                <p>Drag the clock and the sun moves for your city, your date and the way your windows face. Light pools in lux, bounces off your finishes, and the desk gets checked against the 300–500 lux you need to work.</p>
-                <p class="model">NOAA solar position · inverse-square lamps · lumen-method bounce</p>
+                <p>Drag the clock and the sun moves for your city, date and window orientation. Light is painted onto every surface in lux, including what bounces off your walls and floor, and the desk is checked against the 300–500 lux you need to work.</p>
+                <p class="model">NOAA solar position · inverse-square lamps · radiosity bounce</p>
               </article>
               <article class="lens-step" data-lens-step="wifi" style="--c: var(--wifi)">
                 <span class="tag">4 · WiFi</span>
@@ -106,8 +125,8 @@
               <article class="lens-step" data-lens-step="sound" style="--c: var(--sound)">
                 <span class="tag">5 · Sound</span>
                 <h3>Hear the room before you’re in it.</h3>
-                <p>A speaker’s level at every seat, plus how long the room rings. Swap the tile floor for carpet or add a sofa and watch the echo time fall.</p>
-                <p class="model">Eyring reverberation · direct + diffuse field · barrier loss</p>
+                <p>A speaker’s level at every seat, its first echoes off every wall, and how long the room rings. Swap tile for carpet or add a sofa and watch the echo fall; set your street and see what gets through the window at night.</p>
+                <p class="model">Eyring reverberation · image-source reflections · façade noise</p>
               </article>
             </div>
             <div class="showcase-stage" aria-hidden="true">
@@ -167,10 +186,15 @@
               <h3>Floor plan</h3>
               <p>Trace a listing plan: set the scale with one wall, click two corners, done. One plan, every room.</p>
             </article>
-            <article class="card span-2" style="--c: var(--heat-c)" data-glow>
+            <article class="card span-2" style="--c: var(--good)" data-glow>
+              <span class="icon">✎</span>
+              <h3>Draw it</h3>
+              <p>Sketch any outline, type exact lengths, and add a closet or hallway with interior walls and doorways.</p>
+            </article>
+            <article class="card span-6" style="--c: var(--heat-c)" data-glow>
               <span class="icon">⌕</span>
-              <h3>Shop link</h3>
-              <p>Paste an IKEA (or any) product page and the exact piece arrives at its real size and colour.</p>
+              <h3>Your actual furniture</h3>
+              <p>Paste an IKEA (or any) product link, or a photo of the piece: it arrives at its real size, colour and shape, from the T-legs of a desk to the chaise on a sofa.</p>
             </article>
           </div>
         </div>
@@ -184,15 +208,15 @@
             <h2 id="live-title" data-split style="font-size: clamp(2.3rem, 5vw, 4rem); margin-top: 18px">Does it still work to live in?</h2>
             <p class="lede" style="margin-top: 18px">Every change is scored against how people actually use rooms, then one click searches for a better arrangement that keeps the pieces you’ve locked.</p>
             <ul class="check-list" data-reveal>
-              <li style="--c: var(--bad, #ff6b5b)">A 60 cm walkway from the door to every bed, desk and wardrobe</li>
-              <li style="--c: var(--heat-c)">Heaters 90 cm from fabric, 60 cm from where you sit</li>
-              <li style="--c: var(--light-c)">Daylight and 300 lux on the desk, door swing kept clear</li>
-              <li style="--c: var(--good)">Fan aimed at people, AC not at the bed, sofa facing the TV</li>
+              <li style="--c: #ff6b5b"><b>Space &amp; safety</b>&nbsp;· a 60 cm walkway to every bed, desk and wardrobe; heaters 90 cm from fabric</li>
+              <li style="--c: var(--heat-c)"><b>Comfort &amp; air</b>&nbsp;· ISO 7730 comfort at every seat, fresh air and CO₂</li>
+              <li style="--c: var(--light-c)"><b>Light</b>&nbsp;· 300 lux on the desk, no screen glare, light for the plants</li>
+              <li style="--c: var(--sound)"><b>Sound &amp; WiFi</b>&nbsp;· echo, fridge hum, street noise at the bed, signal where you sit</li>
             </ul>
           </div>
           <div class="before-after" data-reveal>
-            <figure><img src="./img/app/insights.jpg" alt="RoomShift insights panel showing a livability score of 46 with six problems" /><figcaption>Before · 46</figcaption></figure>
-            <figure><img src="./img/app/suggest.jpg" alt="Suggested layout dialog raising the score to 94" /><figcaption>One click later · 94</figcaption></figure>
+            <figure><img src="./img/app/insights.jpg" alt="RoomShift insights panel showing a livability score of 46 with six problems" /><figcaption>Eight categories, every issue clickable</figcaption></figure>
+            <figure><img src="./img/app/suggest.jpg" alt="Suggested layout dialog raising the score to 94" /><figcaption>One click later · a better layout</figcaption></figure>
           </div>
         </div>
       </section>
@@ -238,7 +262,7 @@
       <section aria-label="In numbers">
         <div class="stats" data-reveal>
           <div class="stat"><b><span data-count="5">5</span></b><span>lenses on one room</span></div>
-          <div class="stat"><b><span data-count="7">7</span></b><span>published physics models</span></div>
+          <div class="stat"><b><span data-count="9">9</span></b><span>published physics models</span></div>
           <div class="stat"><b><span data-count="1.5" data-decimals="1">1.5</span>M</b><span>air cells solved on your GPU</span></div>
           <div class="stat"><b>0</b><span>servers doing the maths</span></div>
         </div>
@@ -260,7 +284,7 @@
     <footer class="site-footer">
       <div class="wrap">
         <span><span class="logo-mark" style="display:inline-block;vertical-align:-5px;margin-right:8px"></span>RoomShift · estimates, not certified measurements</span>
-        <nav aria-label="Footer"><a href="./science.html">Science</a><a href="./pricing.html">Pricing</a><a href="./vision.html">Vision</a><a href="./slides/">Deck</a><a href="https://github.com/Kixenon/RoomShift">GitHub</a></nav>
+        <nav aria-label="Footer"><a href="./science.html">Science</a><a href="./design.html">Design</a><a href="./pricing.html">Pricing</a><a href="./vision.html">Vision</a><a href="./slides/">Deck</a><a href="https://github.com/Kixenon/RoomShift">GitHub</a></nav>
       </div>
     </footer>
     <svg width="0" height="0" aria-hidden="true" style="position:absolute"><defs><linearGradient id="scoreGradient" x1="0" x2="1"><stop offset="0" stop-color="#4f8dff" /><stop offset="1" stop-color="#3fcf8e" /></linearGradient></defs></svg>

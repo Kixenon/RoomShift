@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f6f3" />
+    <title>RoomShift — Design</title>
+    <meta name="description" content="How RoomShift was designed: the brief, proto-personas, a journey map, design principles and the iterations from the first editor to today." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" />
+    <link rel="stylesheet" href="./site.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="./"><span class="logo-mark"></span>RoomShift</a>
+      <nav class="site-nav" aria-label="Pages">
+        <a href="./">Product</a><a href="./science.html">Science</a><a href="./design.html" aria-current="page">Design</a><a href="./pricing.html">Pricing</a><a href="./vision.html" >Vision</a><a href="./slides/">Deck</a>
+      </nav>
+      <button class="nav-toggle" type="button" aria-label="Menu" data-nav-toggle>☰</button>
+      <a class="btn btn-primary btn-small" href="../">Open RoomShift <span class="arrow">→</span></a>
+    </header>
+
+    <main id="main">
+      <section class="page-hero wrap" aria-labelledby="page-title">
+        <p class="eyebrow">Design</p>
+        <h1 id="page-title" data-stretch>Designed around the moment you move a room.</h1>
+        <p class="lede">How we went from a brief about testing changes to a tool people can use in a weekend: who it’s for, the journey they take, the principles we hold, and what changed between versions.</p>
+      </section>
+
+      <section class="section wrap" aria-labelledby="process-title" style="padding-top: 20px">
+        <div class="section-head"><p class="eyebrow">Process</p><h2 id="process-title" data-split>Six steps, repeated.</h2></div>
+        <ol class="process" data-reveal>
+          <li><b>01</b><strong>Brief</strong><span>“Test the change before you make it.” We picked the most common physical change at home: moving things around a room.</span></li>
+          <li><b>02</b><strong>Frame</strong><span>Floor planners answer “does it fit?”. Nobody answers “does it work?” for air, heat, light, signal and sound.</span></li>
+          <li><b>03</b><strong>People</strong><span>Proto-personas from our market scan and the brief: who has the question, when, and what they’d pay.</span></li>
+          <li><b>04</b><strong>Journeys</strong><span>Map what each person does, where it hurts, and which tool answers it.</span></li>
+          <li><b>05</b><strong>Build</strong><span>Real models first, then the interface that makes them legible. Every number is labelled with its source.</span></li>
+          <li><b>06</b><strong>Iterate</strong><span>Screenshot every flow, look for confusion and duplication, change it, repeat.</span></li>
+        </ol>
+      </section>
+
+      <section class="section wrap" aria-labelledby="personas-title" style="padding-top: 0">
+        <div class="section-head"><p class="eyebrow">Proto-personas</p><h2 id="personas-title" data-split>Five people, five questions.</h2><p>Assumptions to test, not research findings. Each became a guided plan in the app.</p></div>
+        <div class="persona-grid" data-reveal>
+          <article class="persona-card" style="--c: var(--wifi)"><span>Student</span><h3>Moving into a hall</h3><p><b>Wants</b> the bed, desk and fan in the right places on day one.</p><p><b>Hurts</b> a room they’ve never seen, a summer with no AC, one chance to carry things.</p><p><b>Gets</b> real size from a photo, a path to the door, the fan aimed at the bed.</p></article>
+          <article class="persona-card" style="--c: var(--heat-c)"><span>Renter in summer</span><h3>Too hot or stuffy</h3><p><b>Wants</b> a cooler room before buying another fan.</p><p><b>Hurts</b> not knowing whether it’s the sun, the layout or the windows.</p><p><b>Gets</b> solar gain per window, cross-breeze, ISO 7730 comfort at each seat.</p></article>
+          <article class="persona-card" style="--c: var(--light-c)"><span>Remote worker</span><h3>Working from home</h3><p><b>Wants</b> a desk that’s bright, glare-free, connected and quiet.</p><p><b>Hurts</b> screen glare, dead WiFi corners, echoey calls.</p><p><b>Gets</b> lux on the desk, glare checks, WiFi at the desk, echo time.</p></article>
+          <article class="persona-card" style="--c: var(--sound)"><span>Light sleeper</span><h3>Sleeping better</h3><p><b>Wants</b> a dark, quiet bedroom at the right temperature.</p><p><b>Hurts</b> street noise, early sun, a humming fridge.</p><p><b>Gets</b> outside noise vs the WHO guideline, blackout effect, comfort under a duvet.</p></article>
+          <article class="persona-card" style="--c: var(--good)"><span>Interior designer</span><h3>Comparing layouts</h3><p><b>Wants</b> to show a client why layout B is better.</p><p><b>Hurts</b> renders that look good but say nothing about living in the room.</p><p><b>Gets</b> A/B layouts on every metric, an optimizer, a client report.</p></article>
+        </div>
+      </section>
+
+      <section class="section wrap" id="journeys" aria-labelledby="journey-title" style="padding-top: 0">
+        <div class="section-head"><p class="eyebrow">Journey map</p><h2 id="journey-title" data-split>A student’s move-in weekend.</h2><p>Each stage is a step in the “Moving into a hall” plan.</p></div>
+        <div class="journey-map" data-reveal>
+          <div class="stage"><b>Capture</b><p class="does">Snaps a photo of the empty room from the doorway.</p><p class="pain">“I don’t own a tape measure.”</p><p class="answer">Room size from a photo · AI scan · LiDAR scan · draw it</p></div>
+          <div class="stage"><b>Furnish</b><p class="does">Adds the bed, desk and fan they’re bringing.</p><p class="pain">“Will my desk even fit?”</p><p class="answer">Drag from the dock · shop links at real size · photo detection</p></div>
+          <div class="stage"><b>Arrange</b><p class="does">Moves things around until it feels right.</p><p class="pain">“I can’t tell if I can still get to the wardrobe.”</p><p class="answer">Clearance overlay · Suggest layout · lock what stays</p></div>
+          <div class="stage"><b>Check</b><p class="does">Wonders if it’ll be bearable in August.</p><p class="pain">“Where does the fan go?”</p><p class="answer">Air and Heat lenses · comfort at the bed · WiFi at the desk</p></div>
+          <div class="stage"><b>Share</b><p class="does">Sends the plan to a roommate or parent.</p><p class="pain">“They can’t open a 3D file.”</p><p class="answer">One-page report · AR on a phone</p></div>
+        </div>
+      </section>
+
+      <section class="section wrap" aria-labelledby="principles-title" style="padding-top: 0">
+        <div class="section-head"><p class="eyebrow">Principles</p><h2 id="principles-title" data-split>What we hold ourselves to.</h2></div>
+        <div class="principles" data-reveal>
+          <div><b>The room is the interface.</b><span>Full-screen 3D, tools float around it. You act on the room, not on forms.</span></div>
+          <div><b>Look through lenses.</b><span>Air, heat, light, WiFi and sound are ways of seeing the same room, combinable, each with its own colour.</span></div>
+          <div><b>Every number has a model.</b><span>If we can’t name the standard or the equation, we don’t show the number.</span></div>
+          <div><b>Livable before pretty.</b><span>A walkway to the door matters more than a nice render.</span></div>
+          <div><b>No dead ends.</b><span>Undo everything, guided plans that point at the next step, one way to do each thing.</span></div>
+          <div><b>Say what’s missing.</b><span>Estimates are labelled as estimates, and limits are on the Science page.</span></div>
+        </div>
+      </section>
+
+      <section class="section wrap" aria-labelledby="iter-title" style="padding-top: 0">
+        <div class="section-head"><p class="eyebrow">Iterations</p><h2 id="iter-title" data-split>From a box editor to a room you can read.</h2></div>
+        <div class="iterations" data-reveal>
+          <figure><img src="./img/main-room.webp" alt="The first RoomShift editor with a sidebar and a furnished room" loading="lazy" /><figcaption><b>v1 · Editor</b> Sidebar editor, generic boxes, three layers (air, heat, light) and one demo room.</figcaption></figure>
+          <figure><img src="./img/app/room.jpg" alt="RoomShift v2 with floating panels and a lens bar" loading="lazy" /><figcaption><b>v2 · Lenses</b> Full-bleed room, five lenses, rooms page, scanning, livability score, A/B layouts.</figcaption></figure>
+          <figure><img src="./img/app/plan.jpg" alt="RoomShift with a guided plan checklist" loading="lazy" /><figcaption><b>v3 · Plans</b> Radiosity light, parametric furniture from photos, drawn rooms with interior walls, guided plans.</figcaption></figure>
+        </div>
+      </section>
+
+      <section class="closing" aria-labelledby="closing-title">
+        <div class="wrap"><h2 id="closing-title">Try the plan that fits you.</h2>
+          <div class="hero-actions"><a class="btn btn-primary" href="../">Open RoomShift <span class="arrow">→</span></a></div></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <span><span class="logo-mark" style="display:inline-block;vertical-align:-5px;margin-right:8px"></span>RoomShift · built at HacKU 2026 with Three.js, GSAP and Vite</span>
+        <nav aria-label="Footer"><a href="./">Product</a><a href="./science.html">Science</a><a href="./design.html">Design</a><a href="./pricing.html">Pricing</a><a href="./vision.html">Vision</a><a href="./slides/">Deck</a><a href="https://github.com/Kixenon/RoomShift">GitHub</a></nav>
+      </div>
+    </footer>
+    <script type="module" src="./pricing.js"></script>
+  </body>
+</html>

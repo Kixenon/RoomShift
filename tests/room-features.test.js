@@ -116,3 +116,10 @@ test('AI shape fields map onto the parametric styles', async () => {
   assert.deepEqual(styleFromFields('sofa', { arms: 'none', chaise: 'left', back: 'n/a' }), { arms: 'none', chaise: 'left' });
   assert.equal(styleFromFields('plant', {}), undefined);
 });
+
+test('the light lens works in a room with no lamps or windows', async () => {
+  const { computePlaneField, luxAt } = await import('../src/simulation/room-propagation.js');
+  const field = computePlaneField(empty(), 'light', { environment: { ...DEFAULT_ENVIRONMENT, hour: 12 }, cellSize: 0.5 });
+  assert.ok(field.light);
+  assert.equal(luxAt(field.light, { x: 1, y: 0.75, z: 1 }), 0);
+});
