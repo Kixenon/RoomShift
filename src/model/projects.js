@@ -22,7 +22,16 @@ export const TEMPLATES = Object.freeze([
     id: 'living',
     label: 'Living room',
     description: 'The demo room: sofa, desk, fan, heater, lamp.',
-    create: () => createRoomScene(),
+    create: () => {
+      // Two windows so daylight has a way in: south-facing for the middle of
+      // the day, west-facing for the afternoon (the default 15:00 demo time).
+      let scene = createRoomScene();
+      const south = addWindow(scene, 'back');
+      scene = moveObject(south.scene, south.object.id, { x: 2.0, y: 0.9 }).scene;
+      const west = addWindow(scene, 'left');
+      scene = moveObject(west.scene, west.object.id, { z: 2.6, y: 0.9 }).scene;
+      return scene;
+    },
   },
   {
     id: 'hall',
