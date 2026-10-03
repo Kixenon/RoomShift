@@ -54,7 +54,11 @@ test('moving an object constrains its full geometry to room bounds', () => {
   const moved = moveObject(original, 'fan-1', { x: -10, y: 9, z: 10 });
   const fan = moved.scene.objects.find((object) => object.id === 'fan-1');
 
-  assert.deepEqual(fan.position, { x: 0.21, y: 1.35, z: 3.79 });
+  // Clamped coordinates are derived by arithmetic, so compare with a tolerance
+  // rather than exact float equality.
+  assert.ok(Math.abs(fan.position.x - 0.21) < 1e-9, `x was ${fan.position.x}`);
+  assert.ok(Math.abs(fan.position.y - 1.35) < 1e-9, `y was ${fan.position.y}`);
+  assert.ok(Math.abs(fan.position.z - 3.79) < 1e-9, `z was ${fan.position.z}`);
   assert.deepEqual(original.objects[0].position, { x: 0.82, y: 0, z: 3.15 });
   assert.equal(moved.object.id, 'fan-1');
 });
@@ -86,19 +90,23 @@ test('resizing an object updates its dimensions and keeps it in the room', () =>
 
 test('rotating an object normalizes its angle without changing its position', () => {
   const original = createRoomScene();
+  const seed = structuredClone(original.objects[0]);
   const rotated = rotateObject(original, 'fan-1', { x: 0, y: 370, z: 0 });
 
   assert.deepEqual(rotated.object.rotation, { x: 0, y: 10, z: 0 });
-  assert.deepEqual(rotated.object.position, original.objects[0].position);
-  assert.deepEqual(original.objects[0].rotation, { x: 0, y: 0, z: 0 });
+  assert.ok(Math.abs(rotated.object.position.x - seed.position.x) < 1e-9);
+  assert.ok(Math.abs(rotated.object.position.y - seed.position.y) < 1e-9);
+  assert.ok(Math.abs(rotated.object.position.z - seed.position.z) < 1e-9);
+  assert.deepEqual(original.objects[0].rotation, seed.rotation);
 });
 
 test('rotation can be edited independently around every object axis', () => {
   const original = createRoomScene();
+  const seed = structuredClone(original.objects[0]);
   const rotated = rotateObject(original, 'fan-1', { x: 370, y: 25, z: -380 });
 
   assert.deepEqual(rotated.object.rotation, { x: 10, y: 25, z: -20 });
-  assert.deepEqual(original.objects[0].rotation, { x: 0, y: 0, z: 0 });
+  assert.deepEqual(original.objects[0].rotation, seed.rotation);
 });
 
 test('rotating an object constrains its rotated footprint to the room', () => {

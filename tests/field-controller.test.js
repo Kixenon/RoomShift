@@ -16,10 +16,12 @@ function createHarness(t, debounceMs = 0) {
   const worker = new FakeWorker();
   const rendered = [];
   const cleared = [];
+  const lightingPreview = [];
   const states = [];
   const viewport = {
     setFields: (...args) => rendered.push(args),
     clearFields: () => cleared.push(true),
+    setLightingPreview: (enabled) => lightingPreview.push(enabled),
   };
   const controller = new RoomFieldController({
     worker,
@@ -28,7 +30,7 @@ function createHarness(t, debounceMs = 0) {
     debounceMs,
   });
   t.after(() => controller.dispose());
-  return { worker, viewport, rendered, cleared, states, controller };
+  return { worker, viewport, rendered, cleared, states, controller, lightingPreview };
 }
 
 const flushTimers = () => new Promise((resolve) => setTimeout(resolve, 5));

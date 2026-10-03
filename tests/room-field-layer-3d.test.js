@@ -35,7 +35,8 @@ test('scalar fields map the complete 3D grid into a volumetric texture', () => {
   const texture = volume.material.uniforms.uField.value;
 
   assert.ok(volume.isMesh);
-  assert.ok(volume.geometry.isBoxGeometry);
+  // three.js r186 dropped the `isBoxGeometry` type flag; `type` is the stable check.
+  assert.equal(volume.geometry.type, 'BoxGeometry');
   assert.deepEqual([texture.image.width, texture.image.height, texture.image.depth], [2, 2, 2]);
   assert.equal(texture.image.data[0], 0);
   assert.equal(texture.image.data[7 * 4], 255);
