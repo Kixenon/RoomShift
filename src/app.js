@@ -74,6 +74,7 @@ const SHAPE_ICONS = {
   rect: '<path d="M4 4h32v22H4z"/>',
   L: '<path d="M4 4h32v10H22v12H4z"/>',
   rounded: '<path d="M12 4h16a8 8 0 0 1 8 8v6a8 8 0 0 1-8 8H12a8 8 0 0 1-8-8v-6a8 8 0 0 1 8-8z"/>',
+  poly: '<path d="M4 8l14-4 18 6v16H10l-6-6z"/>',
 };
 
 // ─── State ────────────────────────────────────────────────────────────────
@@ -901,10 +902,21 @@ $('#duplicate-object').addEventListener('click', duplicateSelected);
 $('#lock-object').addEventListener('click', toggleLock);
 
 // ─── Dock: drag furniture into the room ───────────────────────────────────
+let dockQuery = '';
 function renderDock() {
-  $('#dock-tabs').innerHTML = DOCK_TABS.map((tab) => `<button type="button" class="dock-tab ${tab === dockTab ? 'active' : ''}" data-dock-tab="${tab}">${tab === 'catalog' ? 'Catalog' : tab === 'photo' ? 'Photo & scan' : CATEGORY_LABELS[tab]}</button>`).join('');
+  $('#dock-tabs').innerHTML = `${DOCK_TABS.map((tab) => `<button type="button" class="dock-tab ${!dockQuery && tab === dockTab ? 'active' : ''}" data-dock-tab="${tab}">${tab === 'catalog' ? 'Catalog' : tab === 'photo' ? 'Photo & scan' : CATEGORY_LABELS[tab]}</button>`).join('')}
+    <input id="dock-search" class="dock-search" type="search" placeholder="Search everything…" value="${escapeHtml(dockQuery)}" aria-label="Search objects and products" />`;
   let items;
-  if (dockTab === 'photo') {
+  if (dockQuery) {
+    // Search across every object type and the product catalogue at once.
+    const query = dockQuery.toLowerCase();
+    const models = Object.entries(MODEL_PRESETS).filter(([key, preset]) => `${key} ${preset.label} ${preset.category}`.toLowerCase().includes(query));
+    const products = CATALOG.map((item, index) => [item, index]).filter(([item]) => `${item.name} ${item.model}`.toLowerCase().includes(query));
+    items = `${models.map(([key, preset]) => `<button class="dock-item" type="button" data-add-model="${key}" title="Drag into the room, or click to add"><span class="glyph">${escapeHtml(preset.icon)}</span>${escapeHtml(preset.label)}</button>`).join('')}
+      ${products.map(([item, index]) => `<button class="dock-item" type="button" data-catalog="${index}" title="${escapeHtml(item.name)}"><span class="glyph">${escapeHtml(MODEL_PRESETS[item.model].icon)}</span>${escapeHtml(item.name.replace(/^IKEA /, '').split(',')[0].slice(0, 14))}</button>`).join('')}
+      ${app.openProductImport ? `<button class="dock-item photo" type="button" data-dock-action="product-link" title="Paste a product page (IKEA or any shop)"><span class="glyph">⌕</span>From a link</button>` : ''}`;
+    if (!models.length && !products.length) items = `<span class="muted" style="padding:20px">Nothing called “${escapeHtml(dockQuery)}” yet.</span>${items}`;
+  } else if (dockTab === 'photo') {
     items = `<button class="dock-item photo" type="button" data-dock-action="room-photo"><span class="glyph">⛶</span>Room size</button>
       <button class="dock-item photo" type="button" data-dock-action="furniture-photo"><span class="glyph">◫</span>Furniture</button>
       ${dockProviders.map((provider) => provider()).join('')}`;
@@ -920,7 +932,17 @@ $('#dock-tabs').addEventListener('click', (event) => {
   const tab = event.target.closest('[data-dock-tab]');
   if (!tab) return;
   dockTab = tab.dataset.dockTab;
+  dockQuery = '';
   renderDock();
+});
+$('#dock-tabs').addEventListener('input', (event) => {
+  if (event.target.id !== 'dock-search') return;
+  dockQuery = event.target.value.trim();
+  const caret = event.target.selectionStart;
+  renderDock();
+  const input = $('#dock-search');
+  input.focus();
+  input.setSelectionRange(caret, caret);
 });
 
 function placeModel(model, { position, catalog } = {}) {
@@ -1003,6 +1025,7 @@ $('#dock-items').addEventListener('click', (event) => {
   const action = event.target.closest('[data-dock-action]')?.dataset.dockAction;
   if (action === 'room-photo') photoPanel.open();
   else if (action === 'furniture-photo') openFurniturePhoto();
+  else if (action === 'product-link') app.openProductImport?.();
   else if (action) app.dockActions?.[action]?.();
 });
 $('#add-box').addEventListener('click', () => placeModel('box'));
@@ -1567,7 +1590,7 @@ function renderRoomSheet() {
     if (document.activeElement !== input) input.value = roomScene.room[axis];
   }
   const shape = roomShape(roomScene.room);
-  $('#shape-picker').innerHTML = Object.entries(ROOM_SHAPES).map(([key, label]) => `<button type="button" class="shape-option ${shape.type === key ? 'active' : ''}" data-shape="${key}"><svg viewBox="0 0 40 30">${SHAPE_ICONS[key]}</svg>${label.split(' /')[0]}</button>`).join('');
+  $('#shape-picker').innerHTML = Object.entries(ROOM_SHAPES).filter(([key]) => key !== 'poly' || shape.type === 'poly').map(([key, label]) => `<button type="button" class="shape-option ${shape.type === key ? 'active' : ''}" data-shape="${key}"><svg viewBox="0 0 40 30">${SHAPE_ICONS[key]}</svg>${label.split(' /')[0]}</button>`).join('');
   $('#shape-params').innerHTML = shape.type === 'L'
     ? `<label class="field"><span>Cut W</span><input class="mono" type="number" step="0.1" min="0.5" data-shape-param="cutWidth" value="${fmt(shape.cutWidth, 2)}" /></label><label class="field"><span>Cut D</span><input class="mono" type="number" step="0.1" min="0.5" data-shape-param="cutDepth" value="${fmt(shape.cutDepth, 2)}" /></label>`
     : shape.type === 'rounded'
@@ -2022,6 +2045,7 @@ const ACTIONS = {
   'ar-usdz': () => app.exportAr?.('usdz'),
   'ar-glb': () => app.exportAr?.('glb'),
   compare: () => app.compareLayouts?.(),
+  'draw-room': () => app.openRoomDrawer?.(),
 };
 app.actions = ACTIONS;
 document.addEventListener('click', (event) => {

@@ -247,12 +247,12 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 .view-island { position: absolute; z-index: 9; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 2px; padding: 6px; transition: right .3s var(--ease); }
 .editor.sheet-open .view-island { right: 348px; }
 
-.dock { position: absolute; z-index: 9; left: 50%; bottom: 12px; transform: translateX(-50%); display: grid; gap: 6px; padding: 8px; max-width: calc(100vw - 560px); min-width: 420px; }
-.dock-tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.dock { position: absolute; z-index: 9; left: 50%; bottom: 12px; transform: translateX(-50%); display: grid; gap: 6px; padding: 8px; width: min(760px, calc(100vw - 600px)); min-width: 440px; }
+.dock-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .dock-tab { height: 26px; padding: 0 10px; border-radius: 7px; color: var(--ink-3); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .dock-tab:hover { color: var(--ink); background: var(--raise); }
 .dock-tab.active { color: var(--ink); background: var(--raise-2); }
-.dock-items { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-height: 64px; }
+.dock-items { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; min-height: 64px; max-height: 140px; overflow-y: auto; }
 .dock-item { display: grid; justify-items: center; align-content: center; gap: 4px; flex: none; width: 70px; height: 64px; border-radius: 11px; color: var(--ink-2); font-size: 11px; touch-action: none; user-select: none; transition: background-color .15s, transform .2s var(--spring); cursor: grab; }
 .dock-item .glyph { font-size: 20px; line-height: 1; color: var(--ink); }
 .dock-item:hover { background: var(--raise-2); transform: translateY(-3px); }
@@ -531,3 +531,34 @@ details.exact[open] summary::before { content: '▾ '; }
 .category.good .category-bar i { background: var(--good); } .category.ok .category-bar i { background: var(--warn); } .category.bad .category-bar i { background: var(--bad); }
 
 .lens.secondary { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--ink); }
+
+.dock-search { margin-left: auto; width: 150px; height: 26px; padding: 0 9px; border: 1px solid transparent; border-radius: 7px; background: var(--raise); font-size: 12px; color: var(--ink); }
+.dock-search:focus { outline: none; border-color: var(--accent); background: var(--island-solid); }
+.editor.sheet-open #score-orb { display: none; }
+
+/* Room drawer */
+.drawer-dialog { width: min(1180px, calc(100vw - 32px)); height: min(820px, calc(100vh - 32px)); }
+.drawer { display: grid; grid-template-rows: auto 1fr auto; height: 100%; padding: 18px 22px; gap: 12px; }
+.drawer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.drawer-head h2 { margin: 0 8px 0 0; font-size: 18px; }
+.drawer-presets { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+.drawer-body { display: grid; grid-template-columns: 1fr 260px; gap: 14px; min-height: 0; }
+.drawer-canvas { width: 100%; height: 100%; border-radius: 14px; background: var(--raise); touch-action: none; cursor: grab; user-select: none; }
+.drawer-canvas .grid line { stroke: var(--line); }
+.drawer-canvas .grid line.major { stroke: var(--line-2, var(--line)); stroke-opacity: 1.6; }
+.drawer-canvas .floor { fill: color-mix(in srgb, var(--accent) 10%, transparent); stroke: var(--ink); stroke-linejoin: round; }
+.drawer-canvas .corner { fill: var(--island-solid); stroke: var(--accent); stroke-width: 0.02; cursor: move; }
+.drawer-canvas .corner:hover { fill: var(--accent); }
+.drawer-canvas .edge-label { fill: var(--ink-2); font-family: 'Geist Mono', monospace; text-anchor: middle; dominant-baseline: middle; cursor: text; }
+.drawer-canvas .edge-label:hover { fill: var(--accent); }
+.drawer-canvas .edge-add { fill: var(--island-solid); stroke: var(--line); stroke-width: 0.01; cursor: copy; opacity: .7; }
+.drawer-canvas .edge-add:hover { opacity: 1; stroke: var(--accent); }
+.drawer-canvas .edge-add-plus { fill: var(--ink-3); text-anchor: middle; pointer-events: none; font-family: Geist, sans-serif; }
+.drawer-canvas .wall line { stroke: var(--ink-2); stroke-linecap: square; }
+.drawer-canvas .wall .wall-hit { stroke: transparent; cursor: pointer; }
+.drawer-canvas .wall.selected line:not(.wall-hit) { stroke: var(--accent); }
+.drawer-canvas .door-arc { fill: none; stroke: var(--ink-3); stroke-width: 0.015; stroke-dasharray: 0.05 0.04; }
+.drawer-canvas .wall-preview { stroke: var(--accent); stroke-opacity: .7; }
+.drawer-side { display: grid; align-content: start; gap: 10px; overflow-y: auto; }
+.drawer-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.drawer-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }

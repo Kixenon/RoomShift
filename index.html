@@ -95,7 +95,6 @@
             <button type="button" data-action="new-dialog">New room…</button>
             <button type="button" data-action="duplicate-project">Make a copy</button>
             <hr />
-            <button type="button" data-action="report">Room report (PDF)</button>
             <button type="button" data-action="compare">Compare layouts</button>
             <button type="button" data-action="ar-usdz">View in AR on iPhone</button>
             <button type="button" data-action="ar-glb">Export 3D model (GLB)</button>
@@ -216,7 +215,8 @@
             <label class="field"><span>D</span><input id="room-depth" class="mono" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" /></label>
             <label class="field"><span>H</span><input id="room-height" class="mono" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" /></label>
           </div>
-          <h3 class="sheet-h">Shape</h3>
+          <h3 class="sheet-h">Shape &amp; walls</h3>
+          <button class="btn primary wide" type="button" data-action="draw-room" style="margin: 0 0 10px">✎ Draw the room &amp; interior walls</button>
           <div id="shape-picker" class="shape-picker"></div>
           <div id="shape-params" class="field-row"></div>
           <h3 class="sheet-h">Finishes</h3>

@@ -131,10 +131,30 @@ export function createRoomScene() {
 //   { type: 'rect' } (default)
 //   { type: 'L', cutWidth, cutDepth }  — removes the front-right corner
 //   { type: 'rounded', radius }        — rounded corners; radius = half the short side gives a round/stadium room
-export const ROOM_SHAPES = Object.freeze({ rect: 'Rectangle', L: 'L-shape', rounded: 'Rounded / round' });
+export const ROOM_SHAPES = Object.freeze({ rect: 'Rectangle', L: 'L-shape', rounded: 'Rounded / round', poly: 'Drawn' });
+
+function pointInPolygon(points, x, z) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const [xi, zi] = points[i];
+    const [xj, zj] = points[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function distanceToSegment(x, z, [ax, az], [bx, bz]) {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+  return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+}
 
 export function roomShape(room) {
   const shape = room.shape ?? { type: 'rect' };
+  if (shape.type === 'poly' && Array.isArray(shape.points) && shape.points.length >= 3) {
+    return { type: 'poly', points: shape.points.map(([x, z]) => [Math.min(room.width, Math.max(0, x)), Math.min(room.depth, Math.max(0, z))]) };
+  }
   if (shape.type === 'L') {
     return {
       type: 'L',
@@ -151,6 +171,11 @@ export function roomShape(room) {
 export function floorContains(room, x, z, margin = 0) {
   if (x < margin || z < margin || x > room.width - margin || z > room.depth - margin) return false;
   const shape = roomShape(room);
+  if (shape.type === 'poly') {
+    if (!pointInPolygon(shape.points, x, z)) return false;
+    if (margin <= 0) return true;
+    return shape.points.every((point, index) => distanceToSegment(x, z, point, shape.points[(index + 1) % shape.points.length]) >= margin);
+  }
   if (shape.type === 'L') return !(x > room.width - shape.cutWidth - margin && z < shape.cutDepth + margin);
   if (shape.type === 'rounded') {
     const r = shape.radius;
@@ -165,6 +190,14 @@ export function floorContains(room, x, z, margin = 0) {
 export function floorOutline(room, arcSegments = 10) {
   const { width: w, depth: d } = room;
   const shape = roomShape(room);
+  if (shape.type === 'poly') {
+    // Counter-clockwise in the x/z plane, like the other shapes.
+    const area = shape.points.reduce((sum, [x1, z1], index) => {
+      const [x2, z2] = shape.points[(index + 1) % shape.points.length];
+      return sum + (x1 * z2 - x2 * z1);
+    }, 0);
+    return area >= 0 ? shape.points : [...shape.points].reverse();
+  }
   if (shape.type === 'L') {
     return [[0, 0], [w - shape.cutWidth, 0], [w - shape.cutWidth, shape.cutDepth], [w, shape.cutDepth], [w, d], [0, d]];
   }
@@ -187,12 +220,94 @@ export function floorOutline(room, arcSegments = 10) {
 export function wallRange(room, wall) {
   const span = wall === 'back' || wall === 'front' ? room.width : room.depth;
   const shape = roomShape(room);
+  if (shape.type === 'poly') {
+    // The longest stretch of the drawn outline lying on this side of the room.
+    const along = wall === 'back' || wall === 'front';
+    const line = wall === 'front' ? 0 : wall === 'back' ? room.depth : wall === 'left' ? 0 : room.width;
+    let best = [0, 0];
+    shape.points.forEach((a, index) => {
+      const b = shape.points[(index + 1) % shape.points.length];
+      const onSide = along ? Math.abs(a[1] - line) < 0.02 && Math.abs(b[1] - line) < 0.02 : Math.abs(a[0] - line) < 0.02 && Math.abs(b[0] - line) < 0.02;
+      if (!onSide) return;
+      const range = along ? [Math.min(a[0], b[0]), Math.max(a[0], b[0])] : [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+      if (range[1] - range[0] > best[1] - best[0]) best = range;
+    });
+    return best[1] - best[0] > 0.5 ? best : [0, span];
+  }
   if (shape.type === 'rounded') return [shape.radius, span - shape.radius];
   if (shape.type === 'L') {
     if (wall === 'front') return [0, room.width - shape.cutWidth];
     if (wall === 'right') return [shape.cutDepth, room.depth];
   }
   return [0, span];
+}
+
+// ─── Interior walls ───────────────────────────────────────────────────────
+// Partitions split one plan into spaces (a closet, a hallway). Each is a segment
+// in room coordinates with an optional doorway.
+export const PARTITION_MATERIALS = Object.freeze({
+  drywall: { label: 'Drywall', wifiLossDb: 5, soundBlockDb: 25, thickness: 0.1 },
+  brick: { label: 'Brick / block', wifiLossDb: 12, soundBlockDb: 40, thickness: 0.15 },
+  glass: { label: 'Glass', wifiLossDb: 4, soundBlockDb: 20, thickness: 0.05 },
+});
+export const DOORWAY_HEIGHT = 2.05;
+
+export function partitionsOf(scene) {
+  return (scene.partitions ?? []).filter((wall) => Math.hypot(wall.b.x - wall.a.x, wall.b.z - wall.a.z) > 0.2);
+}
+
+// Where along the wall the doorway is, as [start, end] distances from `a`.
+export function doorwaySpan(wall) {
+  if (!wall.door) return null;
+  const length = Math.hypot(wall.b.x - wall.a.x, wall.b.z - wall.a.z);
+  const width = Math.min(wall.door.width ?? 0.85, length - 0.1);
+  const center = (wall.door.at ?? 0.5) * length;
+  const start = Math.max(0.05, Math.min(length - width - 0.05, center - width / 2));
+  return [start, start + width];
+}
+
+// Is the point (x, z, y) inside the solid part of a partition?
+export function insidePartition(scene, x, z, y = 1, extra = 0) {
+  for (const wall of partitionsOf(scene)) {
+    const half = (PARTITION_MATERIALS[wall.material]?.thickness ?? 0.1) / 2 + extra;
+    const dx = wall.b.x - wall.a.x;
+    const dz = wall.b.z - wall.a.z;
+    const length = Math.hypot(dx, dz);
+    const t = ((x - wall.a.x) * dx + (z - wall.a.z) * dz) / length;
+    if (t < -half || t > length + half) continue;
+    const off = Math.abs((x - wall.a.x) * dz - (z - wall.a.z) * dx) / length;
+    if (off > half) continue;
+    const door = doorwaySpan(wall);
+    if (door && t > door[0] && t < door[1] && y < DOORWAY_HEIGHT) continue;
+    return true;
+  }
+  return false;
+}
+
+// Partitions crossed by the straight path a→b (3D points), with their losses.
+export function partitionsCrossed(scene, a, b) {
+  const crossed = [];
+  for (const wall of partitionsOf(scene)) {
+    const rx = b.x - a.x;
+    const rz = b.z - a.z;
+    const sx = wall.b.x - wall.a.x;
+    const sz = wall.b.z - wall.a.z;
+    const denominator = rx * sz - rz * sx;
+    if (Math.abs(denominator) < 1e-9) continue;
+    const t = ((wall.a.x - a.x) * sz - (wall.a.z - a.z) * sx) / denominator;
+    const u = ((wall.a.x - a.x) * rz - (wall.a.z - a.z) * rx) / denominator;
+    if (t <= 0 || t >= 1 || u < 0 || u > 1) continue;
+    const y = a.y + (b.y - a.y) * t;
+    const door = doorwaySpan(wall);
+    const along = u * Math.hypot(sx, sz);
+    if (door && along > door[0] && along < door[1] && y < DOORWAY_HEIGHT) continue;
+    crossed.push(PARTITION_MATERIALS[wall.material] ?? PARTITION_MATERIALS.drywall);
+  }
+  return crossed;
+}
+
+export function setPartitions(scene, partitions) {
+  return { ...scene, partitions: partitions.map((wall) => structuredClone(wall)) };
 }
 
 export function setRoomShape(scene, shape) {

@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
-import { floorContains, floorOutline, isWallItem, objectMaterial, openFraction } from '../model/room-scene.js';
+import { DOORWAY_HEIGHT, PARTITION_MATERIALS, doorwaySpan, floorContains, floorOutline, isWallItem, objectMaterial, openFraction, partitionsOf } from '../model/room-scene.js';
 import { MATERIALS, SURFACE_MATERIALS, sceneSurfaces } from '../model/materials.js';
 import { bearingToRoomVector, sunPosition } from '../model/environment.js';
 import { gsap } from 'gsap';
@@ -446,6 +446,21 @@ function createEdgeWall(a, b, height, openings, room) {
   return { geometry, angle: Math.atan2(-direction[1], direction[0]) };
 }
 
+// Drop depth testing on a field volume while the camera is inside it.
+function updateLayerDepthTest(layer, camera) {
+  const volume = layer?.children?.find((child) => child.userData?.boundsHalfSize);
+  if (!volume) return;
+  const { boundsCenter, boundsHalfSize } = volume.userData;
+  const position = camera.position;
+  const cameraInside = Math.abs(position.x - boundsCenter.x) < boundsHalfSize.x
+    && Math.abs(position.y - boundsCenter.y) < boundsHalfSize.y
+    && Math.abs(position.z - boundsCenter.z) < boundsHalfSize.z;
+  const material = volume.material;
+  if (material.depthTest === !cameraInside) return;
+  material.depthTest = !cameraInside;
+  material.needsUpdate = true;
+}
+
 export class RoomViewport {
   constructor(container, { onSelect = () => {}, onTransform = () => {}, onDragChange = () => {}, onProbe = () => {}, onRoomResize = () => {}, onContextMenu = () => {} } = {}) {
     this.container = container;
@@ -729,6 +744,43 @@ export class RoomViewport {
     }
     const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(linePoints), new THREE.LineBasicMaterial({ color: theme.outline, transparent: true, opacity: 0.8 }));
     this.sceneRoot.add(lines);
+
+    // Interior walls (closets, hallways), extruded with their doorway cut out.
+    for (const partition of partitionsOf(this.roomScene)) {
+      const length = Math.hypot(partition.b.x - partition.a.x, partition.b.z - partition.a.z);
+      const thickness = PARTITION_MATERIALS[partition.material]?.thickness ?? 0.1;
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.lineTo(length, 0);
+      shape.lineTo(length, height);
+      shape.lineTo(0, height);
+      shape.closePath();
+      const door = doorwaySpan(partition);
+      if (door) {
+        const hole = new THREE.Path();
+        hole.moveTo(door[0], 0.001);
+        hole.lineTo(door[0], DOORWAY_HEIGHT);
+        hole.lineTo(door[1], DOORWAY_HEIGHT);
+        hole.lineTo(door[1], 0.001);
+        hole.closePath();
+        shape.holes.push(hole);
+      }
+      const geometry = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false });
+      geometry.translate(0, 0, -thickness / 2);
+      const mesh = new THREE.Mesh(geometry, material(partition.material === 'glass' ? 0xbfd9df : wallSurface.color, {
+        transparent: true, opacity: partition.material === 'glass' ? 0.35 : 0.82, roughness: 0.85,
+      }));
+      mesh.position.set(partition.a.x - width / 2, 0, partition.a.z - depth / 2);
+      mesh.rotation.y = Math.atan2(-(partition.b.z - partition.a.z), partition.b.x - partition.a.x);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.roomWall = true;
+      this.sceneRoot.add(mesh);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: theme.outline, transparent: true, opacity: 0.6 }));
+      edges.position.copy(mesh.position);
+      edges.rotation.copy(mesh.rotation);
+      this.sceneRoot.add(edges);
+    }
 
     // Invisible ceiling: casts shadows only, so sunlight enters through windows.
     const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(width + 0.4, depth + 0.4), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide }));
@@ -1775,22 +1827,8 @@ export class RoomViewport {
   }
 
   updateFieldVolumeDepthTest() {
-    for (const layer of this.layers?.values() ?? []) this.updateLayerDepthTest(layer);
-    this.updateLayerDepthTest(this.fieldLayer);
-  }
-
-  updateLayerDepthTest(layer) {
-    const volume = layer?.children?.find((child) => child.userData?.boundsHalfSize);
-    if (!volume) return;
-    const { boundsCenter, boundsHalfSize } = volume.userData;
-    const position = this.camera.position;
-    const cameraInside = Math.abs(position.x - boundsCenter.x) < boundsHalfSize.x
-      && Math.abs(position.y - boundsCenter.y) < boundsHalfSize.y
-      && Math.abs(position.z - boundsCenter.z) < boundsHalfSize.z;
-    const material = volume.material;
-    if (material.depthTest === !cameraInside) return;
-    material.depthTest = !cameraInside;
-    material.needsUpdate = true;
+    for (const layer of this.layers?.values() ?? []) updateLayerDepthTest(layer, this.camera);
+    updateLayerDepthTest(this.fieldLayer, this.camera);
   }
 
   animate(time = 0) {

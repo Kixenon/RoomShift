@@ -1,4 +1,4 @@
-import { MODEL_PRESETS, floorContains, isWallItem, objectMaterial, objectProps, openArea, rotationMatrixXYZ, windowCovering } from '../model/room-scene.js';
+import { MODEL_PRESETS, floorContains, insidePartition, isWallItem, objectMaterial, objectProps, openArea, partitionsCrossed, rotationMatrixXYZ, windowCovering } from '../model/room-scene.js';
 import { bearingToRoomVector, sunPosition } from '../model/environment.js';
 import { MATERIALS, SURFACE_MATERIALS, sceneSurfaces } from '../model/materials.js';
 
@@ -94,6 +94,7 @@ function directLux(context, point, normal) {
     const cosine = (dx * normal.x + dy * normal.y + dz * normal.z) / distance;
     if (cosine <= 0) continue;
     if (boxes.some((box) => box.object.id !== lamp.id && segmentHitsBox(point, bulb, box))) continue;
+    if (partitionsCrossed(scene, point, bulb).length) continue;
     const intensity = (objectProps(lamp).lumens ?? LAMP_LUMENS[lamp.model]) / (4 * Math.PI) * (lamp.model === 'ceilingLight' ? 1.6 : 1);
     lux += intensity * cosine / distanceSquared;
   }
@@ -105,7 +106,7 @@ function directLux(context, point, normal) {
     if (toSun && toSun.y > 0 && rayThroughWindow(point, toSun, rect)) {
       const cosine = toSun.x * normal.x + toSun.y * normal.y + toSun.z * normal.z;
       const far = { x: point.x + toSun.x * 20, y: point.y + toSun.y * 20, z: point.z + toSun.z * 20 };
-      if (cosine > 0 && !boxes.some((box) => segmentHitsBox(point, far, box))) lux += context.directNormal * cosine * transmit;
+      if (cosine > 0 && !boxes.some((box) => segmentHitsBox(point, far, box)) && !partitionsCrossed(scene, point, far).length) lux += context.directNormal * cosine * transmit;
     }
     // Sky seen through the window: the window as a diffuse emitter (form factor).
     const center = rect.alongX
@@ -118,7 +119,7 @@ function directLux(context, point, normal) {
     const distance = Math.sqrt(distanceSquared);
     const atWindow = Math.abs(rect.alongX ? vz : vx) / distance;
     const atPoint = (vx * normal.x + vy * normal.y + vz * normal.z) / distance;
-    if (atPoint <= 0 || boxes.some((box) => segmentHitsBox(point, center, box))) continue;
+    if (atPoint <= 0 || boxes.some((box) => segmentHitsBox(point, center, box)) || partitionsCrossed(scene, point, center).length) continue;
     // The sky's luminance is highest overhead: a window seen from below looks brighter.
     const skyLuminance = context.skyLuminance * (0.6 + 0.4 * Math.max(0, vy / distance + 0.3));
     lux += skyLuminance * transmit * window.dimensions.width * window.dimensions.height * atWindow * atPoint / distanceSquared;
@@ -282,9 +283,10 @@ function buildPlane(room, height, cellSize) {
   return { nx, nz, dx: room.width / nx, dz: room.depth / nz, height: Math.min(height, room.height - 0.05) };
 }
 
-function blockingLoss(source, target, boxes, key) {
+function blockingLoss(source, target, boxes, key, scene = null) {
   let loss = 0;
   for (const box of boxes) if (segmentHitsBox(source, target, box)) loss += box.material[key];
+  if (scene) for (const wall of partitionsCrossed(scene, source, target)) loss += wall[key] ?? 0;
   return loss;
 }
 
@@ -300,7 +302,7 @@ export function wifiAt(scene, point, boxes = null) {
     // map still peaks at the router.
     const near = distance < 1 ? 20 * Math.log10(Math.max(0.25, distance)) : 0;
     const loss = itu1238Loss(distance, band) + near
-      + blockingLoss(source, point, boxes ?? obstacleBoxes(scene, router.id).filter((box) => box.object.id !== router.id), 'wifiLossDb') * (WIFI_BANDS_GHZ[band]?.materialFactor ?? 1);
+      + blockingLoss(source, point, boxes ?? obstacleBoxes(scene, router.id).filter((box) => box.object.id !== router.id), 'wifiLossDb', scene) * (WIFI_BANDS_GHZ[band]?.materialFactor ?? 1);
     best = Math.max(best, power + ANTENNA_GAIN_DBI - loss);
   }
   return best;
@@ -371,7 +373,7 @@ export function soundAt(scene, point, acoustics = roomAcoustics(scene), boxes = 
     const distance = Math.max(0.15, Math.hypot(point.x - source.x, point.y - source.y, point.z - source.z));
     // Level is the SPL 1 m in front; Q = 2 for a speaker standing on a surface.
     const powerLevel = objectProps(speaker).level + 8;
-    const barrier = blockingLoss(source, point, boxes ?? obstacleBoxes(scene, speaker.id), 'soundBlockDb');
+    const barrier = blockingLoss(source, point, boxes ?? obstacleBoxes(scene, speaker.id), 'soundBlockDb', scene);
     const direct = (2 / (4 * Math.PI * distance * distance)) * 10 ** (-barrier / 10);
     // Early reflections off walls, floor and ceiling, then the diffuse tail.
     let early = 0;
@@ -470,7 +472,7 @@ export function computeVolumeField(scene, mode, { cellSize = 0.12 } = {}) {
       for (let i = 0; i < nx; i += 1) {
         const index = (j * nz + k) * nx + i;
         const point = { x: (i + 0.5) * grid.dx, y: (j + 0.5) * grid.dy, z: (k + 0.5) * grid.dz };
-        if (!floorContains(scene.room, point.x, point.z) || boxes.some((box) => inside(box, point))) {
+        if (!floorContains(scene.room, point.x, point.z) || insidePartition(scene, point.x, point.z, point.y) || boxes.some((box) => inside(box, point))) {
           solid[index] = 1;
           continue;
         }

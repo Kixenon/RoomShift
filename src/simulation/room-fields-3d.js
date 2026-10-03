@@ -1,4 +1,4 @@
-import { floorContains, rotatedHalfExtents, rotationMatrixXYZ, sourceScale } from '../model/room-scene.js';
+import { floorContains, insidePartition, partitionsOf, rotatedHalfExtents, rotationMatrixXYZ, sourceScale } from '../model/room-scene.js';
 
 const LIMITS = Object.freeze({
   roomMin: 2,
@@ -155,6 +155,17 @@ export function buildSolidMask(scene, grid) {
       for (let i = 0; i < grid.nx; i += 1) {
         if (floorContains(scene.room, (i + 0.5) * grid.dx, (k + 0.5) * grid.dz)) continue;
         for (let j = 0; j < grid.ny; j += 1) solid[indexOf(i, j, k, grid)] = 1;
+      }
+    }
+  }
+  // Interior walls are solid, except their doorways below door height.
+  if (partitionsOf(scene).length) {
+    for (let j = 0; j < grid.ny; j += 1) {
+      const y = (j + 0.5) * grid.dy;
+      for (let k = 0; k < grid.nz; k += 1) {
+        for (let i = 0; i < grid.nx; i += 1) {
+          if (insidePartition(scene, (i + 0.5) * grid.dx, (k + 0.5) * grid.dz, y, Math.max(grid.dx, grid.dz) * 0.35)) solid[indexOf(i, j, k, grid)] = 1;
+        }
       }
     }
   }

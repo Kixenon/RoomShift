@@ -5,6 +5,7 @@ import { installFloorPlan } from './features/floor-plan.js';
 import { installVariants } from './features/variants.js';
 import { installReport } from './features/report.js';
 import { installArExport } from './features/ar-export.js';
+import { installRoomDrawer } from './features/room-drawer.js';
 
-for (const install of [installAiScan, installScanImport, installFloorPlan, installVariants, installReport, installArExport]) install(app);
+for (const install of [installAiScan, installScanImport, installFloorPlan, installVariants, installReport, installArExport, installRoomDrawer]) install(app);
 app.boot();

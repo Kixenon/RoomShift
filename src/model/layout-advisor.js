@@ -1,4 +1,4 @@
-import { MODEL_PRESETS, isWallItem, objectMaterial, moveObject, rotateObject } from './room-scene.js';
+import { MODEL_PRESETS, floorContains, insidePartition, isWallItem, objectMaterial, moveObject, rotateObject } from './room-scene.js';
 import { lightContext, luxAt, roomAcoustics, wifiAt } from '../simulation/room-propagation.js';
 import { heatBalance, ventilation } from './environment.js';
 
@@ -140,7 +140,7 @@ export function evaluateLayout(scene, { environment = null, weather = null } = {
     for (let i = 0; i < g.nx; i += 1) {
       const { x, z } = g.at(i, k);
       const nearWallEdge = x < WALK_RADIUS - 0.05 || z < WALK_RADIUS - 0.05 || x > room.width - WALK_RADIUS + 0.05 || z > room.depth - WALK_RADIUS + 0.05;
-      free[k * g.nx + i] = !nearWallEdge && !footprints.some(({ object, fp }) => object.model !== 'chair' && insideFootprint(fp, x, z, WALK_RADIUS - 0.04)) ? 1 : 0;
+      free[k * g.nx + i] = !nearWallEdge && floorContains(room, x, z, WALK_RADIUS - 0.05) && !insidePartition(scene, x, z, 1, WALK_RADIUS - 0.08) && !footprints.some(({ object, fp }) => object.model !== 'chair' && insideFootprint(fp, x, z, WALK_RADIUS - 0.04)) ? 1 : 0;
     }
   }
   let starts = doorCells(scene, g).map(([i, k]) => {
