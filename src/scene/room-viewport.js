@@ -53,17 +53,20 @@ function createFan(group, dimensions) {
   cage.position.set(0, headY, headZ + 0.025);
   group.add(cage);
   cylinder(group, headRadius * 0.72, headRadius * 0.72, depth * 0.12, { x: 0, y: headY, z: headZ }, 0xd7e2db, 20).rotation.x = Math.PI / 2;
+  const rotor = new THREE.Group();
+  rotor.name = 'fan-rotor';
+  rotor.position.set(0, headY, headZ + 0.105);
   const bladeRadius = headRadius * 0.57;
   for (let index = 0; index < 3; index += 1) {
     const blade = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), material(COLORS.fan));
     blade.scale.set(headRadius * 0.17, bladeRadius * 0.52, 0.017);
-    blade.position.set(0, headY, headZ + 0.105);
     blade.rotation.z = index * (Math.PI * 2 / 3);
-    group.add(blade);
+    rotor.add(blade);
   }
   const hub = new THREE.Mesh(new THREE.SphereGeometry(headRadius * 0.14, 16, 12), material(0xf4f7f3));
-  hub.position.set(0, headY, headZ + 0.13);
-  group.add(hub);
+  hub.position.z = 0.025;
+  rotor.add(hub);
+  group.add(rotor);
 }
 
 function createSofa(group, dimensions) {
@@ -212,6 +215,7 @@ export class RoomViewport {
     this.roomScene = null;
     this.selectedId = null;
     this.groups = new Map();
+    this.fanRotors = new Map();
     this.fieldLayer = null;
     this.lightingPreview = false;
     this.lightingLights = [];
@@ -404,6 +408,16 @@ export class RoomViewport {
     else if (builder) builder(group, object.dimensions);
     else box(group, object.dimensions, { x: 0, y: 0, z: 0 }, COLORS.metal);
     group.userData.open = object.open;
+    if (object.model === 'fan') {
+      const rotor = group.getObjectByName('fan-rotor');
+      rotor.userData.enabled = object.enabled !== false && (object.intensity ?? 1) > 0;
+      rotor.traverse((child) => {
+        if (!child.material?.color) return;
+        child.material.userData.enabledColor ??= child.material.color.clone();
+        child.material.color.copy(child.material.userData.enabledColor).multiplyScalar(rotor.userData.enabled ? 1 : 0.34);
+      });
+      this.fanRotors.set(object.id, rotor);
+    }
     this.applyObjectTransform(group, object);
     this.sceneRoot.add(group);
     this.groups.set(object.id, group);
@@ -424,6 +438,7 @@ export class RoomViewport {
   }
 
   setScene(roomScene, selectedId = this.selectedId) {
+    const initialScene = !this.roomScene;
     const showLighting = this.lightingPreview;
     this.clearFields();
     this.clearHover();
@@ -438,21 +453,22 @@ export class RoomViewport {
       disposeTree(child);
     }
     this.groups.clear();
+    this.fanRotors.clear();
     this.roomScene = roomScene;
     this.buildRoom();
     for (const object of roomScene.objects) this.createObjectGroup(object);
     this.select(selectedId);
-    this.fitRoom(false);
+    if (initialScene) this.fitRoom(false);
     if (showLighting) this.setLightingPreview(true);
   }
 
-  setFields(result, mode) {
+  setFields(result, mode, options = {}) {
     this.clearFields();
     if (mode === 'light') {
       this.setLightingPreview(true);
       this.fieldLayer = null;
     } else {
-      this.fieldLayer = createRoomFieldLayer(result, mode);
+      this.fieldLayer = createRoomFieldLayer(result, mode, this.roomScene, { ...options, objectGroups: this.groups });
       this.sceneRoot.add(this.fieldLayer);
     }
     this.renderer.domElement.dataset.fieldMode = mode;
@@ -465,6 +481,7 @@ export class RoomViewport {
     this.renderer.domElement.dataset.fieldVolumeVoxels = String(this.fieldLayer?.userData.volumeVoxelCount ?? 0);
     if (mode === 'airflow' && this.fieldLayer) {
       this.renderer.domElement.dataset.streamlineVertices = String(this.fieldLayer.userData.streamlineVertexCount);
+      this.renderer.domElement.dataset.gasParticles = String(this.fieldLayer.userData.gasParticleCount);
     }
     this.renderer.domElement.dataset.fieldRevision = String(Number(this.renderer.domElement.dataset.fieldRevision ?? 0) + 1);
   }
@@ -485,6 +502,7 @@ export class RoomViewport {
     delete this.renderer.domElement.dataset.fieldMaxTemperature;
     delete this.renderer.domElement.dataset.fieldVolumeVoxels;
     delete this.renderer.domElement.dataset.streamlineVertices;
+    delete this.renderer.domElement.dataset.gasParticles;
   }
 
   setLightingPreview(enabled) {
@@ -524,7 +542,7 @@ export class RoomViewport {
         const group = this.groups.get(object.id);
         if (!group) continue;
         const source = new THREE.PointLight(0xffffff, 1, 9, 2);
-        source.power = 4500;
+        source.power = 4500 * (object.intensity ?? 1);
         source.castShadow = true;
         source.position.set(0, object.dimensions.height * 0.22, 0);
         group.localToWorld(source.position);
@@ -723,7 +741,15 @@ export class RoomViewport {
   animate(time = 0) {
     this.frameRequest = requestAnimationFrame(this.animate);
     this.orbit.update();
-    this.fieldLayer?.userData.animate?.(this.prefersReducedMotion ? 0 : time / 1000);
+    const seconds = time / 1000;
+    const delta = this.lastAnimationTime === undefined ? 0 : THREE.MathUtils.clamp(seconds - this.lastAnimationTime, 0, 0.05);
+    this.lastAnimationTime = seconds;
+    this.fieldLayer?.userData.animate?.(this.prefersReducedMotion ? 0 : seconds);
+    if (!this.prefersReducedMotion) {
+      for (const rotor of this.fanRotors.values()) {
+        if (rotor.userData.enabled) rotor.rotation.z += delta * 19;
+      }
+    }
     this.selectionBox?.update();
     this.hoverBox?.update();
     this.updateFieldVolumeDepthTest();

@@ -8,7 +8,7 @@ const LIMITS = Object.freeze({
   minCellSize: 0.15,
   maxCellSize: 0.75,
   minSteps: 1,
-  maxSteps: 40,
+  maxSteps: 240,
   minPressureIterations: 4,
   maxPressureIterations: 20,
   maxGridX: 40,
@@ -20,17 +20,17 @@ const LIMITS = Object.freeze({
 
 const DEFAULTS = Object.freeze({
   cellSize: 0.15,
-  steps: 40,
+  steps: 120,
   timeStep: 0.05,
   pressureIterations: 12,
   ambientTemperature: 20,
   kinematicViscosity: 0.018,
-  effectiveThermalDiffusivity: 0.012,
-  coolingRate: 0.035,
+  effectiveThermalDiffusivity: 0.018,
+  coolingRate: 0.02,
   fanAcceleration: 4.5,
-  fanRange: 1.8,
+  fanRange: 2.6,
   heaterRate: 8,
-  heaterRadius: 0.36,
+  heaterRadius: 0.45,
 });
 const FAN_SOURCE_GRID_CELLS = 1.25;
 
@@ -45,7 +45,7 @@ export const FIELD_ASSUMPTIONS = Object.freeze({
   maximumSpeedMetersPerSecond: LIMITS.maxSpeed,
   thermalSourceUnits: 'estimated degrees Celsius per second',
   thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
-  boundaries: 'closed walls with one-way atmospheric window outlets when opened',
+  boundaries: 'closed walls with adjustable inlet or outlet flow at open windows',
 });
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -69,6 +69,19 @@ export function validateScene(scene) {
       object?.rotation?.x, object?.rotation?.y, object?.rotation?.z].every(Number.isFinite)
       || object.dimensions.width <= 0 || object.dimensions.height <= 0 || object.dimensions.depth <= 0) {
       throw new TypeError(`Object ${object?.id ?? '(unknown)'} has invalid geometry.`);
+    }
+    if (['fan', 'heater', 'lamp'].includes(object.model)
+      && object.intensity !== undefined
+      && (!Number.isFinite(object.intensity) || object.intensity < 0 || object.intensity > 2)) {
+      throw new RangeError(`Object ${object.id ?? '(unknown)'} source strength must be between 0 and 2.`);
+    }
+    if (object.model === 'fan' && object.enabled !== undefined && typeof object.enabled !== 'boolean') {
+      throw new TypeError(`Fan ${object.id ?? '(unknown)'} enabled state must be boolean.`);
+    }
+    if (object.model === 'window'
+      && ((object.flowDirection !== undefined && !['exchange', 'inlet', 'outlet'].includes(object.flowDirection))
+        || (object.flowRate !== undefined && (!Number.isFinite(object.flowRate) || object.flowRate < 0 || object.flowRate > 1.5)))) {
+      throw new RangeError(`Window ${object.id ?? '(unknown)'} has invalid airflow settings.`);
     }
     const [halfWidth, halfHeight, halfDepth] = rotatedHalfExtents(object.dimensions, object.rotation);
     const { x, y, z } = object.position;
@@ -184,34 +197,44 @@ export function buildSolidMask(scene, grid) {
 }
 
 export function buildOutletMask(scene, grid) {
-  const outlets = new Uint8Array(grid.nx * grid.ny * grid.nz);
+  return buildWindowBoundary(scene, grid).outlets;
+}
+
+export function buildWindowBoundary(scene, grid) {
+  const count = grid.nx * grid.ny * grid.nz;
+  const outlets = new Uint8Array(count);
+  const flow = new Float32Array(count);
   for (const window of scene.objects) {
     if (window.model !== 'window' || !window.open) continue;
     const alongX = window.wall === 'back' || window.wall === 'front';
     const sideBit = window.wall === 'left' ? 1
       : window.wall === 'right' ? 2
         : window.wall === 'front' ? 16 : 32;
-    for (let j = 0; j < grid.ny; j += 1) {
-      const y = (j + 0.5) * grid.dy;
-      if (y < window.position.y || y > window.position.y + window.dimensions.height) continue;
-      for (let k = 0; k < grid.nz; k += 1) {
-        for (let i = 0; i < grid.nx; i += 1) {
-          if (alongX) {
-            const x = (i + 0.5) * grid.dx;
-            if (Math.abs(x - window.position.x) > window.dimensions.width / 2) continue;
-            if (window.wall === 'back' && k === grid.nz - 1) outlets[indexOf(i, j, k, grid)] |= sideBit;
-            if (window.wall === 'front' && k === 0) outlets[indexOf(i, j, k, grid)] |= sideBit;
-          } else {
-            const z = (k + 0.5) * grid.dz;
-            if (Math.abs(z - window.position.z) > window.dimensions.width / 2) continue;
-            if (window.wall === 'left' && i === 0) outlets[indexOf(i, j, k, grid)] |= sideBit;
-            if (window.wall === 'right' && i === grid.nx - 1) outlets[indexOf(i, j, k, grid)] |= sideBit;
-          }
-        }
+    const firstJ = clamp(Math.floor(window.position.y / grid.dy), 0, grid.ny - 1);
+    const lastJ = clamp(Math.floor((window.position.y + window.dimensions.height) / grid.dy), 0, grid.ny - 1);
+    const direction = window.flowDirection ?? 'exchange';
+    const wallSign = window.wall === 'left' || window.wall === 'front' ? -1 : 1;
+    const speed = window.flowRate ?? 0.35;
+    const alongCells = alongX ? grid.nx : grid.nz;
+    const alongSpacing = alongX ? grid.dx : grid.dz;
+    const alongPosition = alongX ? window.position.x : window.position.z;
+    const firstAlong = clamp(Math.floor((alongPosition - window.dimensions.width / 2) / alongSpacing), 0, alongCells - 1);
+    const lastAlong = clamp(Math.floor((alongPosition + window.dimensions.width / 2) / alongSpacing), 0, alongCells - 1);
+    const inletRows = Math.floor((lastJ - firstJ + 1) / 2);
+    for (let j = firstJ; j <= lastJ; j += 1) {
+      const isInlet = direction === 'inlet' || (direction === 'exchange' && j - firstJ < inletRows);
+      const outwardSign = isInlet ? -1 : 1;
+      const normalSpeed = outwardSign * wallSign * speed;
+      for (let along = firstAlong; along <= lastAlong; along += 1) {
+        const i = alongX ? along : window.wall === 'left' ? 0 : grid.nx - 1;
+        const k = alongX ? window.wall === 'front' ? 0 : grid.nz - 1 : along;
+        const index = indexOf(i, j, k, grid);
+        outlets[index] |= sideBit;
+        flow[index] = normalSpeed;
       }
     }
   }
-  return outlets;
+  return { outlets, flow };
 }
 
 function sampleField(field, x, y, z, grid, solid, fallback) {
@@ -290,7 +313,7 @@ function laplacian(field, i, j, k, grid, solid) {
       - 2 * center + neighborValue(field, i, j, k, 0, 0, 1, center, grid, solid)) / (grid.dz ** 2);
 }
 
-function applyVelocityBoundaries(u, v, w, grid, solid, outlets) {
+function applyVelocityBoundaries(u, v, w, grid, solid, outlets, windowFlow) {
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
       for (let i = 0; i < grid.nx; i += 1) {
@@ -301,11 +324,11 @@ function applyVelocityBoundaries(u, v, w, grid, solid, outlets) {
           w[index] = 0;
           continue;
         }
-        if (i === 0) u[index] = outlets[index] & 1 ? Math.min(u[index], -0.18) : 0;
-        if (i === grid.nx - 1) u[index] = outlets[index] & 2 ? Math.max(u[index], 0.18) : 0;
+        if (i === 0) u[index] = outlets[index] & 1 ? windowFlow[index] : 0;
+        if (i === grid.nx - 1) u[index] = outlets[index] & 2 ? windowFlow[index] : 0;
         if (j === 0 || j === grid.ny - 1) v[index] = 0;
-        if (k === 0) w[index] = outlets[index] & 16 ? Math.min(w[index], -0.18) : 0;
-        if (k === grid.nz - 1) w[index] = outlets[index] & 32 ? Math.max(w[index], 0.18) : 0;
+        if (k === 0) w[index] = outlets[index] & 16 ? windowFlow[index] : 0;
+        if (k === grid.nz - 1) w[index] = outlets[index] & 32 ? windowFlow[index] : 0;
         if ((i > 0 && solid[indexOf(i - 1, j, k, grid)] && u[index] < 0)
           || (i + 1 < grid.nx && solid[indexOf(i + 1, j, k, grid)] && u[index] > 0)) u[index] = 0;
         if ((j > 0 && solid[indexOf(i, j - 1, k, grid)] && v[index] < 0)
@@ -349,7 +372,7 @@ function applyFanForces(u, v, w, fans, grid, solid, timeStep, settings) {
           const beam = Math.exp(-lateralSquared / (2 * spread ** 2))
             * Math.exp(-Math.max(0, forward) / settings.fanRange)
             * upstreamFade;
-          const magnitude = settings.fanAcceleration * beam * timeStep;
+          const magnitude = settings.fanAcceleration * (fan.intensity ?? 1) * beam * timeStep;
           u[index] += direction[0] * magnitude;
           v[index] += direction[1] * magnitude;
           w[index] += direction[2] * magnitude;
@@ -363,12 +386,12 @@ function applyBuoyancy(v, temperature, solid, timeStep, ambientTemperature) {
   const accelerationPerDegree = 9.81 / (ambientTemperature + 273.15);
   for (let index = 0; index < v.length; index += 1) {
     if (!solid[index]) {
-      v[index] += Math.max(0, temperature[index] - ambientTemperature) * accelerationPerDegree * timeStep;
+      v[index] += (temperature[index] - ambientTemperature) * accelerationPerDegree * timeStep;
     }
   }
 }
 
-function projectVelocity(u, v, w, grid, solid, outlets, iterations) {
+function projectVelocity(u, v, w, grid, solid, outlets, windowFlow, iterations) {
   let pressure = new Float32Array(u.length);
   let nextPressure = new Float32Array(u.length);
   const divergence = new Float32Array(u.length);
@@ -435,7 +458,7 @@ function projectVelocity(u, v, w, grid, solid, outlets, iterations) {
       }
     }
   }
-  applyVelocityBoundaries(u, v, w, grid, solid, outlets);
+  applyVelocityBoundaries(u, v, w, grid, solid, outlets, windowFlow);
 }
 
 function diffuse(field, coefficient, timeStep, grid, solid, clampMin, clampMax) {
@@ -465,7 +488,7 @@ function addHeatSources(temperature, heaters, grid, solid, settings, timeStep) {
           const position = cellPosition(i, j, k, grid);
           const distanceSquared = (position.x - heater.position.x) ** 2
             + (position.y - centerY) ** 2 + (position.z - heater.position.z) ** 2;
-          temperature[index] += settings.heaterRate * Math.exp(-distanceSquared / radiusSquared) * timeStep;
+          temperature[index] += settings.heaterRate * (heater.intensity ?? 1) * Math.exp(-distanceSquared / radiusSquared) * timeStep;
         }
       }
     }
@@ -521,8 +544,8 @@ export function simulateRoomFields(scene, options = {}) {
   const settings = validateOptions(options, scene.room);
   const grid = buildGrid(scene.room, settings.cellSize);
   const solid = buildSolidMask(scene, grid);
-  const outlets = buildOutletMask(scene, grid);
-  const fans = scene.objects.filter((object) => object.model === 'fan');
+  const { outlets, flow: windowFlow } = buildWindowBoundary(scene, grid);
+  const fans = scene.objects.filter((object) => object.model === 'fan' && object.enabled !== false);
   const heaters = scene.objects.filter((object) => object.model === 'heater');
   let u = new Float32Array(grid.nx * grid.ny * grid.nz);
   let v = new Float32Array(u.length);
@@ -549,7 +572,7 @@ export function simulateRoomFields(scene, options = {}) {
     u = diffuse(u, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
     v = diffuse(v, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
     w = diffuse(w, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-    projectVelocity(u, v, w, grid, solid, outlets, settings.pressureIterations);
+    projectVelocity(u, v, w, grid, solid, outlets, windowFlow, settings.pressureIterations);
     for (let index = 0; index < u.length; index += 1) {
       const speed = Math.hypot(u[index], v[index], w[index]);
       if (speed > LIMITS.maxSpeed) {
@@ -567,7 +590,14 @@ export function simulateRoomFields(scene, options = {}) {
         temperature[index] = settings.ambientTemperature;
         continue;
       }
-      if (outlets[index]) temperature[index] += (settings.ambientTemperature - temperature[index]) * Math.min(1, settings.timeStep * 8);
+      if (outlets[index]) {
+        const isInlet = outlets[index] & 1 ? windowFlow[index] > 0
+          : outlets[index] & 2 ? windowFlow[index] < 0
+            : outlets[index] & 16 ? windowFlow[index] > 0 : windowFlow[index] < 0;
+        const exchange = Math.min(1, settings.timeStep * Math.abs(windowFlow[index]) / Math.min(grid.dx, grid.dz));
+        if (isInlet) temperature[index] = settings.ambientTemperature;
+        else temperature[index] += (settings.ambientTemperature - temperature[index]) * exchange;
+      }
       temperature[index] = clamp(
         temperature[index] + (settings.ambientTemperature - temperature[index]) * settings.coolingRate * settings.timeStep,
         0,
@@ -583,7 +613,7 @@ export function simulateRoomFields(scene, options = {}) {
   const stats = calculateStats(u, v, w, temperature, solid, grid, settings.ambientTemperature);
   return {
     grid: { ...grid, cellSize: settings.cellSize },
-    fields: { u, v, w, temperature, solid, outlets },
+    fields: { u, v, w, temperature, solid, outlets, windowFlow },
     backend: 'cpu-preview',
     ambientTemperature: settings.ambientTemperature,
     durationSeconds: settings.steps * settings.timeStep,

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import {
   createAirflowLayers,
   createFieldVolume,
+  createTemperatureObjectLayer,
+  createTemperatureSurfaceLayer,
   getAirflowColor,
   getLightColor,
   getTemperatureColor,
@@ -25,7 +27,7 @@ function validateResult(result, mode) {
   }
 }
 
-export function createRoomFieldLayer(result, mode) {
+export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
   if (!['airflow', 'temperature', 'light'].includes(mode)) {
     throw new RangeError(`Unsupported room field mode: ${mode}`);
   }
@@ -33,15 +35,35 @@ export function createRoomFieldLayer(result, mode) {
   const layer = new THREE.Group();
   layer.name = `room-field-${mode}`;
   layer.userData.fieldMode = mode;
-  const volume = createFieldVolume(result, mode);
-  layer.add(volume);
-  layer.userData.volumeVoxelCount = volume.userData.voxelCount;
-  if (mode === 'airflow') {
-    const airflow = createAirflowLayers(result);
+  layer.userData.volumeVoxelCount = 0;
+  if (mode === 'temperature') {
+    if (options.volumetric) {
+      const volume = createFieldVolume(result, mode);
+      layer.add(volume);
+      layer.userData.volumeVoxelCount = volume.userData.voxelCount;
+    } else {
+      layer.add(createTemperatureSurfaceLayer(result, roomScene));
+    }
+    layer.add(createTemperatureObjectLayer(result, options.objectGroups));
+  } else if (mode === 'airflow') {
+    if (options.volumetric) {
+      const volume = createFieldVolume(result, mode);
+      layer.add(volume);
+      layer.userData.volumeVoxelCount = volume.userData.voxelCount;
+      layer.userData.airflowVisualization = 'volume';
+      return layer;
+    }
+    const airflow = createAirflowLayers(result, roomScene);
     if (airflow.streamlines) layer.add(airflow.streamlines);
     if (airflow.tracers) layer.add(airflow.tracers);
     layer.userData.streamlineVertexCount = airflow.streamlines?.geometry.getAttribute('position').count ?? 0;
+    layer.userData.gasParticleCount = airflow.particleCount;
+    layer.userData.airflowVisualization = 'gas';
     layer.userData.animate = airflow.update;
+  } else {
+    const volume = createFieldVolume(result, mode);
+    layer.add(volume);
+    layer.userData.volumeVoxelCount = volume.userData.voxelCount;
   }
   return layer;
 }

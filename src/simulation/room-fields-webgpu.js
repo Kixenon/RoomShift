@@ -1,20 +1,20 @@
 import { rotationMatrixXYZ } from '../model/room-scene.js';
-import { validateScene, buildOutletMask, buildSolidMask } from './room-fields-3d.js';
+import { validateScene, buildWindowBoundary, buildSolidMask } from './room-fields-3d.js';
 import { createSimulationGrid, DEFAULT_CELL_SIZE } from './room-grid.js';
 
 const SETTINGS = Object.freeze({
   cellSize: DEFAULT_CELL_SIZE,
-  steps: 240,
+  steps: 600,
   timeStep: 0.01,
   pressureIterations: 20,
   ambientTemperature: 20,
   kinematicViscosity: 0.018,
-  effectiveThermalDiffusivity: 0.012,
-  coolingRate: 0.035,
+  effectiveThermalDiffusivity: 0.018,
+  coolingRate: 0.02,
   fanAcceleration: 4.5,
-  fanRange: 1.8,
+  fanRange: 2.6,
   heaterRate: 8,
-  heaterRadius: 0.36,
+  heaterRadius: 0.45,
   maximumSpeed: 2.5,
 });
 
@@ -24,8 +24,9 @@ const WORKGROUP_SIZE = 128;
 export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
   const mask = buildSolidMask(scene, grid);
   const solid = Uint32Array.from(mask);
-  const outlets = Uint32Array.from(buildOutletMask(scene, grid));
-  const fans = scene.objects.filter((object) => object.model === 'fan');
+  const boundary = buildWindowBoundary(scene, grid);
+  const outlets = Uint32Array.from(boundary.outlets);
+  const fans = scene.objects.filter((object) => object.model === 'fan' && object.enabled !== false);
   const heaters = scene.objects.filter((object) => object.model === 'heater');
   const fanData = new Float32Array(Math.max(1, fans.length) * 12);
   const heaterData = new Float32Array(Math.max(1, heaters.length) * 8);
@@ -39,7 +40,7 @@ export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
       fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * local.x + matrix[1][1] * local.y + matrix[1][2] * local.z,
       fan.position.z + matrix[2][0] * local.x + matrix[2][1] * local.y + matrix[2][2] * local.z,
       settings.fanRange,
-      matrix[0][2], matrix[1][2], matrix[2][2], settings.fanAcceleration,
+      matrix[0][2], matrix[1][2], matrix[2][2], settings.fanAcceleration * (fan.intensity ?? 1),
       1.25 * Math.hypot(grid.dx * matrix[0][2], grid.dy * matrix[1][2], grid.dz * matrix[2][2]),
       0.12, 0.2, 0,
     ], offset);
@@ -52,11 +53,11 @@ export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
       heater.position.y + heater.dimensions.height / 2,
       heater.position.z,
       settings.heaterRadius,
-      settings.heaterRate, 0, 0, 0,
+      settings.heaterRate * (heater.intensity ?? 1), 0, 0, 0,
     ], offset);
   });
 
-  return { solid, outlets, fans: fanData, heaters: heaterData, fanCount: fans.length, heaterCount: heaters.length };
+  return { solid, outlets, windowFlow: boundary.flow, fans: fanData, heaters: heaterData, fanCount: fans.length, heaterCount: heaters.length };
 }
 
 const COMMON_CONFIG = `
@@ -87,6 +88,7 @@ struct Heater { centerRadius: vec4<f32>, source: vec4<f32> };
 @group(0) @binding(4) var<storage, read> heaters: array<Heater>;
 @group(0) @binding(5) var<storage, read_write> stateOut: array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read> outletMask: array<u32>;
+@group(0) @binding(7) var<storage, read> windowFlow: array<f32>;
 
 fn fieldValue(i: i32, j: i32, k: i32, component: u32, fallback: f32) -> f32 {
   if (!inside(i, j, k)) { return fallback; }
@@ -166,7 +168,7 @@ fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
     force += fan.direction.xyz * fan.direction.w * beam;
   }
   var velocity = (advected.xyz + cfg.physics.y * cfg.spacing.w * velocityDiffusion + force * cfg.spacing.w) * exp(-0.08 * cfg.spacing.w);
-  velocity.y += max(0.0, advected.w - cfg.physics.x) * cfg.limits.y * cfg.spacing.w;
+  velocity.y += (advected.w - cfg.physics.x) * cfg.limits.y * cfg.spacing.w;
   velocity = clamp(velocity, vec3<f32>(-cfg.limits.x), vec3<f32>(cfg.limits.x));
   let speed = length(velocity);
   if (speed > cfg.limits.x) { velocity *= cfg.limits.x / speed; }
@@ -178,12 +180,20 @@ fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
     temperature += heater.source.x * exp(-distanceSquared / (2.0 * heater.centerRadius.w * heater.centerRadius.w)) * cfg.spacing.w;
   }
   temperature = clamp(temperature, 0.0, 60.0);
-  if (outletMask[id] != 0u) { temperature += (cfg.physics.x - temperature) * min(1.0, cfg.spacing.w * 8.0); }
-  if (i == 0u) { velocity.x = select(0.0, min(velocity.x, -0.18), (outletMask[id] & 1u) != 0u); }
-  if (i + 1u == cfg.dims.x) { velocity.x = select(0.0, max(velocity.x, 0.18), (outletMask[id] & 2u) != 0u); }
+  let flow = windowFlow[id];
+  let mask = outletMask[id];
+  if (mask != 0u) {
+    let inlet = ((mask & 1u) != 0u && flow > 0.0) || ((mask & 2u) != 0u && flow < 0.0)
+      || ((mask & 16u) != 0u && flow > 0.0) || ((mask & 32u) != 0u && flow < 0.0);
+    let exchange = min(1.0, cfg.spacing.w * abs(flow) / min(cfg.spacing.x, cfg.spacing.z));
+    if (inlet) { temperature = cfg.physics.x; }
+    else { temperature += (cfg.physics.x - temperature) * exchange; }
+  }
+  if (i == 0u) { velocity.x = select(0.0, flow, (mask & 1u) != 0u); }
+  if (i + 1u == cfg.dims.x) { velocity.x = select(0.0, flow, (mask & 2u) != 0u); }
   if (j == 0u || j + 1u == cfg.dims.y) { velocity.y = 0.0; }
-  if (k == 0u) { velocity.z = select(0.0, min(velocity.z, -0.18), (outletMask[id] & 16u) != 0u); }
-  if (k + 1u == cfg.dims.z) { velocity.z = select(0.0, max(velocity.z, 0.18), (outletMask[id] & 32u) != 0u); }
+  if (k == 0u) { velocity.z = select(0.0, flow, (mask & 16u) != 0u); }
+  if (k + 1u == cfg.dims.z) { velocity.z = select(0.0, flow, (mask & 32u) != 0u); }
   if ((i > 0u && solid[indexOf(i - 1u, j, k)] != 0u && velocity.x < 0.0)
     || (i + 1u < cfg.dims.x && solid[indexOf(i + 1u, j, k)] != 0u && velocity.x > 0.0)) { velocity.x = 0.0; }
   if ((j > 0u && solid[indexOf(i, j - 1u, k)] != 0u && velocity.y < 0.0)
@@ -261,6 +271,7 @@ const PROJECT_SHADER = `${COMMON_CONFIG}
 @group(0) @binding(3) var<storage, read> pressure: array<f32>;
 @group(0) @binding(4) var<storage, read_write> stateOut: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read> outletMask: array<u32>;
+@group(0) @binding(6) var<storage, read> windowFlow: array<f32>;
 fn pressureAt(i: i32, j: i32, k: i32, center: f32) -> f32 {
   if (!inside(i, j, k)) { return center; }
   let id = indexOf(u32(i), u32(j), u32(k));
@@ -282,11 +293,11 @@ fn project(@builtin(global_invocation_id) invocation: vec3<u32>) {
   velocity = clamp(velocity, vec3<f32>(-cfg.limits.x), vec3<f32>(cfg.limits.x));
   let speed = length(velocity);
   if (speed > cfg.limits.x) { velocity *= cfg.limits.x / speed; }
-  if (i == 0) { velocity.x = select(0.0, min(velocity.x, -0.18), (outletMask[id] & 1u) != 0u); }
-  if (i + 1 == i32(cfg.dims.x)) { velocity.x = select(0.0, max(velocity.x, 0.18), (outletMask[id] & 2u) != 0u); }
+  if (i == 0) { velocity.x = select(0.0, windowFlow[id], (outletMask[id] & 1u) != 0u); }
+  if (i + 1 == i32(cfg.dims.x)) { velocity.x = select(0.0, windowFlow[id], (outletMask[id] & 2u) != 0u); }
   if (j == 0 || j + 1 == i32(cfg.dims.y)) { velocity.y = 0.0; }
-  if (k == 0) { velocity.z = select(0.0, min(velocity.z, -0.18), (outletMask[id] & 16u) != 0u); }
-  if (k + 1 == i32(cfg.dims.z)) { velocity.z = select(0.0, max(velocity.z, 0.18), (outletMask[id] & 32u) != 0u); }
+  if (k == 0) { velocity.z = select(0.0, windowFlow[id], (outletMask[id] & 16u) != 0u); }
+  if (k + 1 == i32(cfg.dims.z)) { velocity.z = select(0.0, windowFlow[id], (outletMask[id] & 32u) != 0u); }
   if ((i > 0 && solid[indexOf(u32(i - 1), u32(j), u32(k))] != 0u && velocity.x < 0.0)
     || (i + 1 < i32(cfg.dims.x) && solid[indexOf(u32(i + 1), u32(j), u32(k))] != 0u && velocity.x > 0.0)) { velocity.x = 0.0; }
   if ((j > 0 && solid[indexOf(u32(i), u32(j - 1), u32(k))] != 0u && velocity.y < 0.0)
@@ -414,6 +425,7 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     const scratch = allocate(byteLength, usage.STORAGE | usage.COPY_DST | usage.COPY_SRC);
     const solid = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const outlets = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
+    const windowFlow = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const fans = allocate(inputs.fans.byteLength, usage.STORAGE | usage.COPY_DST);
     const heaters = allocate(inputs.heaters.byteLength, usage.STORAGE | usage.COPY_DST);
     const pressureA = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
@@ -426,6 +438,7 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     device.queue.writeBuffer(state, 0, packedState);
     device.queue.writeBuffer(solid, 0, inputs.solid);
     device.queue.writeBuffer(outlets, 0, inputs.outlets);
+    device.queue.writeBuffer(windowFlow, 0, inputs.windowFlow);
     device.queue.writeBuffer(fans, 0, inputs.fans);
     device.queue.writeBuffer(heaters, 0, inputs.heaters);
 
@@ -436,19 +449,21 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
       createPipeline(device, PRESSURE_SHADER, 'solve'),
       createPipeline(device, PROJECT_SHADER, 'project'),
     ]);
-    const integrateGroup = bind(device, integrate, [config, state, solid, fans, heaters, scratch, outlets]);
+    const integrateGroup = bind(device, integrate, [config, state, solid, fans, heaters, scratch, outlets, windowFlow]);
     const divergenceGroup = bind(device, calculate, [config, scratch, solid, divergence]);
     const clearAGroup = bind(device, clear, [config, pressureA]);
     const clearBGroup = bind(device, clear, [config, pressureB]);
     const solveABGroup = bind(device, solve, [config, divergence, solid, pressureA, pressureB]);
     const solveBAGroup = bind(device, solve, [config, divergence, solid, pressureB, pressureA]);
-    const projectAGroup = bind(device, project, [config, scratch, solid, pressureA, state, outlets]);
-    const projectBGroup = bind(device, project, [config, scratch, solid, pressureB, state, outlets]);
+    const projectAGroup = bind(device, project, [config, scratch, solid, pressureA, state, outlets, windowFlow]);
+    const projectBGroup = bind(device, project, [config, scratch, solid, pressureB, state, outlets, windowFlow]);
     const workgroups = Math.ceil(count / WORKGROUP_SIZE);
+    const batchSize = 8;
+    let encoder;
 
     for (let step = 0; step < settings.steps; step += 1) {
       if (options.isCancelled?.()) return null;
-      const encoder = device.createCommandEncoder();
+      if (step % batchSize === 0) encoder = device.createCommandEncoder();
       let pass = encoder.beginComputePass();
       dispatch(pass, integrate, integrateGroup, workgroups);
       pass.end();
@@ -462,8 +477,10 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
       }
       dispatch(pass, project, pressureOnA ? projectAGroup : projectBGroup, workgroups);
       pass.end();
-      device.queue.submit([encoder.finish()]);
-      await device.queue.onSubmittedWorkDone();
+      if (step % batchSize === batchSize - 1 || step === settings.steps - 1) {
+        device.queue.submit([encoder.finish()]);
+        await device.queue.onSubmittedWorkDone();
+      }
     }
     if (options.isCancelled?.()) return null;
     const packed = new Float32Array(await readback(device, state, readBuffer, byteLength));
@@ -474,6 +491,7 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
       temperature: new Float32Array(count),
       solid: Uint8Array.from(inputs.solid),
       outlets: Uint8Array.from(inputs.outlets),
+      windowFlow: Float32Array.from(inputs.windowFlow),
     };
     for (let id = 0; id < count; id += 1) {
       const offset = id * 4;
@@ -491,7 +509,7 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
       assumptions: Object.freeze({
         model: 'GPU accelerated 3D incompressible transient room-field estimate',
         units: 'velocity in m/s; temperature in estimated °C',
-        boundaries: 'closed room walls with one-way atmospheric window outlets when opened',
+        boundaries: 'closed room walls with adjustable inlet or outlet flow at open windows',
         thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
         maximumGridCells: 1_500_000,
       }),
