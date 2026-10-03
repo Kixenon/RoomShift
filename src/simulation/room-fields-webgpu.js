@@ -1,49 +1,39 @@
-import { rotationMatrixXYZ } from '../model/room-scene.js';
-import { validateScene, buildOutletMask, buildSolidMask } from './room-fields-3d.js';
+import {
+  validateScene,
+  buildWindowBoundary,
+  buildSolidMask,
+  buildFanAccelerationField,
+  FIELD_PHYSICS_DEFAULTS,
+} from './room-fields-3d.js';
 import { createSimulationGrid, DEFAULT_CELL_SIZE } from './room-grid.js';
 
 const SETTINGS = Object.freeze({
+  ...FIELD_PHYSICS_DEFAULTS,
   cellSize: DEFAULT_CELL_SIZE,
-  steps: 240,
+  steps: 1200,
   timeStep: 0.01,
   pressureIterations: 20,
-  ambientTemperature: 20,
-  kinematicViscosity: 0.018,
-  effectiveThermalDiffusivity: 0.012,
-  coolingRate: 0.035,
-  fanAcceleration: 4.5,
-  fanRange: 1.8,
-  heaterRate: 8,
-  heaterRadius: 0.36,
   maximumSpeed: 2.5,
 });
 
-const CONFIG_BYTES = 80;
+const CONFIG_BYTES = 96;
 const WORKGROUP_SIZE = 128;
+const devicePromises = new WeakMap();
+const pipelinePromises = new WeakMap();
 
-export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
+export function prepareWebGpuInputs(scene, grid, settings = {}) {
+  const physics = {
+    ...SETTINGS,
+    ...settings,
+    outdoorTemperature: settings.outdoorTemperature ?? scene.room.outdoorTemperature ?? SETTINGS.outdoorTemperature,
+  };
   const mask = buildSolidMask(scene, grid);
   const solid = Uint32Array.from(mask);
-  const outlets = Uint32Array.from(buildOutletMask(scene, grid));
-  const fans = scene.objects.filter((object) => object.model === 'fan');
-  const heaters = scene.objects.filter((object) => object.model === 'heater');
-  const fanData = new Float32Array(Math.max(1, fans.length) * 12);
+  const boundary = buildWindowBoundary(scene, grid, physics);
+  const outlets = Uint32Array.from(boundary.outlets);
+  const heaters = scene.objects.filter((object) => object.model === 'heater' && object.enabled !== false);
   const heaterData = new Float32Array(Math.max(1, heaters.length) * 8);
-
-  fans.forEach((fan, index) => {
-    const matrix = rotationMatrixXYZ(fan.rotation);
-    const local = { x: 0, y: fan.dimensions.height * 0.24, z: fan.dimensions.depth * 0.1 };
-    const offset = index * 12;
-    fanData.set([
-      fan.position.x + matrix[0][0] * local.x + matrix[0][1] * local.y + matrix[0][2] * local.z,
-      fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * local.x + matrix[1][1] * local.y + matrix[1][2] * local.z,
-      fan.position.z + matrix[2][0] * local.x + matrix[2][1] * local.y + matrix[2][2] * local.z,
-      settings.fanRange,
-      matrix[0][2], matrix[1][2], matrix[2][2], settings.fanAcceleration,
-      1.25 * Math.hypot(grid.dx * matrix[0][2], grid.dy * matrix[1][2], grid.dz * matrix[2][2]),
-      0.12, 0.2, 0,
-    ], offset);
-  });
+  const fanForces = buildFanAccelerationField(scene, grid, solid, physics);
 
   heaters.forEach((heater, index) => {
     const offset = index * 8;
@@ -51,12 +41,12 @@ export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
       heater.position.x,
       heater.position.y + heater.dimensions.height / 2,
       heater.position.z,
-      settings.heaterRadius,
-      settings.heaterRate, 0, 0, 0,
+      physics.heaterRadius,
+      physics.heaterRate * (heater.intensity ?? 1), 0, 0, 0,
     ], offset);
   });
 
-  return { solid, outlets, fans: fanData, heaters: heaterData, fanCount: fans.length, heaterCount: heaters.length };
+  return { solid, outlets, windowPressure: boundary.pressure, fanForces, heaters: heaterData, heaterCount: heaters.length };
 }
 
 const COMMON_CONFIG = `
@@ -66,6 +56,7 @@ struct Config {
   spacing: vec4<f32>,
   physics: vec4<f32>,
   limits: vec4<f32>,
+  turbulence: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> cfg: Config;
 
@@ -79,14 +70,13 @@ fn inside(i: i32, j: i32, k: i32) -> bool {
 `;
 
 const PHYSICS_SHADER = `${COMMON_CONFIG}
-struct Fan { source: vec4<f32>, direction: vec4<f32>, shape: vec4<f32> };
 struct Heater { centerRadius: vec4<f32>, source: vec4<f32> };
 @group(0) @binding(1) var<storage, read> stateIn: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> solid: array<u32>;
-@group(0) @binding(3) var<storage, read> fans: array<Fan>;
+@group(0) @binding(3) var<storage, read> fanForce: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> heaters: array<Heater>;
 @group(0) @binding(5) var<storage, read_write> stateOut: array<vec4<f32>>;
-@group(0) @binding(6) var<storage, read> outletMask: array<u32>;
+@group(0) @binding(6) var<storage, read> vorticity: array<vec4<f32>>;
 
 fn fieldValue(i: i32, j: i32, k: i32, component: u32, fallback: f32) -> f32 {
   if (!inside(i, j, k)) { return fallback; }
@@ -94,13 +84,14 @@ fn fieldValue(i: i32, j: i32, k: i32, component: u32, fallback: f32) -> f32 {
   if (solid[id] != 0u) { return fallback; }
   return stateIn[id][component];
 }
-fn sampleField(component: u32, point: vec3<f32>, fallback: f32) -> f32 {
+fn sampleField(component: u32, point: vec3<f32>, fallback: f32, skipSolid: bool) -> f32 {
   if (any(point < vec3<f32>(0.0)) || any(point > vec3<f32>(cfg.dims.xyz) * cfg.spacing.xyz)) { return fallback; }
   let cell = clamp(point / cfg.spacing.xyz - vec3<f32>(0.5), vec3<f32>(0.0), vec3<f32>(cfg.dims.xyz - vec3<u32>(1u)));
   let low = vec3<u32>(floor(cell));
   let high = min(low + vec3<u32>(1u), cfg.dims.xyz - vec3<u32>(1u));
   let blend = cell - vec3<f32>(low);
   var value = 0.0;
+  var weightTotal = 0.0;
   for (var y = 0u; y < 2u; y += 1u) {
     for (var z = 0u; z < 2u; z += 1u) {
       for (var x = 0u; x < 2u; x += 1u) {
@@ -108,11 +99,30 @@ fn sampleField(component: u32, point: vec3<f32>, fallback: f32) -> f32 {
         let weight = select(1.0 - blend.x, blend.x, x == 1u)
           * select(1.0 - blend.y, blend.y, y == 1u)
           * select(1.0 - blend.z, blend.z, z == 1u);
+        let id = indexOf(c.x, c.y, c.z);
+        if (skipSolid && solid[id] != 0u) { continue; }
         value += fieldValue(i32(c.x), i32(c.y), i32(c.z), component, fallback) * weight;
+        weightTotal += weight;
       }
     }
   }
+  if (skipSolid) { return select(fallback, value / max(weightTotal, 1e-8), weightTotal > 1e-8); }
   return value;
+}
+fn clipBacktrace(start: vec3<f32>, end: vec3<f32>) -> vec3<f32> {
+  let delta = end - start;
+  let stepLength = 0.5 * min(cfg.spacing.x, min(cfg.spacing.y, cfg.spacing.z));
+  let steps = max(1u, u32(ceil(length(delta) / stepLength)));
+  let roomSize = vec3<f32>(cfg.dims.xyz) * cfg.spacing.xyz;
+  var lastFluidPoint = start;
+  for (var step = 1u; step <= steps; step += 1u) {
+    let point = start + delta * (f32(step) / f32(steps));
+    if (any(point < vec3<f32>(0.0)) || any(point > roomSize)) { continue; }
+    let cell = clamp(vec3<i32>(floor(point / cfg.spacing.xyz)), vec3<i32>(0), vec3<i32>(cfg.dims.xyz) - vec3<i32>(1));
+    if (solid[indexOf(u32(cell.x), u32(cell.y), u32(cell.z))] != 0u) { return lastFluidPoint; }
+    lastFluidPoint = point;
+  }
+  return end;
 }
 fn neighbor(i: i32, j: i32, k: i32, component: u32, center: f32) -> f32 {
   return fieldValue(i, j, k, component, center);
@@ -128,6 +138,12 @@ fn laplacian(i: i32, j: i32, k: i32, component: u32, center: f32) -> f32 {
     + (y0 - 2.0 * center + y1) / (cfg.spacing.y * cfg.spacing.y)
     + (z0 - 2.0 * center + z1) / (cfg.spacing.z * cfg.spacing.z);
 }
+fn omegaMagnitude(i: i32, j: i32, k: i32, fallback: f32) -> f32 {
+  if (!inside(i, j, k)) { return fallback; }
+  let id = indexOf(u32(i), u32(j), u32(k));
+  if (solid[id] != 0u) { return fallback; }
+  return vorticity[id].w;
+}
 
 @compute @workgroup_size(${WORKGROUP_SIZE})
 fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
@@ -142,31 +158,30 @@ fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let k = (id / cfg.dims.x) % cfg.dims.z;
   let j = id / (cfg.dims.x * cfg.dims.z);
   let current = stateIn[id];
+  let centerOmega = vorticity[id].w;
+  let omegaGradient = vec3<f32>(
+    (omegaMagnitude(i32(i) + 1, i32(j), i32(k), centerOmega) - omegaMagnitude(i32(i) - 1, i32(j), i32(k), centerOmega)) / (2.0 * cfg.spacing.x),
+    (omegaMagnitude(i32(i), i32(j) + 1, i32(k), centerOmega) - omegaMagnitude(i32(i), i32(j) - 1, i32(k), centerOmega)) / (2.0 * cfg.spacing.y),
+    (omegaMagnitude(i32(i), i32(j), i32(k) + 1, centerOmega) - omegaMagnitude(i32(i), i32(j), i32(k) - 1, centerOmega)) / (2.0 * cfg.spacing.z));
+  let omegaGradientLength = length(omegaGradient);
+  var confinement = vec3<f32>(0.0);
+  if (omegaGradientLength > 1e-8) {
+    confinement = cross(omegaGradient / omegaGradientLength, vorticity[id].xyz)
+      * cfg.turbulence.x * min(cfg.spacing.x, min(cfg.spacing.y, cfg.spacing.z));
+  }
   let position = (vec3<f32>(f32(i), f32(j), f32(k)) + vec3<f32>(0.5)) * cfg.spacing.xyz;
-  let back = position - current.xyz * cfg.spacing.w;
+  let back = clipBacktrace(position, position - current.xyz * cfg.spacing.w);
   let advected = vec4<f32>(
-    sampleField(0u, back, 0.0), sampleField(1u, back, 0.0),
-    sampleField(2u, back, 0.0), sampleField(3u, back, cfg.physics.x));
+    sampleField(0u, back, 0.0, true), sampleField(1u, back, 0.0, true),
+    sampleField(2u, back, 0.0, true), sampleField(3u, back, cfg.physics.x, true));
   let velocityDiffusion = vec3<f32>(
     laplacian(i32(i), i32(j), i32(k), 0u, current.x),
     laplacian(i32(i), i32(j), i32(k), 1u, current.y),
     laplacian(i32(i), i32(j), i32(k), 2u, current.z));
   let temperatureDiffusion = laplacian(i32(i), i32(j), i32(k), 3u, current.w);
-  var force = vec3<f32>(0.0);
-  for (var fanIndex = 0u; fanIndex < cfg.dims.w; fanIndex += 1u) {
-    let fan = fans[fanIndex];
-    let offset = position - fan.source.xyz;
-    let forward = dot(offset, fan.direction.xyz);
-    if (forward < -fan.shape.x || forward > fan.source.w) { continue; }
-    let lateralSquared = max(0.0, dot(offset, offset) - forward * forward);
-    let spread = fan.shape.y + max(0.0, forward) * fan.shape.z;
-    let upstreamFade = exp(-0.5 * pow(min(0.0, forward) / fan.shape.x, 2.0));
-    let beam = exp(-lateralSquared / (2.0 * spread * spread))
-      * exp(-max(0.0, forward) / fan.source.w) * upstreamFade;
-    force += fan.direction.xyz * fan.direction.w * beam;
-  }
+  let force = fanForce[id].xyz + confinement;
   var velocity = (advected.xyz + cfg.physics.y * cfg.spacing.w * velocityDiffusion + force * cfg.spacing.w) * exp(-0.08 * cfg.spacing.w);
-  velocity.y += max(0.0, advected.w - cfg.physics.x) * cfg.limits.y * cfg.spacing.w;
+  velocity.y += (advected.w - cfg.physics.x) * cfg.limits.y * cfg.spacing.w;
   velocity = clamp(velocity, vec3<f32>(-cfg.limits.x), vec3<f32>(cfg.limits.x));
   let speed = length(velocity);
   if (speed > cfg.limits.x) { velocity *= cfg.limits.x / speed; }
@@ -178,19 +193,44 @@ fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
     temperature += heater.source.x * exp(-distanceSquared / (2.0 * heater.centerRadius.w * heater.centerRadius.w)) * cfg.spacing.w;
   }
   temperature = clamp(temperature, 0.0, 60.0);
-  if (outletMask[id] != 0u) { temperature += (cfg.physics.x - temperature) * min(1.0, cfg.spacing.w * 8.0); }
-  if (i == 0u) { velocity.x = select(0.0, min(velocity.x, -0.18), (outletMask[id] & 1u) != 0u); }
-  if (i + 1u == cfg.dims.x) { velocity.x = select(0.0, max(velocity.x, 0.18), (outletMask[id] & 2u) != 0u); }
-  if (j == 0u || j + 1u == cfg.dims.y) { velocity.y = 0.0; }
-  if (k == 0u) { velocity.z = select(0.0, min(velocity.z, -0.18), (outletMask[id] & 16u) != 0u); }
-  if (k + 1u == cfg.dims.z) { velocity.z = select(0.0, max(velocity.z, 0.18), (outletMask[id] & 32u) != 0u); }
-  if ((i > 0u && solid[indexOf(i - 1u, j, k)] != 0u && velocity.x < 0.0)
-    || (i + 1u < cfg.dims.x && solid[indexOf(i + 1u, j, k)] != 0u && velocity.x > 0.0)) { velocity.x = 0.0; }
-  if ((j > 0u && solid[indexOf(i, j - 1u, k)] != 0u && velocity.y < 0.0)
-    || (j + 1u < cfg.dims.y && solid[indexOf(i, j + 1u, k)] != 0u && velocity.y > 0.0)) { velocity.y = 0.0; }
-  if ((k > 0u && solid[indexOf(i, j, k - 1u)] != 0u && velocity.z < 0.0)
-    || (k + 1u < cfg.dims.z && solid[indexOf(i, j, k + 1u)] != 0u && velocity.z > 0.0)) { velocity.z = 0.0; }
   stateOut[id] = vec4<f32>(velocity, temperature);
+}
+`;
+
+const VORTICITY_SHADER = `${COMMON_CONFIG}
+@group(0) @binding(1) var<storage, read> stateIn: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read> solid: array<u32>;
+@group(0) @binding(3) var<storage, read_write> vorticityOut: array<vec4<f32>>;
+fn velocityAt(i: i32, j: i32, k: i32, fallback: vec3<f32>) -> vec3<f32> {
+  if (!inside(i, j, k)) { return fallback; }
+  let id = indexOf(u32(i), u32(j), u32(k));
+  if (solid[id] != 0u) { return fallback; }
+  return stateIn[id].xyz;
+}
+fn curlAt(i: i32, j: i32, k: i32) -> vec3<f32> {
+  let center = stateIn[indexOf(u32(i), u32(j), u32(k))].xyz;
+  let left = velocityAt(i - 1, j, k, center);
+  let right = velocityAt(i + 1, j, k, center);
+  let below = velocityAt(i, j - 1, k, center);
+  let above = velocityAt(i, j + 1, k, center);
+  let near = velocityAt(i, j, k - 1, center);
+  let far = velocityAt(i, j, k + 1, center);
+  return vec3<f32>(
+    (above.z - below.z) / (2.0 * cfg.spacing.y) - (far.y - near.y) / (2.0 * cfg.spacing.z),
+    (far.x - near.x) / (2.0 * cfg.spacing.z) - (right.z - left.z) / (2.0 * cfg.spacing.x),
+    (right.y - left.y) / (2.0 * cfg.spacing.x) - (above.x - below.x) / (2.0 * cfg.spacing.y));
+}
+@compute @workgroup_size(${WORKGROUP_SIZE})
+fn calculateVorticity(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let id = invocation.x;
+  let count = cfg.dims.x * cfg.dims.y * cfg.dims.z;
+  if (id >= count) { return; }
+  if (solid[id] != 0u) { vorticityOut[id] = vec4<f32>(0.0); return; }
+  let i = id % cfg.dims.x;
+  let k = (id / cfg.dims.x) % cfg.dims.z;
+  let j = id / (cfg.dims.x * cfg.dims.z);
+  let curl = curlAt(i32(i), i32(j), i32(k));
+  vorticityOut[id] = vec4<f32>(curl, length(curl));
 }
 `;
 
@@ -198,10 +238,45 @@ const DIVERGENCE_SHADER = `${COMMON_CONFIG}
 @group(0) @binding(1) var<storage, read> state: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> solid: array<u32>;
 @group(0) @binding(3) var<storage, read_write> divergence: array<f32>;
-fn velocity(i: i32, j: i32, k: i32, component: u32) -> f32 {
-  if (!inside(i, j, k)) { return 0.0; }
+@group(0) @binding(4) var<storage, read> outletMask: array<u32>;
+fn xEast(i: i32, j: i32, k: i32) -> f32 {
   let id = indexOf(u32(i), u32(j), u32(k));
-  return select(state[id][component], 0.0, solid[id] != 0u);
+  if (i + 1 >= i32(cfg.dims.x)) { return select(0.0, state[id].x, (outletMask[id] & 2u) != 0u); }
+  let next = indexOf(u32(i + 1), u32(j), u32(k));
+  if (solid[id] != 0u || solid[next] != 0u) { return 0.0; }
+  return 0.5 * (state[id].x + state[next].x);
+}
+fn xWest(i: i32, j: i32, k: i32) -> f32 {
+  if (i == 0) {
+    let id = indexOf(0u, u32(j), u32(k));
+    return select(0.0, state[id].x, (outletMask[id] & 1u) != 0u);
+  }
+  return xEast(i - 1, j, k);
+}
+fn yNorth(i: i32, j: i32, k: i32) -> f32 {
+  if (j + 1 >= i32(cfg.dims.y)) { return 0.0; }
+  let id = indexOf(u32(i), u32(j), u32(k));
+  let next = indexOf(u32(i), u32(j + 1), u32(k));
+  if (solid[id] != 0u || solid[next] != 0u) { return 0.0; }
+  return 0.5 * (state[id].y + state[next].y);
+}
+fn ySouth(i: i32, j: i32, k: i32) -> f32 {
+  if (j == 0) { return 0.0; }
+  return yNorth(i, j - 1, k);
+}
+fn zFar(i: i32, j: i32, k: i32) -> f32 {
+  let id = indexOf(u32(i), u32(j), u32(k));
+  if (k + 1 >= i32(cfg.dims.z)) { return select(0.0, state[id].z, (outletMask[id] & 32u) != 0u); }
+  let next = indexOf(u32(i), u32(j), u32(k + 1));
+  if (solid[id] != 0u || solid[next] != 0u) { return 0.0; }
+  return 0.5 * (state[id].z + state[next].z);
+}
+fn zNear(i: i32, j: i32, k: i32) -> f32 {
+  if (k == 0) {
+    let id = indexOf(u32(i), u32(j), 0u);
+    return select(0.0, state[id].z, (outletMask[id] & 16u) != 0u);
+  }
+  return zFar(i, j, k - 1);
 }
 @compute @workgroup_size(${WORKGROUP_SIZE})
 fn calculate(@builtin(global_invocation_id) invocation: vec3<u32>) {
@@ -211,9 +286,9 @@ fn calculate(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let i = i32(id % cfg.dims.x);
   let k = i32((id / cfg.dims.x) % cfg.dims.z);
   let j = i32(id / (cfg.dims.x * cfg.dims.z));
-  divergence[id] = (velocity(i + 1, j, k, 0u) - velocity(i - 1, j, k, 0u)) / (2.0 * cfg.spacing.x)
-    + (velocity(i, j + 1, k, 1u) - velocity(i, j - 1, k, 1u)) / (2.0 * cfg.spacing.y)
-    + (velocity(i, j, k + 1, 2u) - velocity(i, j, k - 1, 2u)) / (2.0 * cfg.spacing.z);
+  divergence[id] = (xEast(i, j, k) - xWest(i, j, k)) / cfg.spacing.x
+    + (yNorth(i, j, k) - ySouth(i, j, k)) / cfg.spacing.y
+    + (zFar(i, j, k) - zNear(i, j, k)) / cfg.spacing.z;
 }
 `;
 
@@ -228,30 +303,52 @@ fn clear(@builtin(global_invocation_id) invocation: vec3<u32>) {
 const PRESSURE_SHADER = `${COMMON_CONFIG}
 @group(0) @binding(1) var<storage, read> divergence: array<f32>;
 @group(0) @binding(2) var<storage, read> solid: array<u32>;
-@group(0) @binding(3) var<storage, read> pressureIn: array<f32>;
-@group(0) @binding(4) var<storage, read_write> pressureOut: array<f32>;
+@group(0) @binding(3) var<storage, read_write> pressure: array<f32>;
+@group(0) @binding(4) var<storage, read> outletMask: array<u32>;
+@group(0) @binding(5) var<storage, read> windowPressure: array<f32>;
 fn neighborPressure(i: i32, j: i32, k: i32, center: f32) -> f32 {
   if (!inside(i, j, k)) { return center; }
   let id = indexOf(u32(i), u32(j), u32(k));
-  return select(pressureIn[id], center, solid[id] != 0u);
+  return select(pressure[id], center, solid[id] != 0u);
 }
-@compute @workgroup_size(${WORKGROUP_SIZE})
-fn solve(@builtin(global_invocation_id) invocation: vec3<u32>) {
+fn fluidNeighbor(i: i32, j: i32, k: i32) -> bool {
+  if (!inside(i, j, k)) { return false; }
+  return solid[indexOf(u32(i), u32(j), u32(k))] == 0u;
+}
+fn solveColor(invocation: vec3<u32>, color: u32) {
   let id = invocation.x;
   if (id >= cfg.dims.x * cfg.dims.y * cfg.dims.z) { return; }
-  if (solid[id] != 0u) { pressureOut[id] = 0.0; return; }
+  if (solid[id] != 0u) { return; }
   let i = i32(id % cfg.dims.x);
   let k = i32((id / cfg.dims.x) % cfg.dims.z);
   let j = i32(id / (cfg.dims.x * cfg.dims.z));
-  let center = pressureIn[id];
+  if ((u32(i + j + k) & 1u) != color) { return; }
   let ix = 1.0 / (cfg.spacing.x * cfg.spacing.x);
   let iy = 1.0 / (cfg.spacing.y * cfg.spacing.y);
   let iz = 1.0 / (cfg.spacing.z * cfg.spacing.z);
-  let numerator = ix * (neighborPressure(i - 1, j, k, center) + neighborPressure(i + 1, j, k, center))
-    + iy * (neighborPressure(i, j - 1, k, center) + neighborPressure(i, j + 1, k, center))
-    + iz * (neighborPressure(i, j, k - 1, center) + neighborPressure(i, j, k + 1, center))
-    - divergence[id];
-  pressureOut[id] = numerator / (2.0 * (ix + iy + iz));
+  var diagonal = 0.0;
+  var sum = 0.0;
+  if (fluidNeighbor(i - 1, j, k)) { diagonal += ix; sum += ix * neighborPressure(i - 1, j, k, 0.0); }
+  if (fluidNeighbor(i + 1, j, k)) { diagonal += ix; sum += ix * neighborPressure(i + 1, j, k, 0.0); }
+  if (fluidNeighbor(i, j - 1, k)) { diagonal += iy; sum += iy * neighborPressure(i, j - 1, k, 0.0); }
+  if (fluidNeighbor(i, j + 1, k)) { diagonal += iy; sum += iy * neighborPressure(i, j + 1, k, 0.0); }
+  if (fluidNeighbor(i, j, k - 1)) { diagonal += iz; sum += iz * neighborPressure(i, j, k - 1, 0.0); }
+  if (fluidNeighbor(i, j, k + 1)) { diagonal += iz; sum += iz * neighborPressure(i, j, k + 1, 0.0); }
+  if (i == 0 && (outletMask[id] & 1u) != 0u) { diagonal += 2.0 * ix; sum += 2.0 * ix * windowPressure[id]; }
+  if (i + 1 == i32(cfg.dims.x) && (outletMask[id] & 2u) != 0u) { diagonal += 2.0 * ix; sum += 2.0 * ix * windowPressure[id]; }
+  if (k == 0 && (outletMask[id] & 16u) != 0u) { diagonal += 2.0 * iz; sum += 2.0 * iz * windowPressure[id]; }
+  if (k + 1 == i32(cfg.dims.z) && (outletMask[id] & 32u) != 0u) { diagonal += 2.0 * iz; sum += 2.0 * iz * windowPressure[id]; }
+  if (diagonal == 0.0) { return; }
+  let relaxedPressure = (sum - divergence[id] / cfg.spacing.w) / diagonal;
+  pressure[id] += 1.7 * (relaxedPressure - pressure[id]);
+}
+@compute @workgroup_size(${WORKGROUP_SIZE})
+fn solveRed(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  solveColor(invocation, 0u);
+}
+@compute @workgroup_size(${WORKGROUP_SIZE})
+fn solveBlack(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  solveColor(invocation, 1u);
 }
 `;
 
@@ -261,53 +358,110 @@ const PROJECT_SHADER = `${COMMON_CONFIG}
 @group(0) @binding(3) var<storage, read> pressure: array<f32>;
 @group(0) @binding(4) var<storage, read_write> stateOut: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read> outletMask: array<u32>;
-fn pressureAt(i: i32, j: i32, k: i32, center: f32) -> f32 {
-  if (!inside(i, j, k)) { return center; }
+@group(0) @binding(6) var<storage, read> windowPressure: array<f32>;
+@group(0) @binding(7) var<storage, read_write> windowFlowOut: array<f32>;
+@group(0) @binding(8) var<storage, read_write> projectedDivergenceOut: array<f32>;
+fn xEast(i: i32, j: i32, k: i32) -> f32 {
   let id = indexOf(u32(i), u32(j), u32(k));
-  return select(pressure[id], center, solid[id] != 0u);
+  if (i + 1 >= i32(cfg.dims.x)) {
+    if ((outletMask[id] & 2u) == 0u) { return 0.0; }
+    return candidate[id].x - 2.0 * cfg.spacing.w * (windowPressure[id] - pressure[id]) / cfg.spacing.x;
+  }
+  let next = indexOf(u32(i + 1), u32(j), u32(k));
+  if (solid[id] != 0u || solid[next] != 0u) { return 0.0; }
+  return 0.5 * (candidate[id].x + candidate[next].x) - cfg.spacing.w * (pressure[next] - pressure[id]) / cfg.spacing.x;
+}
+fn xWest(i: i32, j: i32, k: i32) -> f32 {
+  if (i == 0) {
+    let id = indexOf(0u, u32(j), u32(k));
+    if ((outletMask[id] & 1u) == 0u) { return 0.0; }
+    return candidate[id].x - 2.0 * cfg.spacing.w * (pressure[id] - windowPressure[id]) / cfg.spacing.x;
+  }
+  return xEast(i - 1, j, k);
+}
+fn yNorth(i: i32, j: i32, k: i32) -> f32 {
+  if (j + 1 >= i32(cfg.dims.y)) { return 0.0; }
+  let id = indexOf(u32(i), u32(j), u32(k));
+  let next = indexOf(u32(i), u32(j + 1), u32(k));
+  if (solid[id] != 0u || solid[next] != 0u) { return 0.0; }
+  return 0.5 * (candidate[id].y + candidate[next].y) - cfg.spacing.w * (pressure[next] - pressure[id]) / cfg.spacing.y;
+}
+fn ySouth(i: i32, j: i32, k: i32) -> f32 {
+  if (j == 0) { return 0.0; }
+  return yNorth(i, j - 1, k);
+}
+fn zFar(i: i32, j: i32, k: i32) -> f32 {
+  let id = indexOf(u32(i), u32(j), u32(k));
+  if (k + 1 >= i32(cfg.dims.z)) {
+    if ((outletMask[id] & 32u) == 0u) { return 0.0; }
+    return candidate[id].z - 2.0 * cfg.spacing.w * (windowPressure[id] - pressure[id]) / cfg.spacing.z;
+  }
+  let next = indexOf(u32(i), u32(j), u32(k + 1));
+  if (solid[id] != 0u || solid[next] != 0u) { return 0.0; }
+  return 0.5 * (candidate[id].z + candidate[next].z) - cfg.spacing.w * (pressure[next] - pressure[id]) / cfg.spacing.z;
+}
+fn zNear(i: i32, j: i32, k: i32) -> f32 {
+  if (k == 0) {
+    let id = indexOf(u32(i), u32(j), 0u);
+    if ((outletMask[id] & 16u) == 0u) { return 0.0; }
+    return candidate[id].z - 2.0 * cfg.spacing.w * (pressure[id] - windowPressure[id]) / cfg.spacing.z;
+  }
+  return zFar(i, j, k - 1);
 }
 @compute @workgroup_size(${WORKGROUP_SIZE})
 fn project(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let id = invocation.x;
   if (id >= cfg.dims.x * cfg.dims.y * cfg.dims.z) { return; }
-  if (solid[id] != 0u) { stateOut[id] = vec4<f32>(0.0, 0.0, 0.0, candidate[id].w); return; }
+  if (solid[id] != 0u) {
+    stateOut[id] = vec4<f32>(0.0, 0.0, 0.0, candidate[id].w);
+    windowFlowOut[id] = 0.0;
+    projectedDivergenceOut[id] = 0.0;
+    return;
+  }
   let i = i32(id % cfg.dims.x);
   let k = i32((id / cfg.dims.x) % cfg.dims.z);
   let j = i32(id / (cfg.dims.x * cfg.dims.z));
-  let center = pressure[id];
-  var velocity = candidate[id].xyz - vec3<f32>(
-    (pressureAt(i + 1, j, k, center) - pressureAt(i - 1, j, k, center)) / (2.0 * cfg.spacing.x),
-    (pressureAt(i, j + 1, k, center) - pressureAt(i, j - 1, k, center)) / (2.0 * cfg.spacing.y),
-    (pressureAt(i, j, k + 1, center) - pressureAt(i, j, k - 1, center)) / (2.0 * cfg.spacing.z));
-  velocity = clamp(velocity, vec3<f32>(-cfg.limits.x), vec3<f32>(cfg.limits.x));
-  let speed = length(velocity);
-  if (speed > cfg.limits.x) { velocity *= cfg.limits.x / speed; }
-  if (i == 0) { velocity.x = select(0.0, min(velocity.x, -0.18), (outletMask[id] & 1u) != 0u); }
-  if (i + 1 == i32(cfg.dims.x)) { velocity.x = select(0.0, max(velocity.x, 0.18), (outletMask[id] & 2u) != 0u); }
-  if (j == 0 || j + 1 == i32(cfg.dims.y)) { velocity.y = 0.0; }
-  if (k == 0) { velocity.z = select(0.0, min(velocity.z, -0.18), (outletMask[id] & 16u) != 0u); }
-  if (k + 1 == i32(cfg.dims.z)) { velocity.z = select(0.0, max(velocity.z, 0.18), (outletMask[id] & 32u) != 0u); }
-  if ((i > 0 && solid[indexOf(u32(i - 1), u32(j), u32(k))] != 0u && velocity.x < 0.0)
-    || (i + 1 < i32(cfg.dims.x) && solid[indexOf(u32(i + 1), u32(j), u32(k))] != 0u && velocity.x > 0.0)) { velocity.x = 0.0; }
-  if ((j > 0 && solid[indexOf(u32(i), u32(j - 1), u32(k))] != 0u && velocity.y < 0.0)
-    || (j + 1 < i32(cfg.dims.y) && solid[indexOf(u32(i), u32(j + 1), u32(k))] != 0u && velocity.y > 0.0)) { velocity.y = 0.0; }
-  if ((k > 0 && solid[indexOf(u32(i), u32(j), u32(k - 1))] != 0u && velocity.z < 0.0)
-    || (k + 1 < i32(cfg.dims.z) && solid[indexOf(u32(i), u32(j), u32(k + 1))] != 0u && velocity.z > 0.0)) { velocity.z = 0.0; }
-  stateOut[id] = vec4<f32>(velocity, candidate[id].w);
+  let west = xWest(i, j, k);
+  let east = xEast(i, j, k);
+  let south = ySouth(i, j, k);
+  let north = yNorth(i, j, k);
+  let near = zNear(i, j, k);
+  let far = zFar(i, j, k);
+  projectedDivergenceOut[id] = (east - west) / cfg.spacing.x
+    + (north - south) / cfg.spacing.y + (far - near) / cfg.spacing.z;
+  let velocity = vec3<f32>(0.5 * (west + east), 0.5 * (south + north), 0.5 * (near + far));
+  var temperature = candidate[id].w;
+  let mask = outletMask[id];
+  if ((mask & 1u) != 0u && west > 0.0) { temperature = cfg.limits.z; }
+  if ((mask & 2u) != 0u && east < 0.0) { temperature = cfg.limits.z; }
+  if ((mask & 16u) != 0u && near > 0.0) { temperature = cfg.limits.z; }
+  if ((mask & 32u) != 0u && far < 0.0) { temperature = cfg.limits.z; }
+  var boundaryVelocity = 0.0;
+  var boundaryFaceCount = 0u;
+  if ((mask & 1u) != 0u) { boundaryVelocity += west; boundaryFaceCount += 1u; }
+  if ((mask & 2u) != 0u) { boundaryVelocity += east; boundaryFaceCount += 1u; }
+  if ((mask & 16u) != 0u) { boundaryVelocity += near; boundaryFaceCount += 1u; }
+  if ((mask & 32u) != 0u) { boundaryVelocity += far; boundaryFaceCount += 1u; }
+  windowFlowOut[id] = 0.0;
+  if (boundaryFaceCount > 0u) { windowFlowOut[id] = boundaryVelocity / f32(boundaryFaceCount); }
+  stateOut[id] = vec4<f32>(velocity, temperature);
 }
 `;
 
-function makeConfig(grid, settings, fanCount, heaterCount) {
+function makeConfig(grid, settings, heaterCount) {
   const bytes = new ArrayBuffer(CONFIG_BYTES);
   const view = new DataView(bytes);
-  [grid.nx, grid.ny, grid.nz, fanCount, heaterCount, 0, 0, 0].forEach((value, index) => {
+  [grid.nx, grid.ny, grid.nz, 0, heaterCount, 0, 0, 0].forEach((value, index) => {
     view.setUint32(index * 4, value, true);
   });
   [grid.dx, grid.dy, grid.dz, settings.timeStep,
     settings.ambientTemperature, settings.kinematicViscosity,
     settings.effectiveThermalDiffusivity, settings.coolingRate,
-    settings.maximumSpeed, 9.81 / (settings.ambientTemperature + 273.15), 0, 0].forEach((value, index) => {
+    settings.maximumSpeed, 9.81 / (settings.ambientTemperature + 273.15), settings.outdoorTemperature, 0].forEach((value, index) => {
     view.setFloat32(32 + index * 4, value, true);
+  });
+  [settings.vorticityConfinement, 0, 0, 0].forEach((value, index) => {
+    view.setFloat32(80 + index * 4, value, true);
   });
   return bytes;
 }
@@ -324,6 +478,54 @@ async function createPipeline(device, code, entryPoint) {
   return device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
 }
 
+async function getDevice(gpu) {
+  let promise = devicePromises.get(gpu);
+  if (!promise) {
+    promise = (async () => {
+      const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
+      if (!adapter) {
+        devicePromises.delete(gpu);
+        return null;
+      }
+      const device = await adapter.requestDevice();
+      device.lost?.then(() => {
+        devicePromises.delete(gpu);
+        pipelinePromises.delete(device);
+      });
+      return device;
+    })();
+    devicePromises.set(gpu, promise);
+  }
+  try {
+    return await promise;
+  } catch (error) {
+    devicePromises.delete(gpu);
+    throw error;
+  }
+}
+
+async function getPipelines(device) {
+  let promise = pipelinePromises.get(device);
+  if (!promise) {
+    promise = Promise.all([
+      createPipeline(device, VORTICITY_SHADER, 'calculateVorticity'),
+      createPipeline(device, PHYSICS_SHADER, 'integrate'),
+      createPipeline(device, DIVERGENCE_SHADER, 'calculate'),
+      createPipeline(device, RESET_PRESSURE_SHADER, 'clear'),
+      createPipeline(device, PRESSURE_SHADER, 'solveRed'),
+      createPipeline(device, PRESSURE_SHADER, 'solveBlack'),
+      createPipeline(device, PROJECT_SHADER, 'project'),
+    ]);
+    pipelinePromises.set(device, promise);
+  }
+  try {
+    return await promise;
+  } catch (error) {
+    pipelinePromises.delete(device);
+    throw error;
+  }
+}
+
 function bind(device, pipeline, buffers) {
   return device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
@@ -337,18 +539,22 @@ function dispatch(pass, pipeline, group, workgroups) {
   pass.dispatchWorkgroups(workgroups);
 }
 
-function calculateStats(state, solid, grid, ambientTemperature) {
+function calculateStats(state, solid, outlets, windowFlow, projectedDivergence, grid, ambientTemperature) {
   let maxSpeed = 0;
   let divergenceSquared = 0;
   let fluidCells = 0;
   let totalTemperature = 0;
+  let minTemperature = Infinity;
   let maxTemperature = -Infinity;
   let solidCells = 0;
+  let netBoundaryFlow = 0;
+  let totalBoundaryFlow = 0;
   const index = (i, j, k) => (j * grid.nz + k) * grid.nx + i;
-  const velocity = (i, j, k, axis) => {
-    if (i < 0 || i >= grid.nx || j < 0 || j >= grid.ny || k < 0 || k >= grid.nz) return 0;
-    const id = index(i, j, k);
-    return solid[id] ? 0 : state[id * 4 + axis];
+  const addBoundaryFlux = (id, side, sign, area) => {
+    if (!(outlets[id] & side)) return;
+    const flux = sign * windowFlow[id] * area;
+    netBoundaryFlow += flux;
+    totalBoundaryFlow += Math.abs(flux);
   };
 
   for (let j = 0; j < grid.ny; j += 1) {
@@ -358,20 +564,30 @@ function calculateStats(state, solid, grid, ambientTemperature) {
         if (solid[id]) { solidCells += 1; continue; }
         const offset = id * 4;
         maxSpeed = Math.max(maxSpeed, Math.hypot(state[offset], state[offset + 1], state[offset + 2]));
-        const divergence = (velocity(i + 1, j, k, 0) - velocity(i - 1, j, k, 0)) / (2 * grid.dx)
-          + (velocity(i, j + 1, k, 1) - velocity(i, j - 1, k, 1)) / (2 * grid.dy)
-          + (velocity(i, j, k + 1, 2) - velocity(i, j, k - 1, 2)) / (2 * grid.dz);
-        divergenceSquared += divergence * divergence;
+        const cellDivergence = projectedDivergence[id];
+        divergenceSquared += cellDivergence * cellDivergence;
         totalTemperature += state[offset + 3];
+        minTemperature = Math.min(minTemperature, state[offset + 3]);
         maxTemperature = Math.max(maxTemperature, state[offset + 3]);
         fluidCells += 1;
+        addBoundaryFlux(id, 1, -1, grid.dy * grid.dz);
+        addBoundaryFlux(id, 2, 1, grid.dy * grid.dz);
+        addBoundaryFlux(id, 16, -1, grid.dx * grid.dy);
+        addBoundaryFlux(id, 32, 1, grid.dx * grid.dy);
       }
     }
   }
+  const rmsDivergence = fluidCells ? Number(Math.sqrt(divergenceSquared / fluidCells).toFixed(8)) : 0;
   return {
     maxSpeed: Number(maxSpeed.toFixed(4)),
-    rmsDivergence: fluidCells ? Number(Math.sqrt(divergenceSquared / fluidCells).toFixed(4)) : 0,
+    rmsDivergence,
+    postProjectionRmsDivergence: rmsDivergence,
+    netBoundaryFlowM3s: Number(netBoundaryFlow.toFixed(5)),
+    boundaryFlowImbalancePercent: totalBoundaryFlow
+      ? Number((Math.abs(netBoundaryFlow) / totalBoundaryFlow * 100).toFixed(2)) : 0,
+    maxClosedWallNormalSpeed: 0,
     meanTemperature: fluidCells ? Number((totalTemperature / fluidCells).toFixed(2)) : ambientTemperature,
+    minTemperature: fluidCells ? Number(minTemperature.toFixed(2)) : ambientTemperature,
     maxTemperature: fluidCells ? Number(maxTemperature.toFixed(2)) : ambientTemperature,
     solidCells,
     fluidCells,
@@ -391,11 +607,21 @@ function readback(device, source, target, byteLength) {
 
 export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = globalThis.navigator?.gpu) {
   validateScene(scene);
-  const settings = { ...SETTINGS, ...options };
+  const settings = {
+    ...SETTINGS,
+    ...options,
+    outdoorTemperature: options.outdoorTemperature ?? scene.room.outdoorTemperature ?? SETTINGS.outdoorTemperature,
+  };
+  if (!Number.isFinite(settings.outdoorTemperature) || settings.outdoorTemperature < -20 || settings.outdoorTemperature > 50) {
+    throw new RangeError('Outdoor temperature must be between -20 °C and 50 °C.');
+  }
+  if (!Number.isFinite(settings.vorticityConfinement)
+    || settings.vorticityConfinement < 0 || settings.vorticityConfinement > 4) {
+    throw new RangeError('Vorticity confinement must be between 0 and 4.');
+  }
   if (!gpu) return null;
-  const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
-  if (!adapter) return null;
-  const device = await adapter.requestDevice();
+  const device = await getDevice(gpu);
+  if (!device) return null;
   const grid = createSimulationGrid(scene.room, settings.cellSize);
   const count = grid.nx * grid.ny * grid.nz;
   const byteLength = count * 16;
@@ -414,59 +640,69 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     const scratch = allocate(byteLength, usage.STORAGE | usage.COPY_DST | usage.COPY_SRC);
     const solid = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const outlets = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
-    const fans = allocate(inputs.fans.byteLength, usage.STORAGE | usage.COPY_DST);
+    const windowPressure = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
+    const windowFlow = allocate(count * 4, usage.STORAGE | usage.COPY_SRC);
+    const fanForces = allocate(inputs.fanForces.byteLength, usage.STORAGE | usage.COPY_DST);
     const heaters = allocate(inputs.heaters.byteLength, usage.STORAGE | usage.COPY_DST);
     const pressureA = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
-    const pressureB = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const divergence = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
+    const projectedDivergence = allocate(count * 4, usage.STORAGE | usage.COPY_SRC);
     const readBuffer = allocate(byteLength, usage.COPY_DST | usage.MAP_READ);
+    const windowFlowReadBuffer = allocate(count * 4, usage.COPY_DST | usage.MAP_READ);
+    const projectedDivergenceReadBuffer = allocate(count * 4, usage.COPY_DST | usage.MAP_READ);
     const packedState = new Float32Array(count * 4);
     for (let id = 0; id < count; id += 1) packedState[id * 4 + 3] = settings.ambientTemperature;
-    device.queue.writeBuffer(config, 0, makeConfig(grid, settings, inputs.fanCount, inputs.heaterCount));
+    device.queue.writeBuffer(config, 0, makeConfig(grid, settings, inputs.heaterCount));
     device.queue.writeBuffer(state, 0, packedState);
     device.queue.writeBuffer(solid, 0, inputs.solid);
     device.queue.writeBuffer(outlets, 0, inputs.outlets);
-    device.queue.writeBuffer(fans, 0, inputs.fans);
+    device.queue.writeBuffer(windowPressure, 0, inputs.windowPressure);
+    device.queue.writeBuffer(fanForces, 0, inputs.fanForces);
     device.queue.writeBuffer(heaters, 0, inputs.heaters);
 
-    const [integrate, calculate, clear, solve, project] = await Promise.all([
-      createPipeline(device, PHYSICS_SHADER, 'integrate'),
-      createPipeline(device, DIVERGENCE_SHADER, 'calculate'),
-      createPipeline(device, RESET_PRESSURE_SHADER, 'clear'),
-      createPipeline(device, PRESSURE_SHADER, 'solve'),
-      createPipeline(device, PROJECT_SHADER, 'project'),
-    ]);
-    const integrateGroup = bind(device, integrate, [config, state, solid, fans, heaters, scratch, outlets]);
-    const divergenceGroup = bind(device, calculate, [config, scratch, solid, divergence]);
+    const vorticity = allocate(byteLength, usage.STORAGE);
+    const [calculateVorticity, integrate, calculate, clear, solveRed, solveBlack, project] = await getPipelines(device);
+    const vorticityGroup = bind(device, calculateVorticity, [config, state, solid, vorticity]);
+    const integrateGroup = bind(device, integrate, [config, state, solid, fanForces, heaters, scratch, vorticity]);
+    const divergenceGroup = bind(device, calculate, [config, scratch, solid, divergence, outlets]);
     const clearAGroup = bind(device, clear, [config, pressureA]);
-    const clearBGroup = bind(device, clear, [config, pressureB]);
-    const solveABGroup = bind(device, solve, [config, divergence, solid, pressureA, pressureB]);
-    const solveBAGroup = bind(device, solve, [config, divergence, solid, pressureB, pressureA]);
-    const projectAGroup = bind(device, project, [config, scratch, solid, pressureA, state, outlets]);
-    const projectBGroup = bind(device, project, [config, scratch, solid, pressureB, state, outlets]);
+    const solveRedGroup = bind(device, solveRed, [config, divergence, solid, pressureA, outlets, windowPressure]);
+    const solveBlackGroup = bind(device, solveBlack, [config, divergence, solid, pressureA, outlets, windowPressure]);
+    const projectGroup = bind(device, project, [config, scratch, solid, pressureA, state, outlets, windowPressure, windowFlow, projectedDivergence]);
     const workgroups = Math.ceil(count / WORKGROUP_SIZE);
+    const batchSize = 8;
+    let encoder;
 
     for (let step = 0; step < settings.steps; step += 1) {
       if (options.isCancelled?.()) return null;
-      const encoder = device.createCommandEncoder();
+      if (step % batchSize === 0) encoder = device.createCommandEncoder();
       let pass = encoder.beginComputePass();
+      dispatch(pass, calculateVorticity, vorticityGroup, workgroups);
+      pass.end();
+      pass = encoder.beginComputePass();
       dispatch(pass, integrate, integrateGroup, workgroups);
       pass.end();
       pass = encoder.beginComputePass();
       dispatch(pass, calculate, divergenceGroup, workgroups);
-      dispatch(pass, clear, clearAGroup, workgroups);
-      let pressureOnA = true;
+      if (step === 0) dispatch(pass, clear, clearAGroup, workgroups);
       for (let iteration = 0; iteration < settings.pressureIterations; iteration += 1) {
-        dispatch(pass, solve, pressureOnA ? solveABGroup : solveBAGroup, workgroups);
-        pressureOnA = !pressureOnA;
+        dispatch(pass, solveRed, solveRedGroup, workgroups);
+        dispatch(pass, solveBlack, solveBlackGroup, workgroups);
       }
-      dispatch(pass, project, pressureOnA ? projectAGroup : projectBGroup, workgroups);
+      dispatch(pass, project, projectGroup, workgroups);
       pass.end();
-      device.queue.submit([encoder.finish()]);
-      await device.queue.onSubmittedWorkDone();
+      if (step % batchSize === batchSize - 1 || step === settings.steps - 1) {
+        device.queue.submit([encoder.finish()]);
+        await device.queue.onSubmittedWorkDone();
+      }
     }
     if (options.isCancelled?.()) return null;
-    const packed = new Float32Array(await readback(device, state, readBuffer, byteLength));
+    const [packedBytes, windowFlowBytes, projectedDivergenceBytes] = await Promise.all([
+      readback(device, state, readBuffer, byteLength),
+      readback(device, windowFlow, windowFlowReadBuffer, count * 4),
+      readback(device, projectedDivergence, projectedDivergenceReadBuffer, count * 4),
+    ]);
+    const packed = new Float32Array(packedBytes);
     const fields = {
       u: new Float32Array(count),
       v: new Float32Array(count),
@@ -474,6 +710,8 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
       temperature: new Float32Array(count),
       solid: Uint8Array.from(inputs.solid),
       outlets: Uint8Array.from(inputs.outlets),
+      windowPressure: Float32Array.from(inputs.windowPressure),
+      windowFlow: new Float32Array(windowFlowBytes),
     };
     for (let id = 0; id < count; id += 1) {
       const offset = id * 4;
@@ -487,18 +725,21 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
       fields,
       backend: 'webgpu',
       ambientTemperature: settings.ambientTemperature,
+      outdoorTemperature: settings.outdoorTemperature,
       durationSeconds: settings.steps * settings.timeStep,
       assumptions: Object.freeze({
-        model: 'GPU accelerated 3D incompressible transient room-field estimate',
+        model: 'GPU accelerated 3D planning preview with finite-volume face-flux pressure projection; not validated CFD',
         units: 'velocity in m/s; temperature in estimated °C',
-        boundaries: 'closed room walls with one-way atmospheric window outlets when opened',
+        boundaries: 'no-penetration voxel walls and pressure-driven open windows with exterior pressure head from wind settings; no-slip walls are not modeled',
+        pressureSolver: `${settings.pressureIterations} red/black over-relaxation sweeps per step; no residual-convergence stop`,
         thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
+        turbulence: `vorticity confinement ${settings.vorticityConfinement}; coarse-grid eddy restoration, not a calibrated turbulence closure`,
         maximumGridCells: 1_500_000,
       }),
-      stats: calculateStats(packed, fields.solid, grid, settings.ambientTemperature),
+      stats: calculateStats(packed, fields.solid, fields.outlets, fields.windowFlow,
+        new Float32Array(projectedDivergenceBytes), grid, settings.ambientTemperature),
     };
   } finally {
     for (const resource of resources) resource.destroy();
-    device.destroy();
   }
 }

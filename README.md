@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open <http://127.0.0.1:4173>.
+Open the local URL printed by Vite (normally <http://127.0.0.1:4173>).
 
 ```sh
 npm test
@@ -30,7 +30,7 @@ They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a brow
 - Edit room width, depth, and height in meters.
 - Add generic boxes, then change their name and visual/semantic model (fan, sofa, bed, desk, table, lamp, heater) independently; choosing a model does not change its box dimensions or name.
 - Hover near an object to highlight it; click the object or its list item to select it. Drag the gizmo or edit position, size, and X/Y/Z rotation in the inspector.
-- Add windows on room walls and toggle them open to exhaust air and heat. Drag the canvas to orbit in **3D**; **Top** locks the camera vertically; **Ortho** switches the 3D view to orthographic projection.
+- Add a window, then drag it toward a wall; it snaps to the nearest wall. Open windows can exchange air, act as an inlet, or act as an outlet. Fan, heater, lamp, and window flow strengths are adjustable; fans can be switched off in the inspector. Drag the canvas to orbit in **3D**; **Top** locks the camera vertically; **Ortho** switches the 3D view to orthographic projection.
 - Undo with **⌘Z / Ctrl+Z**; redo with **⌘⇧Z / Ctrl+Y**. Use the **i** button in the viewport toolbar for the full shortcut list. A gizmo drag is one undo step.
 - **Air** and **Heat** update continuously in the background while selected. Geometry or model edits trigger a fresh estimate; **Light** switches immediately to a real-time shadow preview.
 
@@ -47,13 +47,13 @@ This is still a **visual preview, not lux-calibrated photometry**. The solar pos
 
 ## Simulation scope and limits
 
-RoomShift includes bounded **3D estimates** to visualize airflow and temperature plus a grayscale lighting preview. It is **not validated CFD**, an engineering-grade thermal model, calibrated photometry, or a safety tool. A Web Worker uses WebGPU compute for airflow and heat; Three.js renders volumetric fields and provides point-light shadow maps for the lighting preview.
+The editor uses Three.js for the room and visualizations, a Web Worker for field solves, WebGPU when available, and a bounded CPU fallback. These are **planning estimates**, not validated computational fluid dynamics (CFD), an engineering-grade thermal model, calibrated photometry, or a safety tool.
 
-- Airflow and heat use a default 0.05 m volume grid, automatically coarsened only as needed to fit 1.5 million cells and WebGPU dimension limits. GPU airflow/heat use 240 steps at 0.01 s with twenty pressure iterations. The solver includes advection, diffusion, pressure projection, a simplified temperature-driven buoyancy term, and box obstacles.
-- When WebGPU is unavailable, airflow and heat use a clearly labelled CPU preview at 0.15 m resolution, capped at 38,400 cells. Fields render as 3D volumes; airflow adds streamlines and tracers that fade before they respawn.
-- Heat uses advection, effective diffusion, relaxation toward a 20 °C ambient default, and a simple heater source. Source strength is an estimated °C/s term, **not watts**; displayed temperatures are estimates, not measured room temperatures.
-- **Light** is a real-time monochrome material render with point lights at lamp bulbs and cast shadows. It is a visual preview, not lux-calibrated photometry; it does not model indirect light bounce, glass transmission, or measured lamp output.
-- Closed room walls block flow. An open window creates a simplified one-way exhaust boundary with a small imposed outward velocity and ambient-temperature exchange. It illustrates heat and air leaving, but is not a calibrated opening-flow model. The estimates omit validated turbulence, wall/material heat capacity, radiation, HVAC, and measured calibration. Do not use them to claim real-world comfort, temperature, ventilation, lighting, or safety performance.
+- WebGPU uses a 0.05 m grid by default and coarsens only as needed to fit 1.5 million cells and device limits. It advances twelve simulated seconds with twenty pressure iterations. The CPU fallback uses a 0.15 m grid, is capped at 38,400 cells, and also advances twelve simulated seconds.
+- Air's **Gas** view renders a continuously advected 3D passive-tracer volume over the final solved velocity field. The dye moves, but airflow velocity is not currently advanced during playback; it can settle into a stable plume. **Speed volume** and **Slice** show the solved speed field directly.
+- Heat advects and diffuses air temperature, relaxes it toward a 20 °C ambient default, applies heater sources, and couples temperature to buoyancy. Outdoor temperature enters only through open-window inflow. The infrared view maps nearby air temperature onto room and object surfaces; it does not calculate material-surface temperature. Heater intensity is an estimated temperature source, **not watts**.
+- **Light** is a real-time monochrome render with point lights at lamp bulbs and cast shadows. It is not lux-calibrated and does not model indirect light bounce, glass transmission, or measured lamp output.
+- An open window can bias flow toward intake or exhaust, or permit vertically balanced exchange. Fan speeds, thermal sources, and opening flow rates are adjustable estimates rather than calibrated device or opening models. The solver omits a calibrated turbulence closure, no-slip wall treatment, wall/material heat capacity, radiation, HVAC, and reference-case calibration. Do not use its output to claim real-world comfort, temperature, ventilation, lighting, or safety performance.
 
 The scene model is solver-independent (`src/model/room-scene.js`); rendering and field solving consume the same scene without mixing simulation state into object geometry. Scene persistence and schema migration are not implemented.
 
@@ -68,7 +68,7 @@ The scene model is solver-independent (`src/model/room-scene.js`); rendering and
 - `src/simulation/daylight.js` — maps a clock time and the scene to sun, sky, lamp, exposure and sun-patch state. Pure, with no three.js.
 - `src/simulation/room-light.js` — retained scalar light estimator; the editor's Light mode uses rendered shadows instead.
 - `src/simulation/room-field-worker.js` and `src/simulation/room-field-controller.js` — background solving and coalesced live updates.
-- `src/scene/room-field-layer-3d.js` and `src/scene/room-field-renderer.js` — volumetric field rendering, animated airflow streamlines, and tracers.
+- `src/scene/room-field-layer-3d.js` and `src/scene/room-field-renderer.js` — 3D tracer advection, infrared surface mapping, and volumetric field rendering.
 - `src/scene/room-viewport.js` — Three.js room, model meshes, camera, selection, and transform controls.
 - `src/app.js` — editor and simulation controls.
 - `tests/` — headless-safe model, solver, and scene-graph tests, run by `npm test`.

@@ -5,7 +5,7 @@ import { addObject, createRoomScene, moveObject, removeObject, renameObject, res
 test('a new scene starts with real room dimensions in meters', () => {
   const scene = createRoomScene();
 
-  assert.deepEqual(scene.room, { width: 5.2, depth: 4, height: 2.7 });
+  assert.deepEqual(scene.room, { width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
   assert.ok(Array.isArray(scene.objects));
   assert.ok(scene.objects.every((object) => object.primitive === 'box'));
   assert.deepEqual(scene.objects.map((object) => object.model), ['fan', 'sofa', 'desk', 'table', 'lamp', 'heater']);
@@ -24,7 +24,7 @@ test('adding an object creates a named box primitive with a unique stable id', (
   assert.equal(box.name, 'Box 5');
   assert.deepEqual(box.dimensions, { width: 1, height: 1, depth: 1 });
   assert.notEqual(box.id, second.object.id);
-  assert.deepEqual(first.scene.room, { width: 5.2, depth: 4, height: 2.7 });
+  assert.deepEqual(first.scene.room, { width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
 });
 
 test('changing the model preset does not change the editable box geometry', () => {
@@ -65,9 +65,9 @@ test('moving an object constrains its full geometry to room bounds', () => {
 
 test('resizing a room preserves every object inside its new dimensions', () => {
   const original = createRoomScene();
-  const resized = resizeRoom(original, { width: 3.2, depth: 2.4, height: 2.2 });
+  const resized = resizeRoom(original, { width: 4.8, depth: 3.8, height: 2.2 });
 
-  assert.deepEqual(resized.room, { width: 3.2, depth: 2.4, height: 2.2 });
+  assert.deepEqual(resized.room, { width: 4.8, depth: 3.8, height: 2.2, outdoorTemperature: 10 });
   for (const object of resized.objects) {
     assert.ok(object.position.x - object.dimensions.width / 2 >= 0);
     assert.ok(object.position.x + object.dimensions.width / 2 <= resized.room.width);
@@ -75,7 +75,7 @@ test('resizing a room preserves every object inside its new dimensions', () => {
     assert.ok(object.position.z + object.dimensions.depth / 2 <= resized.room.depth);
     assert.ok(object.position.y + object.dimensions.height <= resized.room.height);
   }
-  assert.deepEqual(original.room, { width: 5.2, depth: 4, height: 2.7 });
+  assert.deepEqual(original.room, { width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
 });
 
 test('resizing an object updates its dimensions and keeps it in the room', () => {
@@ -110,7 +110,9 @@ test('rotation can be edited independently around every object axis', () => {
 });
 
 test('rotating an object constrains its rotated footprint to the room', () => {
-  const scene = moveObject(createRoomScene(), 'sofa-2', { x: 0.775, z: 0.42 });
+  const original = createRoomScene();
+  const onlySofa = { ...original, objects: [original.objects.find((object) => object.id === 'sofa-2')] };
+  const scene = moveObject(onlySofa, 'sofa-2', { x: 0.775, z: 0.42 });
   const rotated = rotateObject(scene.scene, 'sofa-2', { x: 0, y: 90, z: 0 });
 
   assert.equal(rotated.object.position.x, 0.78);
