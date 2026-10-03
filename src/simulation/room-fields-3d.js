@@ -22,17 +22,18 @@ const LIMITS = Object.freeze({
 export const FIELD_PHYSICS_DEFAULTS = Object.freeze({
   ambientTemperature: 20,
   outdoorTemperature: 10,
-  kinematicViscosity: 0.018,
+  kinematicViscosity: 0.001,
   effectiveThermalDiffusivity: 0.018,
   coolingRate: 0.02,
   fanOutletSpeed: 1.2,
+  vorticityConfinement: 2,
   heaterRate: 0.8,
   heaterRadius: 0.45,
 });
 const DEFAULTS = Object.freeze({
   ...FIELD_PHYSICS_DEFAULTS,
   cellSize: 0.15,
-  steps: 120,
+  steps: 240,
   timeStep: 0.05,
   pressureIterations: 20,
 });
@@ -46,7 +47,8 @@ export const FIELD_ASSUMPTIONS = Object.freeze({
   maximumGridCells: LIMITS.maxGridX * LIMITS.maxGridY * LIMITS.maxGridZ,
   maximumSteps: LIMITS.maxSteps,
   maximumPressureIterations: LIMITS.maxPressureIterations,
-  pressureSolver: 'fixed-count red/black successive over-relaxation; no residual-convergence stop',
+  pressureSolver: 'warm-started fixed-count red/black successive over-relaxation; no residual-convergence stop',
+  turbulence: 'coarse-grid vorticity confinement to restore resolved fan and obstacle eddies; not a calibrated turbulence closure',
   maximumSpeedMetersPerSecond: LIMITS.maxSpeed,
   thermalSourceUnits: 'estimated degrees Celsius per second',
   thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
@@ -140,6 +142,7 @@ function validateOptions(options, room) {
     ['effectiveThermalDiffusivity', 0, 0.05],
     ['coolingRate', 0, 1],
     ['fanOutletSpeed', 0, 3],
+    ['vorticityConfinement', 0, 4],
     ['heaterRate', 0, 10],
     ['heaterRadius', 0.05, roomReach],
   ];
@@ -551,7 +554,11 @@ export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULT
   for (const fan of fans) {
     const matrix = rotationMatrixXYZ(fan.rotation);
     const direction = [matrix[0][2], matrix[1][2], matrix[2][2]];
-    const localSource = { x: 0, y: fan.dimensions.height * 0.24, z: fan.dimensions.depth * 0.1 };
+    const localSource = {
+      x: 0,
+      y: fan.dimensions.height * 0.24,
+      z: fan.dimensions.depth / 2 + Math.min(grid.dx, grid.dy, grid.dz) * 0.5,
+    };
     const source = {
       x: fan.position.x + matrix[0][0] * localSource.x + matrix[0][1] * localSource.y + matrix[0][2] * localSource.z,
       y: fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * localSource.x + matrix[1][1] * localSource.y + matrix[1][2] * localSource.z,
@@ -612,12 +619,84 @@ function applyBuoyancy(v, temperature, solid, timeStep, ambientTemperature) {
   }
 }
 
+function calculateVorticity(u, v, w, grid, solid, workspace) {
+  const { x, y, z, magnitude } = workspace;
+  for (let j = 0; j < grid.ny; j += 1) {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        const index = indexOf(i, j, k, grid);
+        if (solid[index]) {
+          x[index] = 0;
+          y[index] = 0;
+          z[index] = 0;
+          magnitude[index] = 0;
+          continue;
+        }
+        const duDy = (neighborValue(u, i, j, k, 0, 1, 0, u[index], grid, solid)
+          - neighborValue(u, i, j, k, 0, -1, 0, u[index], grid, solid)) / (2 * grid.dy);
+        const duDz = (neighborValue(u, i, j, k, 0, 0, 1, u[index], grid, solid)
+          - neighborValue(u, i, j, k, 0, 0, -1, u[index], grid, solid)) / (2 * grid.dz);
+        const dvDx = (neighborValue(v, i, j, k, 1, 0, 0, v[index], grid, solid)
+          - neighborValue(v, i, j, k, -1, 0, 0, v[index], grid, solid)) / (2 * grid.dx);
+        const dvDz = (neighborValue(v, i, j, k, 0, 0, 1, v[index], grid, solid)
+          - neighborValue(v, i, j, k, 0, 0, -1, v[index], grid, solid)) / (2 * grid.dz);
+        const dwDx = (neighborValue(w, i, j, k, 1, 0, 0, w[index], grid, solid)
+          - neighborValue(w, i, j, k, -1, 0, 0, w[index], grid, solid)) / (2 * grid.dx);
+        const dwDy = (neighborValue(w, i, j, k, 0, 1, 0, w[index], grid, solid)
+          - neighborValue(w, i, j, k, 0, -1, 0, w[index], grid, solid)) / (2 * grid.dy);
+        x[index] = dwDy - dvDz;
+        y[index] = duDz - dwDx;
+        z[index] = dvDx - duDy;
+        magnitude[index] = Math.hypot(x[index], y[index], z[index]);
+      }
+    }
+  }
+}
+
+function applyVorticityConfinement(u, v, w, grid, solid, workspace, timeStep, strength) {
+  if (strength === 0) return;
+  const { x: curlX, y: curlY, z: curlZ, magnitude } = workspace;
+  const confinementScale = strength * Math.min(grid.dx, grid.dy, grid.dz);
+  for (let j = 0; j < grid.ny; j += 1) {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        const index = indexOf(i, j, k, grid);
+        if (solid[index]) continue;
+        const centerMagnitude = magnitude[index];
+        const gradientX = (neighborValue(magnitude, i, j, k, 1, 0, 0, centerMagnitude, grid, solid)
+          - neighborValue(magnitude, i, j, k, -1, 0, 0, centerMagnitude, grid, solid)) / (2 * grid.dx);
+        const gradientY = (neighborValue(magnitude, i, j, k, 0, 1, 0, centerMagnitude, grid, solid)
+          - neighborValue(magnitude, i, j, k, 0, -1, 0, centerMagnitude, grid, solid)) / (2 * grid.dy);
+        const gradientZ = (neighborValue(magnitude, i, j, k, 0, 0, 1, centerMagnitude, grid, solid)
+          - neighborValue(magnitude, i, j, k, 0, 0, -1, centerMagnitude, grid, solid)) / (2 * grid.dz);
+        const gradientLength = Math.hypot(gradientX, gradientY, gradientZ);
+        if (gradientLength < 1e-8) continue;
+        const normalX = gradientX / gradientLength;
+        const normalY = gradientY / gradientLength;
+        const normalZ = gradientZ / gradientLength;
+        const scale = confinementScale * timeStep;
+        u[index] += (normalY * curlZ[index] - normalZ * curlY[index]) * scale;
+        v[index] += (normalZ * curlX[index] - normalX * curlZ[index]) * scale;
+        w[index] += (normalX * curlY[index] - normalY * curlX[index]) * scale;
+      }
+    }
+  }
+}
+
+function buildVorticityWorkspace(count) {
+  return {
+    x: new Float32Array(count),
+    y: new Float32Array(count),
+    z: new Float32Array(count),
+    magnitude: new Float32Array(count),
+  };
+}
+
 function projectVelocity(u, v, w, grid, solid, outlets, windowPressure, windowFlow, pressureStencil, workspace, timeStep, iterations) {
   const { pressure } = workspace;
   const { divergence } = workspace;
   const { neighbors, diagonal, weights, boundarySource } = pressureStencil;
   const faces = buildFaceVelocities(u, v, w, grid, solid, outlets, windowFlow, workspace.faces, false);
-  pressure.fill(0);
 
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
@@ -748,15 +827,17 @@ function addHeatSources(temperature, heaters, grid, solid, settings, timeStep) {
   }
 }
 
-function calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid, ambientTemperature, projectedDivergence) {
+function calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid, ambientTemperature, projectedDivergence, faces) {
   let maxSpeed = 0;
   let divergenceSquared = 0;
   let fluidCells = 0;
   let totalTemperature = 0;
+  let minTemperature = Infinity;
   let maxTemperature = -Infinity;
   let solidCells = 0;
   let netBoundaryFlow = 0;
   let totalBoundaryFlow = 0;
+  let maxClosedWallNormalSpeed = 0;
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
       for (let i = 0; i < grid.nx; i += 1) {
@@ -770,6 +851,7 @@ function calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid, 
         const divergence = projectedDivergence?.[index] ?? 0;
         divergenceSquared += divergence ** 2;
         totalTemperature += temperature[index];
+        minTemperature = Math.min(minTemperature, temperature[index]);
         maxTemperature = Math.max(maxTemperature, temperature[index]);
         fluidCells += 1;
         if (outlets[index] & 1) {
@@ -792,10 +874,15 @@ function calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid, 
           netBoundaryFlow += flux;
           totalBoundaryFlow += Math.abs(flux);
         }
+        if (i === 0 && !(outlets[index] & 1)) maxClosedWallNormalSpeed = Math.max(maxClosedWallNormalSpeed, Math.abs(faces.xLow[index]));
+        if (i + 1 === grid.nx && !(outlets[index] & 2)) maxClosedWallNormalSpeed = Math.max(maxClosedWallNormalSpeed, Math.abs(faces.x[index]));
+        if (j + 1 === grid.ny) maxClosedWallNormalSpeed = Math.max(maxClosedWallNormalSpeed, Math.abs(faces.y[index]));
+        if (k === 0 && !(outlets[index] & 16)) maxClosedWallNormalSpeed = Math.max(maxClosedWallNormalSpeed, Math.abs(faces.zLow[index]));
+        if (k + 1 === grid.nz && !(outlets[index] & 32)) maxClosedWallNormalSpeed = Math.max(maxClosedWallNormalSpeed, Math.abs(faces.z[index]));
       }
     }
   }
-  const rmsDivergence = fluidCells ? Number(Math.sqrt(divergenceSquared / fluidCells).toFixed(4)) : 0;
+  const rmsDivergence = fluidCells ? Number(Math.sqrt(divergenceSquared / fluidCells).toFixed(8)) : 0;
   return {
     maxSpeed: Number(maxSpeed.toFixed(4)),
     rmsDivergence,
@@ -803,7 +890,9 @@ function calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid, 
     netBoundaryFlowM3s: Number(netBoundaryFlow.toFixed(5)),
     boundaryFlowImbalancePercent: totalBoundaryFlow
       ? Number((Math.abs(netBoundaryFlow) / totalBoundaryFlow * 100).toFixed(2)) : 0,
+    maxClosedWallNormalSpeed: Number(maxClosedWallNormalSpeed.toFixed(8)),
     meanTemperature: fluidCells ? Number((totalTemperature / fluidCells).toFixed(2)) : ambientTemperature,
+    minTemperature: fluidCells ? Number(minTemperature.toFixed(2)) : ambientTemperature,
     maxTemperature: fluidCells ? Number(maxTemperature.toFixed(2)) : ambientTemperature,
     solidCells,
     fluidCells,
@@ -829,6 +918,7 @@ function createSimulationState(scene, options) {
     windowFlow,
     pressureStencil,
     pressureWorkspace: buildPressureWorkspace(count),
+    vorticityWorkspace: buildVorticityWorkspace(count),
     fanAcceleration: buildFanAccelerationField(scene, grid, solid, settings),
     heaters: scene.objects.filter((object) => object.model === 'heater'),
     u: new Float32Array(count),
@@ -839,15 +929,19 @@ function createSimulationState(scene, options) {
 }
 
 function advanceSimulation(state) {
-  const { settings, grid, solid, outlets, windowPressure, windowFlow, pressureStencil, pressureWorkspace, fanAcceleration, heaters } = state;
+  const { settings, grid, solid, outlets, windowPressure, windowFlow, pressureStencil, pressureWorkspace, vorticityWorkspace, fanAcceleration, heaters } = state;
   let { u, v, w, temperature } = state;
   const previousU = u;
   const previousV = v;
   const previousW = w;
-  u = advect(previousU, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
-  v = advect(previousV, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
-  w = advect(previousW, previousU, previousV, previousW, grid, solid, settings.timeStep, 0);
+  if (settings.vorticityConfinement > 0) {
+    calculateVorticity(previousU, previousV, previousW, grid, solid, vorticityWorkspace);
+  }
+  u = advect(previousU, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true);
+  v = advect(previousV, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true);
+  w = advect(previousW, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true);
   applyFanForces(u, v, w, fanAcceleration, settings.timeStep);
+  applyVorticityConfinement(u, v, w, grid, solid, vorticityWorkspace, settings.timeStep, settings.vorticityConfinement);
   applyBuoyancy(v, temperature, solid, settings.timeStep, settings.ambientTemperature);
 
   const damp = Math.exp(-0.08 * settings.timeStep);
@@ -870,7 +964,7 @@ function advanceSimulation(state) {
   projectVelocity(u, v, w, grid, solid, outlets, windowPressure, windowFlow,
     pressureStencil, pressureWorkspace, settings.timeStep, settings.pressureIterations);
 
-  temperature = advect(temperature, previousU, previousV, previousW, grid, solid, settings.timeStep, settings.outdoorTemperature, true);
+  temperature = advect(temperature, previousU, previousV, previousW, grid, solid, settings.timeStep, settings.ambientTemperature, true);
   temperature = diffuse(temperature, settings.effectiveThermalDiffusivity, settings.timeStep, grid, solid, 0, LIMITS.maxTemperature);
   for (let index = 0; index < temperature.length; index += 1) {
     if (solid[index]) {
@@ -899,7 +993,7 @@ function advanceSimulation(state) {
 function finishSimulation(state) {
   const { settings, grid, solid, outlets, windowPressure, windowFlow, u, v, w, temperature } = state;
   const stats = calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid,
-    settings.ambientTemperature, state.pressureWorkspace.projectedDivergence);
+    settings.ambientTemperature, state.pressureWorkspace.projectedDivergence, state.pressureWorkspace.faces);
   return {
     grid: { ...grid, cellSize: settings.cellSize },
     fields: { u, v, w, temperature, solid, outlets, windowPressure, windowFlow },
@@ -909,7 +1003,7 @@ function finishSimulation(state) {
     durationSeconds: settings.steps * settings.timeStep,
     assumptions: Object.freeze({
       ...FIELD_ASSUMPTIONS,
-      pressureSolver: `${settings.pressureIterations} red/black over-relaxation sweeps per step; no residual-convergence stop`,
+      pressureSolver: `warm-started ${settings.pressureIterations} red/black over-relaxation sweeps per step; no residual-convergence stop`,
     }),
     stats,
   };

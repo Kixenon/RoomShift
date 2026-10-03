@@ -64,12 +64,22 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
       return layer;
     }
     const airflow = createAirflowLayers(result, roomScene);
-    if (airflow.streamlines) layer.add(airflow.streamlines);
-    if (airflow.tracers) layer.add(airflow.tracers);
-    layer.userData.streamlineVertexCount = airflow.streamlines?.geometry.getAttribute('position').count ?? 0;
-    layer.userData.gasParticleCount = airflow.particleCount;
-    layer.userData.airflowVisualization = 'gas';
-    layer.userData.animate = airflow.update;
+    layer.add(airflow.volume);
+    layer.userData.volumeVoxelCount = airflow.gasVoxelCount;
+    layer.userData.gasVoxelCount = airflow.gasVoxelCount;
+    layer.userData.gasSourceCounts = airflow.sourceCounts;
+    layer.userData.airflowVisualization = 'advected-density';
+    layer.userData.maxDensity = airflow.volume.userData.maxDensity ?? 0;
+    layer.userData.occupiedVoxels = airflow.volume.userData.occupiedVoxels ?? 0;
+    layer.userData.tracerVolumeM3 = airflow.volume.userData.tracerVolumeM3 ?? 0;
+    layer.userData.exteriorTracerVolumeM3 = airflow.volume.userData.exteriorTracerVolumeM3 ?? 0;
+    layer.userData.animate = (time) => {
+      airflow.update(time);
+      layer.userData.maxDensity = airflow.volume.userData.maxDensity ?? 0;
+      layer.userData.occupiedVoxels = airflow.volume.userData.occupiedVoxels ?? 0;
+      layer.userData.tracerVolumeM3 = airflow.volume.userData.tracerVolumeM3 ?? 0;
+      layer.userData.exteriorTracerVolumeM3 = airflow.volume.userData.exteriorTracerVolumeM3 ?? 0;
+    };
   } else if (displayStyle === 'map') {
     const volume = createFieldVolume(result, mode);
     layer.add(volume);

@@ -16,6 +16,7 @@ import {
 } from './model/room-scene.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
+import { temperatureDisplayRange } from './simulation/room-field-display.js';
 import {
   createEditorState,
   resetEditorState,
@@ -57,7 +58,6 @@ const fieldControls = {
   gradient: $('#field-gradient'),
   legendMin: $('#field-legend-min'),
   legendMax: $('#field-legend-max'),
-  accuracy: $('#field-accuracy'),
 };
 
 let editorState = createEditorState();
@@ -127,16 +127,7 @@ function renderFieldState({ mode, loading, result, error, stale }) {
   viewportElement.setAttribute('aria-busy', String(loading));
   fieldControls.legend.hidden = !mode || (!result && !(mode === 'light' && displayStyle === 'preview'));
   fieldControls.status.textContent = loading ? (mode === 'light' ? 'Estimating…' : 'Solving…') : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
-  const solveDiagnostics = result?.stats && (mode === 'airflow' || mode === 'temperature') ? [
-    `Post-projection face-flux divergence (RMS): ${result.stats.rmsDivergence} s⁻¹`,
-    `Net window flow: ${result.stats.netBoundaryFlowM3s} m³/s (${result.stats.boundaryFlowImbalancePercent}% imbalance)`,
-  ] : [];
-  fieldControls.status.title = error?.message ?? [
-    result?.gpuFallbackReason,
-    result?.assumptions?.model,
-    result?.assumptions?.pressureSolver,
-    ...solveDiagnostics,
-  ].filter(Boolean).join('\n');
+  fieldControls.status.title = error?.message ?? '';
   if (mode === 'light' && displayStyle === 'preview') {
     if (!loading && !error) fieldControls.status.textContent = 'Realtime shadows';
     fieldControls.status.title = error?.message ?? 'Monochrome room render with lamp point lights and cast shadows.';
@@ -144,7 +135,6 @@ function renderFieldState({ mode, loading, result, error, stale }) {
     fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
     fieldControls.legendMin.textContent = 'shadow';
     fieldControls.legendMax.textContent = 'lit';
-    fieldControls.accuracy.textContent = 'Direct lighting and shadows · no light-bounce solve';
     return;
   }
   if (!result) return;
@@ -153,17 +143,16 @@ function renderFieldState({ mode, loading, result, error, stale }) {
   let legend;
   if (mode === 'airflow') {
     legend = {
-      title: displayStyle === 'volume' ? 'Air speed · 3D volume' : displayStyle === 'slice' ? 'Air speed · horizontal slice' : 'Airflow · advected tracer',
+      title: displayStyle === 'volume' ? 'Air speed · 3D volume' : displayStyle === 'slice' ? 'Air speed · horizontal slice' : 'Airflow · moving gas',
       minimum: '0 m/s',
-      maximum: '1.2+ m/s',
+      maximum: `${(result.stats.maxSpeed ?? 1.2).toFixed(2)} m/s`,
     };
   } else if (mode === 'temperature') {
-    const minimum = Math.min(result.ambientTemperature - 4, result.outdoorTemperature ?? result.ambientTemperature);
-    const maximum = Math.max(result.ambientTemperature + 8, result.outdoorTemperature ?? result.ambientTemperature);
+    const { minimum, maximum } = temperatureDisplayRange(result);
     legend = {
       title: displayStyle === 'volume' ? 'Air temperature · 3D volume' : displayStyle === 'slice' ? `Air temperature · ${fieldController.sliceHeight.toFixed(2)} m slice` : 'Air temperature · surfaces and objects',
       minimum: `${minimum.toFixed(1)} °C`,
-      maximum: `${maximum.toFixed(1)}+ °C`,
+      maximum: `${maximum.toFixed(1)} °C`,
     };
   } else if (displayStyle === 'map') {
     legend = {
@@ -181,11 +170,6 @@ function renderFieldState({ mode, loading, result, error, stale }) {
   fieldControls.legendTitle.textContent = legend.title;
   fieldControls.legendMin.textContent = legend.minimum;
   fieldControls.legendMax.textContent = legend.maximum;
-  fieldControls.accuracy.textContent = mode === 'light'
-    ? 'Relative estimate · not calibrated in lux'
-    : result.backend === 'webgpu'
-      ? 'WebGPU estimate · not validated CFD'
-      : 'CPU preview · not validated CFD';
 }
 
 function updateSelection(objectId) {
@@ -267,7 +251,7 @@ function renderProperties() {
     <div class="properties-form">
       <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
       ${isWindow ? `
-        <label class="window-open-toggle"><input type="checkbox" data-window-open ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
+        <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="Window open" ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
         <label class="property-field"><span>Window pressure</span><select class="property-input" data-window-flow-direction aria-label="Window exterior pressure direction">
           <option value="exchange">Stack exchange · two-way</option><option value="inlet">Positive pressure · intake bias</option><option value="outlet">Negative pressure · exhaust bias</option>
         </select></label>

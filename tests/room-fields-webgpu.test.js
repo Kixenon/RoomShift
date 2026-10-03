@@ -5,6 +5,7 @@ import { prepareWebGpuInputs, simulateRoomFieldsWebGpu } from '../src/simulation
 
 test('WebGPU reports an unavailable adapter so the worker can use its CPU preview', async () => {
   assert.equal(await simulateRoomFieldsWebGpu(createRoomScene(), {}, null), null);
+  await assert.rejects(simulateRoomFieldsWebGpu(createRoomScene(), { vorticityConfinement: 5 }, null), /vorticity confinement/i);
 });
 
 test('GPU inputs preserve rotated fan direction and voxelize room obstacles', () => {
@@ -28,9 +29,13 @@ test('GPU inputs preserve rotated fan direction and voxelize room obstacles', ()
 
   assert.equal(inputs.solid.length, grid.nx * grid.ny * grid.nz);
   assert.equal(inputs.solid[(8 * grid.nz + 20) * grid.nx + 26], 1);
-  assert.equal(inputs.fans.length, 12);
-  assert.ok(inputs.fans[4] > 0.99);
-  assert.ok(Math.abs(inputs.fans[5]) < 1e-6);
+  assert.equal(inputs.fanForces.length, grid.nx * grid.ny * grid.nz * 4);
+  const grilleCell = ((10 * grid.nz + 31) * grid.nx + 11) * 4;
+  assert.ok(inputs.fanForces[grilleCell] > 0.99);
+  assert.ok(Math.abs(inputs.fanForces[grilleCell + 1]) < 1e-6);
+  assert.ok(Math.abs(inputs.fanForces[grilleCell + 2]) < 1e-6);
+  assert.deepEqual(Array.from(inputs.fanForces.slice(((8 * grid.nz + 20) * grid.nx + 26) * 4,
+    ((8 * grid.nz + 20) * grid.nx + 26) * 4 + 3)), [0, 0, 0]);
   assert.equal(inputs.heaters.length, 8);
   assert.equal(inputs.heaters[0], 1);
   assert.ok(Math.abs(inputs.heaters[1] - 0.2) < 1e-6);

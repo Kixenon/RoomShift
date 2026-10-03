@@ -249,7 +249,7 @@ export class RoomViewport {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.domElement.id = 'room-canvas';
     this.renderer.domElement.setAttribute('aria-label', 'Three-dimensional room. Click an object to select it.');
     this.renderer.domElement.dataset.projection = this.projection;
@@ -499,14 +499,19 @@ export class RoomViewport {
     this.renderer.domElement.dataset.fieldMode = mode;
     this.renderer.domElement.dataset.fieldCells = String(result.grid.nx * result.grid.ny * result.grid.nz);
     this.renderer.domElement.dataset.fieldBackend = result.backend ?? 'cpu-preview';
+    this.renderer.domElement.dataset.fieldGpuFallbackReason = result.gpuFallbackReason ?? '';
     this.renderer.domElement.dataset.fieldCellSize = String(result.grid.cellSize ?? Math.max(result.grid.dx, result.grid.dy, result.grid.dz));
     this.renderer.domElement.dataset.fieldMaxSpeed = String(result.stats.maxSpeed ?? 0);
     this.renderer.domElement.dataset.fieldRmsDivergence = String(result.stats.rmsDivergence ?? 0);
+    this.renderer.domElement.dataset.fieldBoundaryFlowImbalance = String(result.stats.boundaryFlowImbalancePercent ?? 0);
+    this.renderer.domElement.dataset.fieldNetBoundaryFlow = String(result.stats.netBoundaryFlowM3s ?? 0);
+    this.renderer.domElement.dataset.fieldMinTemperature = String(result.stats.minTemperature ?? result.ambientTemperature ?? 0);
+    this.renderer.domElement.dataset.fieldMeanTemperature = String(result.stats.meanTemperature ?? result.ambientTemperature ?? 0);
     this.renderer.domElement.dataset.fieldMaxTemperature = String(result.stats.maxTemperature ?? result.stats.maxLevel ?? 0);
     this.renderer.domElement.dataset.fieldVolumeVoxels = String(this.fieldLayer?.userData.volumeVoxelCount ?? 0);
     if (mode === 'airflow' && this.fieldLayer) {
-      this.renderer.domElement.dataset.streamlineVertices = String(this.fieldLayer.userData.streamlineVertexCount);
-      this.renderer.domElement.dataset.gasParticles = String(this.fieldLayer.userData.gasParticleCount);
+      this.renderer.domElement.dataset.gasVoxels = String(this.fieldLayer.userData.gasVoxelCount);
+      this.renderer.domElement.dataset.gasSourceCounts = JSON.stringify(this.fieldLayer.userData.gasSourceCounts);
     }
     this.renderer.domElement.dataset.fieldRevision = String(Number(this.renderer.domElement.dataset.fieldRevision ?? 0) + 1);
   }
@@ -521,13 +526,22 @@ export class RoomViewport {
     delete this.renderer.domElement.dataset.fieldMode;
     delete this.renderer.domElement.dataset.fieldCells;
     delete this.renderer.domElement.dataset.fieldBackend;
+    delete this.renderer.domElement.dataset.fieldGpuFallbackReason;
     delete this.renderer.domElement.dataset.fieldCellSize;
     delete this.renderer.domElement.dataset.fieldMaxSpeed;
     delete this.renderer.domElement.dataset.fieldRmsDivergence;
+    delete this.renderer.domElement.dataset.fieldBoundaryFlowImbalance;
+    delete this.renderer.domElement.dataset.fieldNetBoundaryFlow;
+    delete this.renderer.domElement.dataset.fieldMinTemperature;
+    delete this.renderer.domElement.dataset.fieldMeanTemperature;
     delete this.renderer.domElement.dataset.fieldMaxTemperature;
     delete this.renderer.domElement.dataset.fieldVolumeVoxels;
-    delete this.renderer.domElement.dataset.streamlineVertices;
-    delete this.renderer.domElement.dataset.gasParticles;
+    delete this.renderer.domElement.dataset.gasVoxels;
+    delete this.renderer.domElement.dataset.gasSourceCounts;
+    delete this.renderer.domElement.dataset.gasDensityMax;
+    delete this.renderer.domElement.dataset.gasOccupiedVoxels;
+    delete this.renderer.domElement.dataset.tracerVolumeM3;
+    delete this.renderer.domElement.dataset.exteriorTracerVolumeM3;
   }
 
   setLightingPreview(enabled) {
@@ -759,7 +773,10 @@ export class RoomViewport {
   }
 
   updateFieldVolumeDepthTest() {
-    const volume = this.fieldLayer?.children?.find((child) => child.userData?.boundsHalfSize);
+    let volume;
+    this.fieldLayer?.traverse((child) => {
+      if (!volume && child.userData?.boundsHalfSize) volume = child;
+    });
     if (!volume) return;
     const { boundsCenter, boundsHalfSize } = volume.userData;
     const position = this.camera.position;
@@ -778,7 +795,15 @@ export class RoomViewport {
     const seconds = time / 1000;
     const delta = this.lastAnimationTime === undefined ? 0 : THREE.MathUtils.clamp(seconds - this.lastAnimationTime, 0, 0.05);
     this.lastAnimationTime = seconds;
-    this.fieldLayer?.userData.animate?.(this.prefersReducedMotion ? 0 : seconds);
+    // Selecting a simulated field is an explicit request to see it evolve.
+    // Reduced motion still stops decorative object animation such as fan rotors.
+    this.fieldLayer?.userData.animate?.(seconds);
+    if (this.fieldLayer?.userData.gasVoxelCount) {
+      this.renderer.domElement.dataset.gasDensityMax = String(this.fieldLayer.userData.maxDensity ?? 0);
+      this.renderer.domElement.dataset.gasOccupiedVoxels = String(this.fieldLayer.userData.occupiedVoxels ?? 0);
+      this.renderer.domElement.dataset.tracerVolumeM3 = String(this.fieldLayer.userData.tracerVolumeM3 ?? 0);
+      this.renderer.domElement.dataset.exteriorTracerVolumeM3 = String(this.fieldLayer.userData.exteriorTracerVolumeM3 ?? 0);
+    }
     if (!this.prefersReducedMotion) {
       for (const rotor of this.fanRotors.values()) {
         if (rotor.userData.enabled) rotor.rotation.z += delta * 19;
