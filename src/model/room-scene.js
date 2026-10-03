@@ -91,7 +91,7 @@ function addOpening(scene, model, wall) {
     model,
     name: `${label} ${idNumber}`,
     wall,
-    open: false,
+    open: true,
     flowDirection: 'exchange',
     flowRate: 0.35,
     dimensions,

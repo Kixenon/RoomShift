@@ -44,14 +44,15 @@ const roomInputs = {
 };
 const outdoorTemperatureInput = $('#outdoor-temperature');
 const objectList = $('#object-list');
-const deviceList = $('#device-list');
 const properties = $('#object-properties');
 const fieldControls = {
   airflow: $('#show-airflow'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
   display: $('#field-display-control'),
-  displaySelect: $('#field-display'),
+  displayButton: $('#field-display-button'),
+  displayLabel: $('#field-display-label'),
+  displayMenu: $('#field-display-menu'),
   sliceControl: $('#slice-height-control'),
   sliceSummary: $('#slice-height-summary'),
   sliceHeight: $('#slice-height'),
@@ -134,9 +135,22 @@ function renderFieldState({ mode, loading, result, error }) {
   }[mode] ?? [];
   const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
   fieldControls.display.hidden = !mode;
-  fieldControls.displaySelect.setAttribute('aria-label', `${mode ?? 'Field'} view`);
-  fieldControls.displaySelect.replaceChildren(...availableStyles.map((style) => new Option(styleLabels[style], style)));
-  if (displayStyle) fieldControls.displaySelect.value = displayStyle;
+  if (!mode) fieldControls.display.open = false;
+  fieldControls.displayButton.setAttribute('aria-label', `Choose ${mode ?? 'field'} view`);
+  fieldControls.displayButton.title = displayStyle ? `${styleLabels[displayStyle]} view` : 'Choose view';
+  fieldControls.displayButton.setAttribute('aria-expanded', String(fieldControls.display.open));
+  fieldControls.displayLabel.textContent = styleLabels[displayStyle] ?? 'View';
+  fieldControls.displayMenu.setAttribute('aria-label', `${mode ?? 'Field'} view options`);
+  fieldControls.displayMenu.replaceChildren(...availableStyles.map((style) => {
+    const option = document.createElement('button');
+    option.className = 'field-display-option';
+    option.type = 'button';
+    option.setAttribute('role', 'menuitemradio');
+    option.setAttribute('aria-checked', String(style === displayStyle));
+    option.dataset.displayStyle = style;
+    option.textContent = styleLabels[style];
+    return option;
+  }));
   const showSlice = (mode === 'airflow' || mode === 'temperature') && displayStyle === 'slice';
   fieldControls.sliceControl.hidden = !showSlice;
   if (fieldController?.scene) {
@@ -253,7 +267,7 @@ function syncRoomInputs() {
 }
 
 function renderObjectList() {
-  const renderRows = (objects) => objects.map((object) => {
+  objectList.innerHTML = roomScene.objects.map((object) => {
     return `
       <button class="object-row ${object.id === selectedId ? 'selected' : ''}" type="button" data-select-object="${escapeHtml(object.id)}" aria-pressed="${object.id === selectedId}">
         <span class="object-row-icon" aria-hidden="true">${escapeHtml((MODEL_PRESETS[object.model] ?? MODEL_PRESETS.box).icon)}</span>
@@ -261,8 +275,6 @@ function renderObjectList() {
       </button>
     `;
   }).join('');
-  objectList.innerHTML = renderRows(roomScene.objects.filter((object) => !DEVICE_MODELS.includes(object.model)));
-  deviceList.innerHTML = renderRows(roomScene.objects.filter((object) => DEVICE_MODELS.includes(object.model)));
 }
 
 function propertyField(label, axis, value, kind, limits = {}) {
@@ -426,6 +438,7 @@ function addRoomDoor() {
 }
 
 function toggleFieldMode(mode) {
+  fieldControls.display.open = false;
   fieldController.setMode(fieldController.mode === mode ? null : mode);
 }
 
@@ -438,8 +451,37 @@ $('#add-door').addEventListener('click', addRoomDoor);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
-fieldControls.displaySelect.addEventListener('change', () => fieldController.setDisplayStyle(fieldControls.displaySelect.value));
+fieldControls.displayMenu.addEventListener('click', (event) => {
+  const option = event.target.closest('[data-display-style]');
+  if (!option) return;
+  fieldController.setDisplayStyle(option.dataset.displayStyle);
+  fieldControls.display.open = false;
+});
+fieldControls.display.addEventListener('toggle', () => {
+  fieldControls.displayButton.setAttribute('aria-expanded', String(fieldControls.display.open));
+});
+document.addEventListener('click', (event) => {
+  if (!fieldControls.display.contains(event.target)) fieldControls.display.open = false;
+});
 fieldControls.sliceHeight.addEventListener('input', () => fieldController.setSliceHeight(Number(fieldControls.sliceHeight.value)));
+
+const editorLayout = $('#editor-layout');
+const assetRailToggle = $('#toggle-asset-rail');
+const inspectorToggle = $('#toggle-inspector');
+function togglePanel(button, className, label, collapsedClass) {
+  const collapsed = editorLayout.classList.toggle(className);
+  button.setAttribute('aria-expanded', String(!collapsed));
+  button.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${label} menu`);
+  button.title = `${collapsed ? 'Expand' : 'Collapse'} ${label} menu`;
+  button.dataset.collapsed = String(collapsed);
+  collapsedClass?.(collapsed);
+}
+assetRailToggle.addEventListener('click', () => togglePanel(assetRailToggle, 'asset-rail-collapsed', 'asset', (collapsed) => {
+  $('#asset-rail').classList.toggle('is-collapsed', collapsed);
+}));
+inspectorToggle.addEventListener('click', () => togglePanel(inspectorToggle, 'inspector-collapsed', 'properties', (collapsed) => {
+  $('.inspector').classList.toggle('is-collapsed', collapsed);
+}));
 
 $('.object-list-section').addEventListener('click', (event) => {
   const row = event.target.closest('[data-select-object]');
