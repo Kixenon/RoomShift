@@ -109,3 +109,10 @@ test('bestIndex respects the direction of “better”', () => {
   assert.equal(bestIndex([1, 3, 2], 'low'), 0);
   assert.equal(bestIndex([100, 400, 900], 'target', [300, 750]), 1);
 });
+
+test('AI shape fields map onto the parametric styles', async () => {
+  const { styleFromFields } = await import('../src/features/ai-scan.js');
+  assert.deepEqual(styleFromFields('table', { top_shape: 'rect', legs: 'tleg' }), { shape: 'rect', legs: 'tleg' });
+  assert.deepEqual(styleFromFields('sofa', { arms: 'none', chaise: 'left', back: 'n/a' }), { arms: 'none', chaise: 'left' });
+  assert.equal(styleFromFields('plant', {}), undefined);
+});

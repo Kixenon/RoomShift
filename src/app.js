@@ -1004,8 +1004,8 @@ function placeModel(model, { position, catalog } = {}) {
           && Math.abs(position.x - object.position.x) < object.dimensions.width / 2 && Math.abs(position.z - object.position.z) < object.dimensions.depth / 2);
         result = moveObject(result.scene, result.object.id, { ...position, ...(surface ? { y: surface.position.y + surface.dimensions.height } : {}) });
       }
-      if (catalog?.color || catalog?.props) {
-        const extra = { ...(catalog.color ? { color: catalog.color } : {}), ...(catalog.props ? { props: catalog.props } : {}) };
+      if (catalog?.color || catalog?.props || catalog?.style) {
+        const extra = { ...(catalog.color ? { color: catalog.color } : {}), ...(catalog.props ? { props: catalog.props } : {}), ...(catalog.style ? { style: catalog.style } : {}) };
         result = { object: { ...result.object, ...extra }, scene: { ...result.scene, objects: result.scene.objects.map((item) => (item.id === result.object.id ? { ...item, ...extra } : item)) } };
       }
     }

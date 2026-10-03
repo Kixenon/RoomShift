@@ -6,6 +6,46 @@ import { MODEL_PRESETS, addObject, addWindow, moveObject, resizeRoom, rotateObje
 // The SDK and zod load on first use so the editor bundle stays small.
 
 const KEY_STORAGE = 'roomshift.anthropicKey';
+
+// Shape details Claude reports so the 3D model matches the product, mapped onto
+// the parametric builders' style options. "n/a" when a field doesn't apply.
+const shapeFields = (z) => ({
+  secondary_color_hex: z.string().describe('Colour of legs / frame / handles as #rrggbb, or empty'),
+  top_shape: z.enum(['rect', 'round', 'oval', 'n/a']),
+  legs: z.enum(['four', 'tleg', 'trestle', 'pedestal', 'panel', 'drawers', 'n/a']).describe('Table or desk base'),
+  arms: z.enum(['both', 'left', 'right', 'none', 'n/a']).describe('Sofa arms'),
+  chaise: z.enum(['none', 'left', 'right', 'n/a']),
+  back: z.enum(['low', 'high', 'n/a']).describe('Sofa back height'),
+  headboard: z.enum(['none', 'low', 'tall', 'panel', 'n/a']),
+  bed_base: z.enum(['legs', 'platform', 'storage', 'n/a']),
+  chair_kind: z.enum(['dining', 'office', 'stool', 'armchair', 'n/a']),
+  doors: z.number().describe('Wardrobe doors, 0 if not a wardrobe'),
+  door_opening: z.enum(['hinged', 'sliding', 'n/a']),
+  shelf_kind: z.enum(['open', 'cube', 'closed', 'n/a']),
+  lamp_kind: z.enum(['floor', 'arc', 'tripod', 'n/a']),
+  tv_mount: z.enum(['stand', 'wall', 'n/a']),
+  fridge_kind: z.enum(['single', 'top', 'double', 'n/a']),
+});
+
+export function styleFromFields(type, fields) {
+  const pick = (value) => (value && value !== 'n/a' ? value : undefined);
+  const style = {
+    table: { shape: pick(fields.top_shape), legs: pick(fields.legs) },
+    desk: { legs: pick(fields.legs) },
+    sofa: { arms: pick(fields.arms), chaise: pick(fields.chaise), back: pick(fields.back) },
+    bed: { headboard: pick(fields.headboard), base: pick(fields.bed_base) },
+    chair: { kind: pick(fields.chair_kind) },
+    wardrobe: { doors: fields.doors >= 1 && fields.doors <= 4 ? String(Math.round(fields.doors)) : undefined, opening: pick(fields.door_opening) },
+    shelf: { kind: pick(fields.shelf_kind) },
+    lamp: { kind: pick(fields.lamp_kind) },
+    tv: { mount: pick(fields.tv_mount) },
+    fridge: { kind: pick(fields.fridge_kind) },
+  }[type];
+  if (!style) return undefined;
+  const cleaned = Object.fromEntries(Object.entries(style).filter(([, value]) => value !== undefined));
+  return Object.keys(cleaned).length ? cleaned : undefined;
+}
+const validHex = (value) => (/^#[0-9a-f]{6}$/i.test(value ?? '') ? value : undefined);
 const FURNITURE_TYPES = Object.entries(MODEL_PRESETS).filter(([, preset]) => !preset.wall).map(([key]) => key);
 
 const PROMPT = `You are measuring a room from one photograph so it can be rebuilt in a 3D planner.
@@ -15,6 +55,8 @@ Coordinate system (metres):
 - x runs from the LEFT wall (x = 0) to the RIGHT wall (x = width).
 - z runs from the FRONT wall (z = 0, behind the camera) to the BACK wall (z = depth).
 - Object x/z are the centre of its footprint. rotation_deg is the turn about the vertical axis; 0 means the object's front faces the camera (toward the front wall), 180 means it faces the back wall, 90 faces the left wall.
+
+For each object also describe its shape with the style fields (use n/a where a field does not apply) and its secondary (legs/frame) colour.
 
 Use standard sizes to set scale: doors are about 2.0–2.1 m tall and 0.8–0.9 m wide, ceilings 2.4–2.8 m, kitchen/desk tops 0.72–0.75 m, single beds 0.9 × 2.0 m, double 1.4 × 1.9 m. Estimate the parts of the room you cannot see from the visible proportions.
 
@@ -45,6 +87,7 @@ function schema(z) {
       z: z.number(),
       rotation_deg: z.number(),
       color_hex: z.string().describe('Dominant colour as #rrggbb'),
+      ...shapeFields(z),
     })),
     openings: z.array(z.object({
       type: z.enum(['window', 'door']),
@@ -81,10 +124,11 @@ function productSchema(z) {
     image_url: z.string().describe('Absolute URL of the main product photo, or empty'),
     price: z.string().describe('Price with currency as shown, or empty'),
     notes: z.string().describe('What was measured vs estimated'),
+    ...shapeFields(z),
   });
 }
 
-const PRODUCT_PROMPT = 'Identify this piece of furniture or equipment so it can be placed at true size in a room planner. Use the published dimensions when available; otherwise estimate from typical sizes and say so in notes. Choose the closest type from the allowed list.';
+const PRODUCT_PROMPT = 'Identify this piece of furniture or equipment so it can be rebuilt at true size and true shape in a room planner. Use the published dimensions when available (width = side to side facing its front, depth = front to back); otherwise estimate from typical sizes and say so in notes. Choose the closest type from the allowed list, then describe its shape with the style fields (use n/a for fields that do not apply) and give the main and secondary (legs/frame) colours.';
 
 // A product page (IKEA or any shop) or a product photo → one object at true size.
 export async function productWithClaude({ url, file }, apiKey) {
@@ -157,7 +201,10 @@ export function sceneFromLayout(base, layout) {
       const dimensions = {
         width: clamp(item.width, 0.1, scene.room.width), depth: clamp(item.depth, 0.1, scene.room.depth), height: clamp(item.height, 0.1, scene.room.height),
       };
-      let result = addObject(scene, { model: item.type, name: item.name.slice(0, 80) || MODEL_PRESETS[item.type].label, dimensions });
+      let result = addObject(scene, {
+        model: item.type, name: item.name.slice(0, 80) || MODEL_PRESETS[item.type].label, dimensions,
+        style: styleFromFields(item.type, item), color2: validHex(item.secondary_color_hex),
+      });
       if (item.rotation_deg) result = rotateObject(result.scene, result.object.id, { y: item.rotation_deg });
       result = moveObject(result.scene, result.object.id, { x: item.x, z: item.z });
       scene = /^#[0-9a-f]{6}$/i.test(item.color_hex)
@@ -230,11 +277,15 @@ export function installAiScan(app) {
       const product = await productWithClaude(source, key);
       const dimensions = { width: Math.max(0.05, product.width), depth: Math.max(0.05, product.depth), height: Math.max(0.05, product.height) };
       const object = app.placeModel(product.type, {
-        catalog: { name: product.name, dimensions, color: /^#[0-9a-f]{6}$/i.test(product.color_hex) ? product.color_hex : undefined },
+        catalog: { name: product.name, dimensions, color: validHex(product.color_hex) },
       });
       if (object) {
         const scene = app.scene;
-        app.apply({ ...scene, objects: scene.objects.map((item) => (item.id === object.id ? { ...item, material: product.material, product: { url: source.url ?? '', image: product.image_url, price: product.price } } : item)) }, { select: object.id });
+        const style = styleFromFields(product.type, product);
+        app.apply({ ...scene, objects: scene.objects.map((item) => (item.id === object.id ? {
+          ...item, material: product.material, ...(style ? { style } : {}), ...(validHex(product.secondary_color_hex) ? { color2: product.secondary_color_hex } : {}),
+          product: { url: source.url ?? '', image: product.image_url, price: product.price },
+        } : item)) }, { select: object.id });
       }
       status.innerHTML = `<div class="ai-result">${product.image_url ? `<img src="${product.image_url}" alt="" referrerpolicy="no-referrer" />` : '<span></span>'}<div><strong>${product.name}</strong>
         <p class="mono">${product.width.toFixed(2)} × ${product.depth.toFixed(2)} × ${product.height.toFixed(2)} m ${product.price ? `· ${product.price}` : ''}</p><p class="note">${product.notes}</p><p class="note">Added to the room — drag it into place.</p></div></div>`;
