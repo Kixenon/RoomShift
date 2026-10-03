@@ -50,7 +50,7 @@ test('selecting a field mode sends the current scene and renders its worker resu
   const result = { grid: { nx: 1, ny: 1, nz: 1 }, fields: {}, stats: {} };
   harness.worker.respond({ requestId: request.requestId, result });
 
-  assert.deepEqual(harness.rendered, [[result, 'airflow']]);
+  assert.deepEqual(harness.rendered, [[result, 'airflow', { volumetric: false, objectGroups: undefined }]]);
   assert.equal(harness.states.at(-1).loading, false);
   assert.equal(harness.states.at(-1).result, result);
 });
@@ -76,7 +76,7 @@ test('rapid edits coalesce and stale worker results are not rendered', async (t)
 
   const latest = { grid: { nx: 1, ny: 1, nz: 1 }, fields: {}, stats: {} };
   harness.worker.respond({ requestId: harness.worker.requests[1].requestId, result: latest });
-  assert.deepEqual(harness.rendered, [[latest, 'temperature']]);
+  assert.deepEqual(harness.rendered, [[latest, 'temperature', { volumetric: false, objectGroups: undefined }]]);
 });
 
 test('clearing the field mode cancels pending work and clears the overlay', async (t) => {

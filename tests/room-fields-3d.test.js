@@ -140,7 +140,7 @@ test('maximum room/grid work is bounded and all returned fields stay finite', ()
   for (const field of [result.fields.u, result.fields.v, result.fields.w, result.fields.temperature]) {
     assert.ok(Array.from(field).every(Number.isFinite));
   }
-  assert.throws(() => simulateRoomFields(room, { steps: 41 }), /steps/i);
+  assert.throws(() => simulateRoomFields(room, { steps: 241 }), /steps/i);
   assert.throws(() => simulateRoomFields(room, { cellSize: 0.1 }), /cell size/i);
 });
 

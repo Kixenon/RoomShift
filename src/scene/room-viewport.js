@@ -410,7 +410,7 @@ export class RoomViewport {
     group.userData.open = object.open;
     if (object.model === 'fan') {
       const rotor = group.getObjectByName('fan-rotor');
-      rotor.userData.enabled = object.enabled !== false;
+      rotor.userData.enabled = object.enabled !== false && (object.intensity ?? 1) > 0;
       rotor.traverse((child) => {
         if (!child.material?.color) return;
         child.material.userData.enabledColor ??= child.material.color.clone();

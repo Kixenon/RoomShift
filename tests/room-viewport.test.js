@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import { addObject, createRoomScene, resizeObject, rotateObject } from '../src/model/room-scene.js';
 import { RoomViewport } from '../src/scene/room-viewport.js';
 
@@ -34,6 +35,20 @@ test('a rejected gizmo rotation restores the last valid scene pose', () => {
   assert.equal(selectionBoxUpdates, 1);
 });
 
+test('a fan with zero output does not animate its rotor', () => {
+  const scene = createRoomScene();
+  const fan = scene.objects.find((object) => object.model === 'fan');
+  const viewport = Object.assign(Object.create(RoomViewport.prototype), {
+    roomScene: scene,
+    groups: new Map(),
+    fanRotors: new Map(),
+    sceneRoot: new THREE.Group(),
+  });
+  viewport.createObjectGroup({ ...fan, intensity: 0 });
+
+  assert.equal(viewport.fanRotors.get(fan.id).userData.enabled, false);
+});
+
 test('viewport frames advance the airflow layer animation clock', () => {
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
   let animationTime = null;
@@ -44,6 +59,7 @@ test('viewport frames advance the airflow layer animation clock', () => {
     orbit: { update() {} },
     selectionBox: null,
     hoverBox: null,
+    fanRotors: new Map(),
     fieldLayer: { userData: { animate: (time) => { animationTime = time; } } },
     renderer: { render() {} },
     scene: {},
