@@ -212,24 +212,30 @@ test('the daylight dataset is cleared when the preview closes', async () => {
   assert.deepEqual(data, { clock: undefined, altitude: undefined, patches: undefined });
 });
 
-test('the time controls do not overlap the field status', async () => {
+test('the time controls sit clear of their neighbours', async () => {
   await page.locator('#show-light').click();
   await page.waitForTimeout(700);
   const boxes = await page.evaluate(() => {
-    const controls = document.querySelector('#time-controls').getBoundingClientRect();
-    const status = document.querySelector('#field-status').getBoundingClientRect();
+    const box = (selector) => {
+      const rect = document.querySelector(selector).getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    };
     return {
-      controls: { left: controls.left, right: controls.right, top: controls.top, bottom: controls.bottom },
-      status: { left: status.left, right: status.right, top: status.top, bottom: status.bottom },
+      controls: box('#time-controls'),
+      lightButton: box('#show-light'),
       statusText: document.querySelector('#field-status').textContent,
+      statusVisible: getComputedStyle(document.querySelector('#field-status')).display !== 'none',
     };
   });
-  assert.ok(boxes.statusText.length > 0, 'the status should have text to collide with');
-  assert.ok(boxes.status.left >= boxes.controls.right,
-    `status starts at ${boxes.status.left} but the controls end at ${boxes.controls.right}`);
-  const overlapsVertically = boxes.status.top < boxes.controls.bottom
-    && boxes.controls.top < boxes.status.bottom;
-  assert.ok(overlapsVertically, 'the two share a row, so they must not overlap horizontally');
+
+  // Idle light mode has nothing to say, so the status collapses out of the way.
+  assert.equal(boxes.statusText, '', `idle status was "${boxes.statusText}"`);
+  assert.equal(boxes.statusVisible, false, 'an empty status should not take up room');
+
+  // The clock group follows the Light button without colliding with it.
+  assert.ok(boxes.controls.left >= boxes.lightButton.right,
+    `controls start at ${boxes.controls.left} but the Light button ends at ${boxes.lightButton.right}`);
+  assert.ok(boxes.controls.right > boxes.controls.left, 'the controls have width');
 });
 
 test('the clock label is legible against the toolbar', async () => {

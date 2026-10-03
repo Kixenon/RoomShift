@@ -132,8 +132,11 @@ function renderFieldState({ mode, loading, result, error }) {
   timeControls.group.hidden = mode !== 'light';
   if (mode === 'light') {
     renderTimeOfDay();
-    fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : 'Realtime shadows';
-    fieldControls.status.title = error?.message ?? 'Monochrome room render driven by the sun position at the site.';
+    // The active mode is already named by the pressed button and the clock
+    // reports the time, so there is nothing worth saying here. Keep the
+    // transient states, which are the only part that carries new information.
+    fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : '';
+    fieldControls.status.title = error?.message ?? '';
     fieldControls.gradient.dataset.mode = 'light';
     fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
     fieldControls.legendMin.textContent = 'shadow';
