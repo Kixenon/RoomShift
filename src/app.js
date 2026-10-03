@@ -38,6 +38,7 @@ const roomInputs = {
   depth: $('#room-depth'),
   height: $('#room-height'),
 };
+const outdoorTemperatureInput = $('#outdoor-temperature');
 const objectList = $('#object-list');
 const properties = $('#object-properties');
 const fieldControls = {
@@ -148,10 +149,12 @@ function renderFieldState({ mode, loading, result, error, stale }) {
       maximum: '1.2+ m/s',
     };
   } else if (mode === 'temperature') {
+    const minimum = Math.min(result.ambientTemperature - 4, result.outdoorTemperature ?? result.ambientTemperature);
+    const maximum = Math.max(result.ambientTemperature + 8, result.outdoorTemperature ?? result.ambientTemperature);
     legend = {
       title: displayStyle === 'volume' ? 'Air temperature · 3D volume' : displayStyle === 'slice' ? `Air temperature · ${fieldController.sliceHeight.toFixed(2)} m slice` : 'Air temperature · surfaces and objects',
-      minimum: `${(result.ambientTemperature - 4).toFixed(1)} °C`,
-      maximum: `${(result.ambientTemperature + 8).toFixed(1)}+ °C`,
+      minimum: `${minimum.toFixed(1)} °C`,
+      maximum: `${maximum.toFixed(1)}+ °C`,
     };
   } else if (displayStyle === 'map') {
     legend = {
@@ -210,6 +213,7 @@ function updateRoomSummary() {
   const { width, depth, height } = roomScene.room;
   $('#room-summary').textContent = `${width.toFixed(1)} × ${depth.toFixed(1)} × ${height.toFixed(1)} m`;
   for (const [dimension, input] of Object.entries(roomInputs)) input.value = roomScene.room[dimension];
+  outdoorTemperatureInput.value = roomScene.room.outdoorTemperature ?? 10;
 }
 
 function renderObjectList() {
@@ -256,7 +260,7 @@ function renderProperties() {
       ${isWindow ? `
         <label class="window-open-toggle"><input type="checkbox" data-window-open ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
         <label class="property-field"><span>Window flow</span><select class="property-input" data-window-flow-direction aria-label="Window airflow direction">
-          <option value="exchange">Exchange · in low, out high</option><option value="inlet">Inlet · source</option><option value="outlet">Outlet · sink</option>
+          <option value="exchange">Exchange · two-way</option><option value="inlet">Inlet · source</option><option value="outlet">Outlet · sink</option>
         </select></label>
         <div class="property-group">
           <div class="range-heading"><span>Flow speed</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
@@ -394,6 +398,19 @@ for (const [dimension, input] of Object.entries(roomInputs)) {
     }
   });
 }
+
+outdoorTemperatureInput.addEventListener('change', () => {
+  const temperature = Number(outdoorTemperatureInput.value);
+  if (outdoorTemperatureInput.value.trim() === '' || !Number.isFinite(temperature) || temperature < -20 || temperature > 50) {
+    outdoorTemperatureInput.value = roomScene.room.outdoorTemperature ?? 10;
+    outdoorTemperatureInput.setCustomValidity('Enter an outdoor temperature from -20 °C to 50 °C.');
+    outdoorTemperatureInput.reportValidity();
+    outdoorTemperatureInput.setCustomValidity('');
+    return;
+  }
+  updateScene({ ...roomScene, room: { ...roomScene.room, outdoorTemperature: temperature } });
+  setEditorStatus('');
+});
 
 properties.addEventListener('change', (event) => {
   const input = event.target;

@@ -4,7 +4,10 @@ import { rotationMatrixXYZ } from '../model/room-scene.js';
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const indexOf = (i, j, k, grid) => (j * grid.nz + k) * grid.nx + i;
 const AIRFLOW_DISPLAY_RANGE = 1.2;
-const HEAT_DISPLAY_RANGE = 12;
+
+function temperatureRange(ambient, outdoor = ambient) {
+  return { minimum: Math.min(ambient - 4, outdoor), maximum: Math.max(ambient + 8, outdoor) };
+}
 
 export function getAirflowColor(speed, maximumSpeed) {
   const intensity = clamp(Number.isFinite(speed) ? speed / Math.max(0.001, maximumSpeed) : 0, 0, 1);
@@ -60,7 +63,10 @@ function sampleVelocity(result, point, target = new THREE.Vector3()) {
 
 function normalizeScalar(result, mode, value) {
   if (mode === 'airflow') return clamp(value / AIRFLOW_DISPLAY_RANGE, 0, 1);
-  if (mode === 'temperature') return clamp((value - (result.ambientTemperature - 4)) / HEAT_DISPLAY_RANGE, 0, 1);
+  if (mode === 'temperature') {
+    const range = temperatureRange(result.ambientTemperature, result.outdoorTemperature);
+    return clamp((value - range.minimum) / Math.max(0.05, range.maximum - range.minimum), 0, 1);
+  }
   return clamp((value - result.ambientLevel) / Math.max((result.stats.maxLevel ?? result.stats.maxLight) - result.ambientLevel, 0.05), 0, 1);
 }
 
@@ -246,7 +252,7 @@ export function createScalarSliceLayer(result, mode, height) {
       getAirflowColor(speed, AIRFLOW_DISPLAY_RANGE).toArray(colors, index * 4);
     } else {
       const temperature = sampleField(fields.temperature, x, height, z, grid, fields.solid, result.ambientTemperature);
-      infraredColor(temperature, result.ambientTemperature, color).toArray(colors, index * 4);
+      infraredColor(temperature, result.ambientTemperature, color, result.outdoorTemperature).toArray(colors, index * 4);
     }
     colors[index * 4 + 3] = 0.82;
   }
@@ -280,6 +286,45 @@ function isFluidPoint(point, grid, solid) {
   return !solid[indexOf(i, j, k, grid)];
 }
 
+function makeEmitter(position, direction, axis, radius) {
+  const normal = direction.clone().normalize();
+  const spanAxis = axis.clone().addScaledVector(normal, -axis.dot(normal));
+  if (spanAxis.lengthSq() < 1e-6) {
+    spanAxis.set(0, 0, 1).addScaledVector(normal, -normal.z);
+  }
+  spanAxis.normalize();
+  const sideAxis = new THREE.Vector3().crossVectors(normal, spanAxis).normalize();
+  return { position, direction: normal, axis: spanAxis, sideAxis, radius };
+}
+
+function findWindowExit(start, end, roomScene, result, targetVelocity) {
+  const { grid } = result;
+  const walls = {
+    front: { axis: 'z', boundary: 0, along: 'x', normal: new THREE.Vector3(0, 0, -1) },
+    back: { axis: 'z', boundary: roomScene.room.depth, along: 'x', normal: new THREE.Vector3(0, 0, 1) },
+    left: { axis: 'x', boundary: 0, along: 'z', normal: new THREE.Vector3(-1, 0, 0) },
+    right: { axis: 'x', boundary: roomScene.room.width, along: 'z', normal: new THREE.Vector3(1, 0, 0) },
+  };
+  for (const window of roomScene?.objects ?? []) {
+    if (window.model !== 'window' || !window.open) continue;
+    const wall = walls[window.wall];
+    const delta = end[wall.axis] - start[wall.axis];
+    if (Math.abs(delta) < 1e-8) continue;
+    const fraction = (wall.boundary - start[wall.axis]) / delta;
+    if (fraction <= 0 || fraction > 1) continue;
+    const point = start.clone().lerp(end, fraction);
+    if (point.y < window.position.y || point.y > window.position.y + window.dimensions.height
+      || Math.abs(point[wall.along] - window.position[wall.along]) > window.dimensions.width / 2) continue;
+
+    const interiorPoint = point.clone().addScaledVector(wall.normal, -Math.min(grid.dx, grid.dy, grid.dz) * 0.25);
+    sampleVelocity(result, interiorPoint, targetVelocity);
+    const outwardSpeed = targetVelocity.dot(wall.normal);
+    if (outwardSpeed <= 0.02) continue;
+    return { point, velocity: targetVelocity.clone() };
+  }
+  return null;
+}
+
 function getAirEmitters(result, roomScene) {
   const emitters = [];
   for (const fan of roomScene?.objects ?? []) {
@@ -291,39 +336,53 @@ function getAirEmitters(result, roomScene) {
       fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * local.x + matrix[1][1] * local.y + matrix[1][2] * local.z,
       fan.position.z + matrix[2][0] * local.x + matrix[2][1] * local.y + matrix[2][2] * local.z,
     );
-    emitters.push({
+    emitters.push(makeEmitter(
       position,
-      direction: new THREE.Vector3(matrix[0][2], matrix[1][2], matrix[2][2]).normalize(),
-      axis: new THREE.Vector3(matrix[0][0], matrix[1][0], matrix[2][0]).normalize(),
-      speed: Math.max(0.2, result.stats.maxSpeed * 0.58),
-      radius: Math.max(0.05, fan.dimensions.width * 0.16),
-    });
+      new THREE.Vector3(matrix[0][2], matrix[1][2], matrix[2][2]),
+      new THREE.Vector3(matrix[0][0], matrix[1][0], matrix[2][0]),
+      Math.max(0.05, fan.dimensions.width * 0.16),
+    ));
+  }
+
+  for (const heater of roomScene?.objects ?? []) {
+    if (heater.model !== 'heater' || (heater.intensity ?? 1) <= 0) continue;
+    const topCell = Math.min(result.grid.ny - 1, Math.ceil((heater.position.y + heater.dimensions.height) / result.grid.dy));
+    const position = new THREE.Vector3(
+      heater.position.x,
+      Math.min(result.grid.height - result.grid.dy * 0.5, (topCell + 0.5) * result.grid.dy),
+      heater.position.z,
+    );
+    if (!isFluidPoint(position, result.grid, result.fields.solid)) continue;
+    emitters.push(makeEmitter(
+      position,
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(1, 0, 0),
+      Math.max(heater.dimensions.width, heater.dimensions.depth) * 0.46,
+    ));
   }
 
   for (const window of roomScene?.objects ?? []) {
-    if (window.model !== 'window' || !window.open || (window.flowRate ?? 0.35) <= 0
-      || window.flowDirection === 'outlet') continue;
+    if (window.model !== 'window' || !window.open || (window.flowRate ?? 0.35) <= 0) continue;
     const alongX = window.wall === 'back' || window.wall === 'front';
-    const exchange = (window.flowDirection ?? 'exchange') === 'exchange';
-    const height = window.dimensions.height * (exchange ? 0.46 : 0.9);
-    const position = new THREE.Vector3(window.position.x, window.position.y + height / 2, window.position.z);
-    const direction = {
-      front: new THREE.Vector3(0, 0, 1),
-      back: new THREE.Vector3(0, 0, -1),
-      left: new THREE.Vector3(1, 0, 0),
-      right: new THREE.Vector3(-1, 0, 0),
+    const flowDirection = window.flowDirection ?? 'exchange';
+    const outdoorAirIsWarmer = (roomScene.room.outdoorTemperature ?? result.outdoorTemperature ?? result.ambientTemperature)
+      > result.ambientTemperature;
+    const inletFraction = outdoorAirIsWarmer ? 0.75 : 0.25;
+    const outward = {
+      front: new THREE.Vector3(0, 0, -1),
+      back: new THREE.Vector3(0, 0, 1),
+      left: new THREE.Vector3(-1, 0, 0),
+      right: new THREE.Vector3(1, 0, 0),
     }[window.wall];
-    if (window.wall === 'front') position.z += window.dimensions.depth / 2;
-    if (window.wall === 'back') position.z -= window.dimensions.depth / 2;
-    if (window.wall === 'left') position.x += window.dimensions.depth / 2;
-    if (window.wall === 'right') position.x -= window.dimensions.depth / 2;
-    emitters.push({
-      position,
+    const axis = alongX ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+    const addWindowEmitter = (fraction, direction) => emitters.push(makeEmitter(
+      new THREE.Vector3(window.position.x, window.position.y + window.dimensions.height * fraction, window.position.z),
       direction,
-      axis: alongX ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1),
-      speed: window.flowRate ?? 0.35,
-      radius: Math.max(0.08, window.dimensions.width * 0.36),
-    });
+      axis,
+      Math.max(0.08, window.dimensions.width * 0.36),
+    ));
+    if (flowDirection !== 'outlet') addWindowEmitter(inletFraction, outward.clone().negate());
+    if (flowDirection !== 'inlet') addWindowEmitter(1 - inletFraction, outward);
   }
 
   if (emitters.length) return emitters;
@@ -347,7 +406,7 @@ function getAirEmitters(result, roomScene) {
   candidates.sort((a, b) => b.speed - a.speed);
   for (const candidate of candidates) {
     if (emitters.every((emitter) => emitter.position.distanceTo(candidate.position) > 0.55)) {
-      emitters.push({ ...candidate, axis: new THREE.Vector3(1, 0, 0), radius: 0.13 });
+      emitters.push(makeEmitter(candidate.position, candidate.direction, new THREE.Vector3(1, 0, 0), 0.13));
       if (emitters.length === 5) break;
     }
   }
@@ -358,18 +417,22 @@ function createGasLayer(result, roomScene) {
   const { grid, fields } = result;
   const emitters = getAirEmitters(result, roomScene);
   const particleCount = emitters.length ? clamp(emitters.length * 260, 520, 1560) : 0;
-  const trailCount = 7;
+  const trailCount = 9;
   const pointCount = particleCount * trailCount;
   const positions = new Float32Array(pointCount * 3);
+  const tangentValues = new Float32Array(pointCount * 3);
   const lifeValues = new Float32Array(pointCount);
   const speedValues = new Float32Array(pointCount);
   const trailValues = new Float32Array(pointCount);
   const current = new Float32Array(particleCount * 3);
   const ages = new Float32Array(particleCount);
   const lifetimes = new Float32Array(particleCount);
+  const exitAges = new Float32Array(particleCount).fill(-1);
+  const exitVelocities = new Float32Array(particleCount * 3);
   const history = new Float32Array(pointCount * 3);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('aTangent', new THREE.BufferAttribute(tangentValues, 3).setUsage(THREE.DynamicDrawUsage));
   geometry.setAttribute('aLife', new THREE.BufferAttribute(lifeValues, 1).setUsage(THREE.DynamicDrawUsage));
   geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speedValues, 1).setUsage(THREE.DynamicDrawUsage));
   geometry.setAttribute('aTrail', new THREE.BufferAttribute(trailValues, 1));
@@ -388,30 +451,41 @@ function createGasLayer(result, roomScene) {
       attribute float aLife;
       attribute float aSpeed;
       attribute float aTrail;
+      attribute vec3 aTangent;
       varying float vLife;
       varying float vSpeed;
       varying float vTrail;
+      varying vec2 vTangent;
       void main() {
         vLife = aLife;
         vSpeed = aSpeed;
         vTrail = aTrail;
         vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+        vec3 viewTangent = (modelViewMatrix * vec4(aTangent, 0.0)).xyz;
+        vTangent = length(viewTangent.xy) > 0.0001 ? normalize(viewTangent.xy) : vec2(1.0, 0.0);
         gl_Position = projectionMatrix * viewPosition;
-        gl_PointSize = clamp(uSize * (0.7 + aSpeed * 0.45) / max(1.0, -viewPosition.z), 2.0, 30.0);
+        gl_PointSize = clamp(uSize * (0.7 + aSpeed * 0.45) / max(1.0, -viewPosition.z), 2.0, 18.0);
       }
     `,
     fragmentShader: `
       varying float vLife;
       varying float vSpeed;
       varying float vTrail;
+      varying vec2 vTangent;
       void main() {
-        float radius = length(gl_PointCoord - vec2(0.5));
-        float vapor = exp(-radius * radius * 15.0);
-        float alpha = vapor * vLife * (0.06 + vTrail * 0.13);
+        vec2 tangent = normalize(vTangent);
+        vec2 normal = vec2(-tangent.y, tangent.x);
+        vec2 point = gl_PointCoord - vec2(0.5);
+        float along = dot(point, tangent);
+        float across = dot(point, normal);
+        float vapor = exp(-along * along * 12.0 - across * across * 170.0);
+        float haze = exp(-along * along * 4.0 - across * across * 48.0);
+        float alpha = (vapor * 0.7 + haze * 0.2) * vLife * (0.05 + vTrail * 0.11);
         if (alpha < 0.006) discard;
         vec3 slow = vec3(0.12, 0.52, 0.78);
         vec3 fast = vec3(0.46, 0.91, 1.0);
-        gl_FragColor = vec4(mix(slow, fast, clamp(vSpeed, 0.0, 1.0)), alpha);
+        vec3 gas = mix(slow, fast, clamp(vSpeed, 0.0, 1.0));
+        gl_FragColor = vec4(gas, alpha);
       }
     `,
   });
@@ -420,20 +494,17 @@ function createGasLayer(result, roomScene) {
   layer.renderOrder = 2;
   layer.frustumCulled = false;
 
-  const respawn = (index, seed = false) => {
+  const respawn = (index) => {
     const emitter = emitters[index % emitters.length];
     const offset = index * 3;
     const along = (Math.random() - 0.5) * emitter.radius;
     const side = (Math.random() - 0.5) * emitter.radius * 0.34;
-    const initialAge = seed ? Math.random() * 1.4 : 0;
-    const travel = initialAge * Math.min(emitter.speed, Math.max(result.stats.maxSpeed, 0.12)) * 0.38;
-    current[offset] = emitter.position.x + emitter.axis.x * along + emitter.direction.x * travel;
-    current[offset + 1] = emitter.position.y + emitter.axis.y * along + emitter.direction.y * travel;
-    current[offset + 2] = emitter.position.z + emitter.axis.z * along + emitter.direction.z * travel;
-    current[offset] += side * emitter.direction.z;
-    current[offset + 2] -= side * emitter.direction.x;
-    ages[index] = initialAge;
+    current[offset] = emitter.position.x + emitter.axis.x * along + emitter.sideAxis.x * side;
+    current[offset + 1] = emitter.position.y + emitter.axis.y * along + emitter.sideAxis.y * side;
+    current[offset + 2] = emitter.position.z + emitter.axis.z * along + emitter.sideAxis.z * side;
+    ages[index] = 0;
     lifetimes[index] = 5.5 + Math.random() * 4.5;
+    exitAges[index] = -1;
     for (let trail = 0; trail < trailCount; trail += 1) {
       const pointOffset = (index * trailCount + trail) * 3;
       history[pointOffset] = current[offset];
@@ -441,14 +512,13 @@ function createGasLayer(result, roomScene) {
       history[pointOffset + 2] = current[offset + 2];
     }
   };
-  if (particleCount) for (let index = 0; index < particleCount; index += 1) respawn(index, true);
+  if (particleCount) for (let index = 0; index < particleCount; index += 1) respawn(index);
 
   const position = new THREE.Vector3();
   const midpoint = new THREE.Vector3();
   const next = new THREE.Vector3();
   const velocity = new THREE.Vector3();
   const middleVelocity = new THREE.Vector3();
-  const eddy = new THREE.Vector3();
   let lastTime = null;
   let trailClock = 0;
   const update = (time) => {
@@ -463,24 +533,41 @@ function createGasLayer(result, roomScene) {
     for (let index = 0; index < particleCount; index += 1) {
       const offset = index * 3;
       if (ages[index] >= lifetimes[index]) respawn(index);
-      position.set(current[offset], current[offset + 1], current[offset + 2]);
-      sampleVelocity(result, position, velocity);
-      const speed = velocity.length();
-      midpoint.copy(position).addScaledVector(velocity, dt * 0.5);
-      sampleVelocity(result, midpoint, middleVelocity);
-      const turbulence = 0.014;
-      eddy.set(
-          Math.sin(index * 12.9898 + time * 1.7),
-          Math.sin(index * 4.1414 + time * 1.13),
-          Math.sin(index * 7.771 + time * 1.47),
-        ).multiplyScalar(turbulence * Math.sqrt(dt));
-      next.copy(position).addScaledVector(middleVelocity, dt).add(eddy);
-      if (isFluidPoint(next, grid, fields.solid)) {
-        current[offset] = next.x;
-        current[offset + 1] = next.y;
-        current[offset + 2] = next.z;
-      } else if (!insideRoom(next, grid)) {
-        ages[index] = Math.max(ages[index], lifetimes[index] - 0.35);
+      let speed = 0;
+      if (exitAges[index] >= 0) {
+        current[offset] += exitVelocities[offset] * dt;
+        current[offset + 1] += exitVelocities[offset + 1] * dt;
+        current[offset + 2] += exitVelocities[offset + 2] * dt;
+        speed = Math.hypot(exitVelocities[offset], exitVelocities[offset + 1], exitVelocities[offset + 2]);
+      } else {
+        position.set(current[offset], current[offset + 1], current[offset + 2]);
+        sampleVelocity(result, position, velocity);
+        speed = velocity.length();
+        midpoint.copy(position).addScaledVector(velocity, dt * 0.5);
+        sampleVelocity(result, midpoint, middleVelocity);
+        next.copy(position).addScaledVector(middleVelocity, dt);
+        if (isFluidPoint(next, grid, fields.solid)) {
+          current[offset] = next.x;
+          current[offset + 1] = next.y;
+          current[offset + 2] = next.z;
+        } else if (!insideRoom(next, grid)) {
+          const exit = findWindowExit(position, next, roomScene, result, velocity);
+          if (exit) {
+            current[offset] = exit.point.x;
+            current[offset + 1] = exit.point.y;
+            current[offset + 2] = exit.point.z;
+            const exitSpeed = Math.min(1.5, exit.velocity.length());
+            const scale = exitSpeed / Math.max(1e-6, exit.velocity.length());
+            exitVelocities[offset] = exit.velocity.x * scale;
+            exitVelocities[offset + 1] = exit.velocity.y * scale;
+            exitVelocities[offset + 2] = exit.velocity.z * scale;
+            exitAges[index] = ages[index];
+          } else {
+            ages[index] = Math.max(ages[index], lifetimes[index] - 0.5);
+          }
+        } else {
+          ages[index] = Math.max(ages[index], lifetimes[index] - 0.5);
+        }
       }
       ages[index] += dt;
       if (captureTrail) {
@@ -492,17 +579,39 @@ function createGasLayer(result, roomScene) {
       }
       const life = smoothstep01(ages[index] / 0.22)
         * (1 - smoothstep01((ages[index] / lifetimes[index] - 0.78) / 0.22));
+      const exitFade = exitAges[index] < 0 ? 1 : 1 - smoothstep01((ages[index] - exitAges[index]) / 0.75);
       for (let trail = 0; trail < trailCount; trail += 1) {
         const pointIndex = index * trailCount + trail;
         const pointOffset = pointIndex * 3;
         positions[pointOffset] = history[pointOffset] - grid.width / 2;
         positions[pointOffset + 1] = history[pointOffset + 1];
         positions[pointOffset + 2] = history[pointOffset + 2] - grid.depth / 2;
-        lifeValues[pointIndex] = life * (1 - trail / (trailCount + 0.3));
+        const newer = Math.max(0, trail - 1);
+        const older = Math.min(trailCount - 1, trail + 1);
+        const tangentFrom = (index * trailCount + newer) * 3;
+        const tangentTo = (index * trailCount + older) * 3;
+        let tx = history[tangentFrom] - history[tangentTo];
+        let ty = history[tangentFrom + 1] - history[tangentTo + 1];
+        let tz = history[tangentFrom + 2] - history[tangentTo + 2];
+        const tangentLength = Math.hypot(tx, ty, tz);
+        if (tangentLength > 1e-6) {
+          tx /= tangentLength;
+          ty /= tangentLength;
+          tz /= tangentLength;
+        } else {
+          tx = emitters[index % emitters.length].direction.x;
+          ty = emitters[index % emitters.length].direction.y;
+          tz = emitters[index % emitters.length].direction.z;
+        }
+        tangentValues[pointOffset] = tx;
+        tangentValues[pointOffset + 1] = ty;
+        tangentValues[pointOffset + 2] = tz;
+        lifeValues[pointIndex] = life * exitFade * (1 - trail / (trailCount + 0.3));
         speedValues[pointIndex] = clamp(speed / speedRange, 0, 1);
       }
     }
     geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.aTangent.needsUpdate = true;
     geometry.attributes.aLife.needsUpdate = true;
     geometry.attributes.aSpeed.needsUpdate = true;
     geometry.computeBoundingSphere();
@@ -525,8 +634,9 @@ const INFRARED_STOPS = [
   [1, 0xfff2d5],
 ].map(([position, color]) => ({ position, color: new THREE.Color(color) }));
 
-function infraredColor(value, ambient, target) {
-  const normalized = clamp((value - (ambient - 4)) / 12, 0, 1);
+function infraredColor(value, ambient, target, outdoor = ambient) {
+  const range = temperatureRange(ambient, outdoor);
+  const normalized = clamp((value - range.minimum) / (range.maximum - range.minimum), 0, 1);
   const upperIndex = INFRARED_STOPS.findIndex((stop) => stop.position >= normalized);
   const upper = INFRARED_STOPS[Math.max(1, upperIndex)];
   const lower = INFRARED_STOPS[Math.max(0, upperIndex - 1)];
@@ -580,7 +690,7 @@ function createInfraredPlane(result, scene, wall) {
     const y = floor ? Math.max(0.04, grid.dy * 0.55) : point.y;
     const z = point.z + grid.depth / 2;
     const temperature = sampleField(result.fields.temperature, x, y, z, grid, result.fields.solid, result.ambientTemperature);
-    infraredColor(temperature, result.ambientTemperature, color).toArray(colors, index * 4);
+    infraredColor(temperature, result.ambientTemperature, color, result.outdoorTemperature).toArray(colors, index * 4);
     const along = wall === 'left' || wall === 'right' ? z : x;
     const insideOpening = openings.some((window) => {
       const center = wall === 'left' || wall === 'right' ? window.position.z : window.position.x;
@@ -657,7 +767,7 @@ export function createTemperatureObjectLayer(result, objectGroups = new Map()) {
           result.fields.solid,
           result.ambientTemperature,
         );
-        infraredColor(temperature, result.ambientTemperature, color).toArray(colors, vertex * 3);
+        infraredColor(temperature, result.ambientTemperature, color, result.outdoorTemperature).toArray(colors, vertex * 3);
       }
       geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
       overlayMesh.geometry = geometry;

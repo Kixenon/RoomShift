@@ -21,6 +21,7 @@ const LIMITS = Object.freeze({
 
 export const FIELD_PHYSICS_DEFAULTS = Object.freeze({
   ambientTemperature: 20,
+  outdoorTemperature: 10,
   kinematicViscosity: 0.018,
   effectiveThermalDiffusivity: 0.018,
   coolingRate: 0.02,
@@ -49,7 +50,7 @@ export const FIELD_ASSUMPTIONS = Object.freeze({
   maximumSpeedMetersPerSecond: LIMITS.maxSpeed,
   thermalSourceUnits: 'estimated degrees Celsius per second',
   thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
-  boundaries: 'closed walls with adjustable inlet or outlet flow at open windows',
+  boundaries: 'closed walls with prescribed window flow and outdoor-temperature inflow',
 });
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -65,6 +66,10 @@ export function validateScene(scene) {
     || depth < LIMITS.roomMin || depth > LIMITS.roomMax
     || height < LIMITS.heightMin || height > LIMITS.heightMax) {
     throw new RangeError('Room dimensions are outside the supported 2–20 m footprint and 2–6 m height.');
+  }
+  if (scene.room.outdoorTemperature !== undefined
+    && (!Number.isFinite(scene.room.outdoorTemperature) || scene.room.outdoorTemperature < -20 || scene.room.outdoorTemperature > 50)) {
+    throw new RangeError('Outdoor temperature must be between -20 °C and 50 °C.');
   }
 
   for (const object of scene.objects) {
@@ -105,7 +110,11 @@ export function validateScene(scene) {
 }
 
 function validateOptions(options, room) {
-  const values = { ...DEFAULTS, ...options };
+  const values = {
+    ...DEFAULTS,
+    ...options,
+    outdoorTemperature: options.outdoorTemperature ?? room.outdoorTemperature ?? DEFAULTS.outdoorTemperature,
+  };
   if (!Number.isFinite(values.cellSize) || values.cellSize < LIMITS.minCellSize || values.cellSize > LIMITS.maxCellSize) {
     throw new RangeError(`Cell size must be between ${LIMITS.minCellSize} m and ${LIMITS.maxCellSize} m.`);
   }
@@ -119,6 +128,9 @@ function validateOptions(options, room) {
   }
   if (!Number.isFinite(values.ambientTemperature) || values.ambientTemperature < 0 || values.ambientTemperature > 40) {
     throw new RangeError('Ambient temperature must be between 0 °C and 40 °C.');
+  }
+  if (!Number.isFinite(values.outdoorTemperature) || values.outdoorTemperature < -20 || values.outdoorTemperature > 50) {
+    throw new RangeError('Outdoor temperature must be between -20 °C and 50 °C.');
   }
 
   const roomReach = Math.hypot(room.width, room.depth, room.height);
@@ -205,11 +217,11 @@ export function buildSolidMask(scene, grid) {
   return solid;
 }
 
-export function buildOutletMask(scene, grid) {
-  return buildWindowBoundary(scene, grid).outlets;
+export function buildOutletMask(scene, grid, settings = {}) {
+  return buildWindowBoundary(scene, grid, settings).outlets;
 }
 
-export function buildWindowBoundary(scene, grid) {
+export function buildWindowBoundary(scene, grid, settings = {}) {
   const count = grid.nx * grid.ny * grid.nz;
   const outlets = new Uint8Array(count);
   const flow = new Float32Array(count);
@@ -229,18 +241,40 @@ export function buildWindowBoundary(scene, grid) {
     const alongPosition = alongX ? window.position.x : window.position.z;
     const firstAlong = clamp(Math.floor((alongPosition - window.dimensions.width / 2) / alongSpacing), 0, alongCells - 1);
     const lastAlong = clamp(Math.floor((alongPosition + window.dimensions.width / 2) / alongSpacing), 0, alongCells - 1);
-    const inletRows = Math.floor((lastJ - firstJ + 1) / 2);
+    const cells = [];
     for (let j = firstJ; j <= lastJ; j += 1) {
-      const isInlet = direction === 'inlet' || (direction === 'exchange' && j - firstJ < inletRows);
-      const outwardSign = isInlet ? -1 : 1;
-      const normalSpeed = outwardSign * wallSign * speed;
       for (let along = firstAlong; along <= lastAlong; along += 1) {
         const i = alongX ? along : window.wall === 'left' ? 0 : grid.nx - 1;
         const k = alongX ? window.wall === 'front' ? 0 : grid.nz - 1 : along;
-        const index = indexOf(i, j, k, grid);
-        outlets[index] |= sideBit;
-        flow[index] = normalSpeed;
+        cells.push({ index: indexOf(i, j, k, grid), j, along });
       }
+    }
+
+    let inlets = [];
+    let exits = [];
+    if (direction === 'exchange') {
+      const outdoorAirIsWarmer = (settings.outdoorTemperature ?? scene.room.outdoorTemperature ?? DEFAULTS.outdoorTemperature)
+        > (settings.ambientTemperature ?? DEFAULTS.ambientTemperature);
+      cells.sort((a, b) => outdoorAirIsWarmer ? b.j - a.j || a.along - b.along : a.j - b.j || a.along - b.along);
+      const split = Math.floor(cells.length / 2);
+      if (split === 0) continue;
+      inlets = cells.slice(0, split);
+      exits = cells.slice(split);
+    } else if (direction === 'inlet') {
+      inlets = cells;
+    } else {
+      exits = cells;
+    }
+
+    const exchangeSpeed = direction === 'exchange' ? speed * cells.length / (2 * inlets.length) : speed;
+    for (const { index } of inlets) {
+      outlets[index] |= sideBit;
+      flow[index] = -wallSign * exchangeSpeed;
+    }
+    const exitSpeed = direction === 'exchange' ? speed * cells.length / (2 * exits.length) : speed;
+    for (const { index } of exits) {
+      outlets[index] |= sideBit;
+      flow[index] = wallSign * exitSpeed;
     }
   }
   return { outlets, flow };
@@ -653,7 +687,7 @@ function createSimulationState(scene, options) {
   const settings = validateOptions(options, scene.room);
   const grid = buildGrid(scene.room, settings.cellSize);
   const solid = buildSolidMask(scene, grid);
-  const { outlets, flow: windowFlow } = buildWindowBoundary(scene, grid);
+  const { outlets, flow: windowFlow } = buildWindowBoundary(scene, grid, settings);
   const count = grid.nx * grid.ny * grid.nz;
   return {
     scene,
@@ -704,26 +738,24 @@ function advanceSimulation(state) {
     }
   }
 
-  temperature = advect(temperature, previousU, previousV, previousW, grid, solid, settings.timeStep, settings.ambientTemperature, true);
+  temperature = advect(temperature, previousU, previousV, previousW, grid, solid, settings.timeStep, settings.outdoorTemperature, true);
   temperature = diffuse(temperature, settings.effectiveThermalDiffusivity, settings.timeStep, grid, solid, 0, LIMITS.maxTemperature);
   for (let index = 0; index < temperature.length; index += 1) {
     if (solid[index]) {
       temperature[index] = settings.ambientTemperature;
       continue;
     }
-    if (outlets[index]) {
-      const isInlet = outlets[index] & 1 ? windowFlow[index] > 0
-        : outlets[index] & 2 ? windowFlow[index] < 0
-          : outlets[index] & 16 ? windowFlow[index] > 0 : windowFlow[index] < 0;
-      const exchange = Math.min(1, settings.timeStep * Math.abs(windowFlow[index]) / Math.min(grid.dx, grid.dz));
-      if (isInlet) temperature[index] = settings.ambientTemperature;
-      else temperature[index] += (settings.ambientTemperature - temperature[index]) * exchange;
-    }
     temperature[index] = clamp(
       temperature[index] + (settings.ambientTemperature - temperature[index]) * settings.coolingRate * settings.timeStep,
       0,
       LIMITS.maxTemperature,
     );
+    if (outlets[index]) {
+      const isInlet = outlets[index] & 1 ? windowFlow[index] > 0
+        : outlets[index] & 2 ? windowFlow[index] < 0
+          : outlets[index] & 16 ? windowFlow[index] > 0 : windowFlow[index] < 0;
+      if (isInlet) temperature[index] = settings.outdoorTemperature;
+    }
   }
   addHeatSources(temperature, heaters, grid, solid, settings, settings.timeStep);
   for (let index = 0; index < temperature.length; index += 1) {
@@ -740,6 +772,7 @@ function finishSimulation(state) {
     fields: { u, v, w, temperature, solid, outlets, windowFlow },
     backend: 'cpu-preview',
     ambientTemperature: settings.ambientTemperature,
+    outdoorTemperature: settings.outdoorTemperature,
     durationSeconds: settings.steps * settings.timeStep,
     assumptions: FIELD_ASSUMPTIONS,
     stats,

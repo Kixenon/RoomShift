@@ -3,7 +3,7 @@ import { rotationMatrixXYZ } from './room-transform.js';
 
 export { rotationMatrixXYZ } from './room-transform.js';
 
-export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7 });
+export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
 
 export const DEFAULT_BOX_DIMENSIONS = Object.freeze({ width: 1, height: 1, depth: 1 });
 export const SOURCE_MODELS = Object.freeze(['fan', 'heater', 'lamp']);

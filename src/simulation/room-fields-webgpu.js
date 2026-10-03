@@ -21,14 +21,19 @@ const WORKGROUP_SIZE = 128;
 const devicePromises = new WeakMap();
 const pipelinePromises = new WeakMap();
 
-export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
+export function prepareWebGpuInputs(scene, grid, settings = {}) {
+  const physics = {
+    ...SETTINGS,
+    ...settings,
+    outdoorTemperature: settings.outdoorTemperature ?? scene.room.outdoorTemperature ?? SETTINGS.outdoorTemperature,
+  };
   const mask = buildSolidMask(scene, grid);
   const solid = Uint32Array.from(mask);
-  const boundary = buildWindowBoundary(scene, grid);
+  const boundary = buildWindowBoundary(scene, grid, physics);
   const outlets = Uint32Array.from(boundary.outlets);
   const heaters = scene.objects.filter((object) => object.model === 'heater');
   const heaterData = new Float32Array(Math.max(1, heaters.length) * 8);
-  const fanForces = buildFanAccelerationField(scene, grid, solid, settings);
+  const fanForces = buildFanAccelerationField(scene, grid, solid, physics);
 
   heaters.forEach((heater, index) => {
     const offset = index * 8;
@@ -36,8 +41,8 @@ export function prepareWebGpuInputs(scene, grid, settings = SETTINGS) {
       heater.position.x,
       heater.position.y + heater.dimensions.height / 2,
       heater.position.z,
-      settings.heaterRadius,
-      settings.heaterRate * (heater.intensity ?? 1), 0, 0, 0,
+      physics.heaterRadius,
+      physics.heaterRate * (heater.intensity ?? 1), 0, 0, 0,
     ], offset);
   });
 
@@ -151,7 +156,7 @@ fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let back = clipBacktrace(position, position - current.xyz * cfg.spacing.w);
   let advected = vec4<f32>(
     sampleField(0u, back, 0.0, false), sampleField(1u, back, 0.0, false),
-    sampleField(2u, back, 0.0, false), sampleField(3u, back, cfg.physics.x, true));
+    sampleField(2u, back, 0.0, false), sampleField(3u, back, cfg.limits.z, true));
   let velocityDiffusion = vec3<f32>(
     laplacian(i32(i), i32(j), i32(k), 0u, current.x),
     laplacian(i32(i), i32(j), i32(k), 1u, current.y),
@@ -165,21 +170,19 @@ fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
   if (speed > cfg.limits.x) { velocity *= cfg.limits.x / speed; }
   var temperature = advected.w + cfg.physics.z * cfg.spacing.w * temperatureDiffusion
     + (cfg.physics.x - advected.w) * cfg.physics.w * cfg.spacing.w;
+  let flow = windowFlow[id];
+  let mask = outletMask[id];
+  if (mask != 0u) {
+    let inlet = ((mask & 1u) != 0u && flow > 0.0) || ((mask & 2u) != 0u && flow < 0.0)
+      || ((mask & 16u) != 0u && flow > 0.0) || ((mask & 32u) != 0u && flow < 0.0);
+    if (inlet) { temperature = cfg.limits.z; }
+  }
   for (var heaterIndex = 0u; heaterIndex < cfg.counts.x; heaterIndex += 1u) {
     let heater = heaters[heaterIndex];
     let distanceSquared = dot(position - heater.centerRadius.xyz, position - heater.centerRadius.xyz);
     temperature += heater.source.x * exp(-distanceSquared / (2.0 * heater.centerRadius.w * heater.centerRadius.w)) * cfg.spacing.w;
   }
   temperature = clamp(temperature, 0.0, 60.0);
-  let flow = windowFlow[id];
-  let mask = outletMask[id];
-  if (mask != 0u) {
-    let inlet = ((mask & 1u) != 0u && flow > 0.0) || ((mask & 2u) != 0u && flow < 0.0)
-      || ((mask & 16u) != 0u && flow > 0.0) || ((mask & 32u) != 0u && flow < 0.0);
-    let exchange = min(1.0, cfg.spacing.w * abs(flow) / min(cfg.spacing.x, cfg.spacing.z));
-    if (inlet) { temperature = cfg.physics.x; }
-    else { temperature += (cfg.physics.x - temperature) * exchange; }
-  }
   if (i == 0u) { velocity.x = select(0.0, flow, (mask & 1u) != 0u); }
   if (i + 1u == cfg.dims.x) { velocity.x = select(0.0, flow, (mask & 2u) != 0u); }
   if (j == 0u || j + 1u == cfg.dims.y) { velocity.y = 0.0; }
@@ -308,7 +311,7 @@ function makeConfig(grid, settings, heaterCount) {
   [grid.dx, grid.dy, grid.dz, settings.timeStep,
     settings.ambientTemperature, settings.kinematicViscosity,
     settings.effectiveThermalDiffusivity, settings.coolingRate,
-    settings.maximumSpeed, 9.81 / (settings.ambientTemperature + 273.15), 0, 0].forEach((value, index) => {
+    settings.maximumSpeed, 9.81 / (settings.ambientTemperature + 273.15), settings.outdoorTemperature, 0].forEach((value, index) => {
     view.setFloat32(32 + index * 4, value, true);
   });
   return bytes;
@@ -439,7 +442,14 @@ function readback(device, source, target, byteLength) {
 
 export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = globalThis.navigator?.gpu) {
   validateScene(scene);
-  const settings = { ...SETTINGS, ...options };
+  const settings = {
+    ...SETTINGS,
+    ...options,
+    outdoorTemperature: options.outdoorTemperature ?? scene.room.outdoorTemperature ?? SETTINGS.outdoorTemperature,
+  };
+  if (!Number.isFinite(settings.outdoorTemperature) || settings.outdoorTemperature < -20 || settings.outdoorTemperature > 50) {
+    throw new RangeError('Outdoor temperature must be between -20 °C and 50 °C.');
+  }
   if (!gpu) return null;
   const device = await getDevice(gpu);
   if (!device) return null;
@@ -535,11 +545,12 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
       fields,
       backend: 'webgpu',
       ambientTemperature: settings.ambientTemperature,
+      outdoorTemperature: settings.outdoorTemperature,
       durationSeconds: settings.steps * settings.timeStep,
       assumptions: Object.freeze({
         model: 'GPU accelerated simplified 3D transient advection-diffusion estimate',
         units: 'velocity in m/s; temperature in estimated °C',
-        boundaries: 'closed room walls with adjustable inlet or outlet flow at open windows',
+        boundaries: 'closed room walls with prescribed window flow and outdoor-temperature inflow',
         thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
         maximumGridCells: 1_500_000,
       }),
