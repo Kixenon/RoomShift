@@ -286,7 +286,7 @@ function isFluidPoint(point, grid, solid) {
   return !solid[indexOf(i, j, k, grid)];
 }
 
-function makeEmitter(position, direction, axis, radius) {
+function makeEmitter(position, direction, axis, radius, kind = 'flow') {
   const normal = direction.clone().normalize();
   const spanAxis = axis.clone().addScaledVector(normal, -axis.dot(normal));
   if (spanAxis.lengthSq() < 1e-6) {
@@ -294,10 +294,11 @@ function makeEmitter(position, direction, axis, radius) {
   }
   spanAxis.normalize();
   const sideAxis = new THREE.Vector3().crossVectors(normal, spanAxis).normalize();
-  return { position, direction: normal, axis: spanAxis, sideAxis, radius };
+  return { position, direction: normal, axis: spanAxis, sideAxis, radius, kind };
 }
 
 function findWindowExit(start, end, roomScene, result, targetVelocity) {
+  if (!roomScene) return null;
   const { grid } = result;
   const walls = {
     front: { axis: 'z', boundary: 0, along: 'x', normal: new THREE.Vector3(0, 0, -1) },
@@ -340,7 +341,8 @@ function getAirEmitters(result, roomScene) {
       position,
       new THREE.Vector3(matrix[0][2], matrix[1][2], matrix[2][2]),
       new THREE.Vector3(matrix[0][0], matrix[1][0], matrix[2][0]),
-      Math.max(0.05, fan.dimensions.width * 0.16),
+      Math.max(0.06, fan.dimensions.width * 0.32),
+      'fan',
     ));
   }
 
@@ -358,6 +360,7 @@ function getAirEmitters(result, roomScene) {
       new THREE.Vector3(0, 1, 0),
       new THREE.Vector3(1, 0, 0),
       Math.max(heater.dimensions.width, heater.dimensions.depth) * 0.46,
+      'heater',
     ));
   }
 
@@ -380,6 +383,7 @@ function getAirEmitters(result, roomScene) {
       direction,
       axis,
       Math.max(0.08, window.dimensions.width * 0.36),
+      'window',
     ));
     if (flowDirection !== 'outlet') addWindowEmitter(inletFraction, outward.clone().negate());
     if (flowDirection !== 'inlet') addWindowEmitter(1 - inletFraction, outward);
@@ -416,8 +420,8 @@ function getAirEmitters(result, roomScene) {
 function createGasLayer(result, roomScene) {
   const { grid, fields } = result;
   const emitters = getAirEmitters(result, roomScene);
-  const particleCount = emitters.length ? clamp(emitters.length * 260, 520, 1560) : 0;
-  const trailCount = 9;
+  const particleCount = Math.min(1320, emitters.length * 220);
+  const trailCount = 11;
   const pointCount = particleCount * trailCount;
   const positions = new Float32Array(pointCount * 3);
   const tangentValues = new Float32Array(pointCount * 3);
@@ -494,16 +498,105 @@ function createGasLayer(result, roomScene) {
   layer.renderOrder = 2;
   layer.frustumCulled = false;
 
-  const respawn = (index) => {
+  const position = new THREE.Vector3();
+  const midpoint = new THREE.Vector3();
+  const next = new THREE.Vector3();
+  const contact = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const velocity = new THREE.Vector3();
+  const middleVelocity = new THREE.Vector3();
+  const trailInterval = 0.04;
+  const pushHistory = (index) => {
+    const firstHistory = index * trailCount * 3;
+    history.copyWithin(firstHistory + 3, firstHistory, firstHistory + (trailCount - 1) * 3);
+    const offset = index * 3;
+    history[firstHistory] = current[offset];
+    history[firstHistory + 1] = current[offset + 1];
+    history[firstHistory + 2] = current[offset + 2];
+  };
+  const moveParticle = (index, dt) => {
+    const offset = index * 3;
+    if (exitAges[index] >= 0) {
+      current[offset] += exitVelocities[offset] * dt;
+      current[offset + 1] += exitVelocities[offset + 1] * dt;
+      current[offset + 2] += exitVelocities[offset + 2] * dt;
+      return Math.hypot(exitVelocities[offset], exitVelocities[offset + 1], exitVelocities[offset + 2]);
+    }
+
+    position.set(current[offset], current[offset + 1], current[offset + 2]);
+    sampleVelocity(result, position, velocity);
+    const speed = velocity.length();
+    midpoint.copy(position).addScaledVector(velocity, dt * 0.5);
+    sampleVelocity(result, midpoint, middleVelocity);
+    next.copy(position).addScaledVector(middleVelocity, dt);
+    if (isFluidPoint(next, grid, fields.solid)) {
+      current[offset] = next.x;
+      current[offset + 1] = next.y;
+      current[offset + 2] = next.z;
+      return speed;
+    }
+
+    if (!insideRoom(next, grid)) {
+      const exit = findWindowExit(position, next, roomScene, result, velocity);
+      if (exit) {
+        current[offset] = exit.point.x;
+        current[offset + 1] = exit.point.y;
+        current[offset + 2] = exit.point.z;
+        const exitSpeed = Math.min(1.5, exit.velocity.length());
+        const scale = exitSpeed / Math.max(1e-6, exit.velocity.length());
+        exitVelocities[offset] = exit.velocity.x * scale;
+        exitVelocities[offset + 1] = exit.velocity.y * scale;
+        exitVelocities[offset + 2] = exit.velocity.z * scale;
+        exitAges[index] = ages[index];
+      } else {
+        lifetimes[index] = Math.min(lifetimes[index], ages[index] + 0.3);
+      }
+      return speed;
+    }
+
+    let low = 0;
+    let high = 1;
+    for (let iteration = 0; iteration < 5; iteration += 1) {
+      const fraction = (low + high) * 0.5;
+      contact.copy(position).lerp(next, fraction);
+      if (isFluidPoint(contact, grid, fields.solid)) low = fraction;
+      else high = fraction;
+    }
+    contact.copy(position).lerp(next, Math.max(0, low - 0.02));
+    const i = clamp(Math.floor(next.x / grid.dx), 0, grid.nx - 1);
+    const j = clamp(Math.floor(next.y / grid.dy), 0, grid.ny - 1);
+    const k = clamp(Math.floor(next.z / grid.dz), 0, grid.nz - 1);
+    normal.set(
+      (contact.x - (i + 0.5) * grid.dx) / grid.dx,
+      (contact.y - (j + 0.5) * grid.dy) / grid.dy,
+      (contact.z - (k + 0.5) * grid.dz) / grid.dz,
+    );
+    if (normal.lengthSq() < 1e-6) normal.set(-middleVelocity.x, -middleVelocity.y, -middleVelocity.z);
+    normal.normalize();
+    sampleVelocity(result, contact, middleVelocity);
+    const intoSurface = middleVelocity.dot(normal);
+    if (intoSurface < 0) middleVelocity.addScaledVector(normal, -intoSurface);
+    if (middleVelocity.lengthSq() > 0.0004) {
+      next.copy(contact).addScaledVector(middleVelocity, dt);
+      if (isFluidPoint(next, grid, fields.solid)) contact.copy(next);
+    } else {
+      lifetimes[index] = Math.min(lifetimes[index], ages[index] + 0.3);
+    }
+    current[offset] = contact.x;
+    current[offset + 1] = contact.y;
+    current[offset + 2] = contact.z;
+    return speed;
+  };
+  const respawn = (index, warmStart = false) => {
     const emitter = emitters[index % emitters.length];
     const offset = index * 3;
     const along = (Math.random() - 0.5) * emitter.radius;
-    const side = (Math.random() - 0.5) * emitter.radius * 0.34;
+    const side = (Math.random() - 0.5) * emitter.radius * 0.72;
     current[offset] = emitter.position.x + emitter.axis.x * along + emitter.sideAxis.x * side;
     current[offset + 1] = emitter.position.y + emitter.axis.y * along + emitter.sideAxis.y * side;
     current[offset + 2] = emitter.position.z + emitter.axis.z * along + emitter.sideAxis.z * side;
     ages[index] = 0;
-    lifetimes[index] = 5.5 + Math.random() * 4.5;
+    lifetimes[index] = 5 + Math.random() * 4;
     exitAges[index] = -1;
     for (let trail = 0; trail < trailCount; trail += 1) {
       const pointOffset = (index * trailCount + trail) * 3;
@@ -511,14 +604,25 @@ function createGasLayer(result, roomScene) {
       history[pointOffset + 1] = current[offset + 1];
       history[pointOffset + 2] = current[offset + 2];
     }
+    if (!warmStart) return;
+    const maxPhase = emitter.kind === 'window' ? 0.55 : 2.6;
+    const phase = Math.random() * Math.min(maxPhase, lifetimes[index] * 0.6);
+    let elapsed = 0;
+    let historyClock = 0;
+    while (elapsed < phase) {
+      const step = Math.min(1 / 30, phase - elapsed);
+      moveParticle(index, step);
+      ages[index] += step;
+      elapsed += step;
+      historyClock += step;
+      if (historyClock >= trailInterval) {
+        pushHistory(index);
+        historyClock -= trailInterval;
+      }
+      if (ages[index] >= lifetimes[index]) break;
+    }
   };
-  if (particleCount) for (let index = 0; index < particleCount; index += 1) respawn(index);
-
-  const position = new THREE.Vector3();
-  const midpoint = new THREE.Vector3();
-  const next = new THREE.Vector3();
-  const velocity = new THREE.Vector3();
-  const middleVelocity = new THREE.Vector3();
+  if (particleCount) for (let index = 0; index < particleCount; index += 1) respawn(index, true);
   let lastTime = null;
   let trailClock = 0;
   const update = (time) => {
@@ -526,73 +630,32 @@ function createGasLayer(result, roomScene) {
     const dt = lastTime === null ? 1 / 60 : clamp(time - lastTime, 0, 0.05);
     lastTime = time;
     trailClock += dt;
-    const captureTrail = trailClock >= 0.06;
-    if (captureTrail) trailClock %= 0.06;
+    const captureTrail = trailClock >= trailInterval;
+    if (captureTrail) trailClock -= trailInterval;
     const speedRange = Math.max(result.stats.maxSpeed, 0.25);
 
     for (let index = 0; index < particleCount; index += 1) {
       const offset = index * 3;
-      if (ages[index] >= lifetimes[index]) respawn(index);
-      let speed = 0;
-      if (exitAges[index] >= 0) {
-        current[offset] += exitVelocities[offset] * dt;
-        current[offset + 1] += exitVelocities[offset + 1] * dt;
-        current[offset + 2] += exitVelocities[offset + 2] * dt;
-        speed = Math.hypot(exitVelocities[offset], exitVelocities[offset + 1], exitVelocities[offset + 2]);
-      } else {
-        position.set(current[offset], current[offset + 1], current[offset + 2]);
-        sampleVelocity(result, position, velocity);
-        speed = velocity.length();
-        midpoint.copy(position).addScaledVector(velocity, dt * 0.5);
-        sampleVelocity(result, midpoint, middleVelocity);
-        next.copy(position).addScaledVector(middleVelocity, dt);
-        if (isFluidPoint(next, grid, fields.solid)) {
-          current[offset] = next.x;
-          current[offset + 1] = next.y;
-          current[offset + 2] = next.z;
-        } else if (!insideRoom(next, grid)) {
-          const exit = findWindowExit(position, next, roomScene, result, velocity);
-          if (exit) {
-            current[offset] = exit.point.x;
-            current[offset + 1] = exit.point.y;
-            current[offset + 2] = exit.point.z;
-            const exitSpeed = Math.min(1.5, exit.velocity.length());
-            const scale = exitSpeed / Math.max(1e-6, exit.velocity.length());
-            exitVelocities[offset] = exit.velocity.x * scale;
-            exitVelocities[offset + 1] = exit.velocity.y * scale;
-            exitVelocities[offset + 2] = exit.velocity.z * scale;
-            exitAges[index] = ages[index];
-          } else {
-            ages[index] = Math.max(ages[index], lifetimes[index] - 0.5);
-          }
-        } else {
-          ages[index] = Math.max(ages[index], lifetimes[index] - 0.5);
-        }
-      }
+      if (ages[index] >= lifetimes[index]
+        || (exitAges[index] >= 0 && ages[index] - exitAges[index] >= 0.8)) respawn(index);
+      const speed = moveParticle(index, dt);
       ages[index] += dt;
-      if (captureTrail) {
-        const firstHistory = index * trailCount * 3;
-        history.copyWithin(firstHistory + 3, firstHistory, firstHistory + (trailCount - 1) * 3);
-        history[firstHistory] = current[offset];
-        history[firstHistory + 1] = current[offset + 1];
-        history[firstHistory + 2] = current[offset + 2];
-      }
+      if (captureTrail) pushHistory(index);
       const life = smoothstep01(ages[index] / 0.22)
         * (1 - smoothstep01((ages[index] / lifetimes[index] - 0.78) / 0.22));
       const exitFade = exitAges[index] < 0 ? 1 : 1 - smoothstep01((ages[index] - exitAges[index]) / 0.75);
       for (let trail = 0; trail < trailCount; trail += 1) {
         const pointIndex = index * trailCount + trail;
         const pointOffset = pointIndex * 3;
-        positions[pointOffset] = history[pointOffset] - grid.width / 2;
-        positions[pointOffset + 1] = history[pointOffset + 1];
-        positions[pointOffset + 2] = history[pointOffset + 2] - grid.depth / 2;
-        const newer = Math.max(0, trail - 1);
-        const older = Math.min(trailCount - 1, trail + 1);
-        const tangentFrom = (index * trailCount + newer) * 3;
-        const tangentTo = (index * trailCount + older) * 3;
-        let tx = history[tangentFrom] - history[tangentTo];
-        let ty = history[tangentFrom + 1] - history[tangentTo + 1];
-        let tz = history[tangentFrom + 2] - history[tangentTo + 2];
+        const sample = trail === 0 ? offset : (index * trailCount + trail - 1) * 3;
+        positions[pointOffset] = (trail === 0 ? current[offset] : history[sample]) - grid.width / 2;
+        positions[pointOffset + 1] = trail === 0 ? current[offset + 1] : history[sample + 1];
+        positions[pointOffset + 2] = (trail === 0 ? current[offset + 2] : history[sample + 2]) - grid.depth / 2;
+        const tangentFrom = trail < 2 ? offset : (index * trailCount + trail - 2) * 3;
+        const tangentTo = (index * trailCount + trail) * 3;
+        let tx = (trail < 2 ? current[tangentFrom] : history[tangentFrom]) - history[tangentTo];
+        let ty = (trail < 2 ? current[tangentFrom + 1] : history[tangentFrom + 1]) - history[tangentTo + 1];
+        let tz = (trail < 2 ? current[tangentFrom + 2] : history[tangentFrom + 2]) - history[tangentTo + 2];
         const tangentLength = Math.hypot(tx, ty, tz);
         if (tangentLength > 1e-6) {
           tx /= tangentLength;

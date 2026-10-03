@@ -26,8 +26,8 @@ export const FIELD_PHYSICS_DEFAULTS = Object.freeze({
   effectiveThermalDiffusivity: 0.018,
   coolingRate: 0.02,
   fanAcceleration: 4.5,
-  fanRange: 2.6,
-  heaterRate: 8,
+  fanRange: 3.8,
+  heaterRate: 0.8,
   heaterRadius: 0.45,
 });
 const DEFAULTS = Object.freeze({
@@ -35,7 +35,7 @@ const DEFAULTS = Object.freeze({
   cellSize: 0.15,
   steps: 120,
   timeStep: 0.05,
-  pressureIterations: 12,
+  pressureIterations: 20,
 });
 const FAN_SOURCE_GRID_CELLS = 1.25;
 
@@ -498,7 +498,7 @@ export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULT
           const forward = dx * direction[0] + dy * direction[1] + dz * direction[2];
           if (forward < -sourceReach || forward > settings.fanRange) continue;
           const lateralSquared = Math.max(0, dx ** 2 + dy ** 2 + dz ** 2 - forward ** 2);
-          const spread = 0.12 + Math.max(0, forward) * 0.2;
+          const spread = Math.max(0.12, fan.dimensions.width * 0.32) + Math.max(0, forward) * 0.28;
           if (lateralSquared > 9 * spread ** 2 || !rayIsClear(source, x, y, z, blockers)) continue;
           const upstreamFade = Math.exp(-0.5 * (Math.min(0, forward) / sourceReach) ** 2);
           const beam = Math.exp(-lateralSquared / (2 * spread ** 2))
