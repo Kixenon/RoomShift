@@ -158,6 +158,9 @@ function buildGrid(room, cellSize) {
   const nx = clamp(Math.ceil(room.width / cellSize), 4, LIMITS.maxGridX);
   const ny = clamp(Math.ceil(room.height / cellSize), 4, LIMITS.maxGridY);
   const nz = clamp(Math.ceil(room.depth / cellSize), 4, LIMITS.maxGridZ);
+  const dx = room.width / nx;
+  const dy = room.height / ny;
+  const dz = room.depth / nz;
   return {
     width: room.width,
     height: room.height,
@@ -165,9 +168,11 @@ function buildGrid(room, cellSize) {
     nx,
     ny,
     nz,
-    dx: room.width / nx,
-    dy: room.height / ny,
-    dz: room.depth / nz,
+    dx,
+    dy,
+    dz,
+    cellSize: Math.max(dx, dy, dz),
+    requestedCellSize: cellSize,
   };
 }
 
@@ -305,31 +310,47 @@ function sampleField(field, x, y, z, grid, solid, fallback, skipSolid = false) {
   return value;
 }
 
-function clipBacktrace(position, back, grid, solid) {
-  const distance = Math.hypot(back.x - position.x, back.y - position.y, back.z - position.z);
+function clipBacktrace(x, y, z, backX, backY, backZ, grid, solid, target) {
+  const distance = Math.hypot(backX - x, backY - y, backZ - z);
+  if (distance < 1e-12) {
+    target.x = x;
+    target.y = y;
+    target.z = z;
+    return target;
+  }
   const stepLength = Math.min(grid.dx, grid.dy, grid.dz) * 0.5;
   const steps = Math.max(1, Math.ceil(distance / stepLength));
-  let lastFluidPoint = position;
+  let lastX = x;
+  let lastY = y;
+  let lastZ = z;
   for (let step = 1; step <= steps; step += 1) {
     const fraction = step / steps;
-    const point = {
-      x: position.x + (back.x - position.x) * fraction,
-      y: position.y + (back.y - position.y) * fraction,
-      z: position.z + (back.z - position.z) * fraction,
-    };
-    if (point.x < 0 || point.x > grid.width || point.y < 0 || point.y > grid.height
-      || point.z < 0 || point.z > grid.depth) continue;
-    const i = Math.min(grid.nx - 1, Math.floor(point.x / grid.dx));
-    const j = Math.min(grid.ny - 1, Math.floor(point.y / grid.dy));
-    const k = Math.min(grid.nz - 1, Math.floor(point.z / grid.dz));
-    if (solid[indexOf(i, j, k, grid)]) return lastFluidPoint;
-    lastFluidPoint = point;
+    const pointX = x + (backX - x) * fraction;
+    const pointY = y + (backY - y) * fraction;
+    const pointZ = z + (backZ - z) * fraction;
+    if (pointX < 0 || pointX > grid.width || pointY < 0 || pointY > grid.height
+      || pointZ < 0 || pointZ > grid.depth) continue;
+    const i = Math.min(grid.nx - 1, Math.floor(pointX / grid.dx));
+    const j = Math.min(grid.ny - 1, Math.floor(pointY / grid.dy));
+    const k = Math.min(grid.nz - 1, Math.floor(pointZ / grid.dz));
+    if (solid[indexOf(i, j, k, grid)]) {
+      target.x = lastX;
+      target.y = lastY;
+      target.z = lastZ;
+      return target;
+    }
+    lastX = pointX;
+    lastY = pointY;
+    lastZ = pointZ;
   }
-  return back;
+  target.x = backX;
+  target.y = backY;
+  target.z = backZ;
+  return target;
 }
 
-function advect(field, u, v, w, grid, solid, timeStep, fallback, skipSolid = false) {
-  const next = new Float32Array(field.length);
+function advect(field, u, v, w, grid, solid, timeStep, fallback, skipSolid = false, next = new Float32Array(field.length)) {
+  const back = { x: 0, y: 0, z: 0 };
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
       for (let i = 0; i < grid.nx; i += 1) {
@@ -338,12 +359,14 @@ function advect(field, u, v, w, grid, solid, timeStep, fallback, skipSolid = fal
           next[index] = fallback;
           continue;
         }
-        const position = cellPosition(i, j, k, grid);
-        const back = clipBacktrace(position, {
-          x: position.x - u[index] * timeStep,
-          y: position.y - v[index] * timeStep,
-          z: position.z - w[index] * timeStep,
-        }, grid, solid);
+        const x = (i + 0.5) * grid.dx;
+        const y = (j + 0.5) * grid.dy;
+        const z = (k + 0.5) * grid.dz;
+        clipBacktrace(x, y, z,
+          x - u[index] * timeStep,
+          y - v[index] * timeStep,
+          z - w[index] * timeStep,
+          grid, solid, back);
         next[index] = sampleField(field, back.x, back.y, back.z, grid, solid, fallback, skipSolid);
       }
     }
@@ -358,10 +381,6 @@ function neighborValue(field, i, j, k, di, dj, dk, center, grid, solid) {
   if (ni < 0 || ni >= grid.nx || nj < 0 || nj >= grid.ny || nk < 0 || nk >= grid.nz) return center;
   const index = indexOf(ni, nj, nk, grid);
   return solid[index] ? center : field[index];
-}
-
-function boundaryFlow(index, side, outlets, windowFlow) {
-  return outlets[index] & side ? windowFlow[index] : 0;
 }
 
 function buildFaceVelocities(u, v, w, grid, solid, outlets, windowFlow, target, useWindowFlow = true) {
@@ -696,6 +715,9 @@ function projectVelocity(u, v, w, grid, solid, outlets, windowPressure, windowFl
   const { pressure } = workspace;
   const { divergence } = workspace;
   const { neighbors, diagonal, weights, boundarySource } = pressureStencil;
+  const xWeight = weights[0];
+  const yWeight = weights[2];
+  const zWeight = weights[4];
   const faces = buildFaceVelocities(u, v, w, grid, solid, outlets, windowFlow, workspace.faces, false);
 
   for (let j = 0; j < grid.ny; j += 1) {
@@ -719,10 +741,18 @@ function projectVelocity(u, v, w, grid, solid, outlets, windowPressure, windowFl
             if (solid[index] || diagonal[index] === 0) continue;
             const base = index * 6;
             let sum = 0;
-            for (let direction = 0; direction < 6; direction += 1) {
-              const neighbor = neighbors[base + direction];
-              if (neighbor >= 0) sum += pressure[neighbor] * weights[direction];
-            }
+            let neighbor = neighbors[base];
+            if (neighbor >= 0) sum += pressure[neighbor] * xWeight;
+            neighbor = neighbors[base + 1];
+            if (neighbor >= 0) sum += pressure[neighbor] * xWeight;
+            neighbor = neighbors[base + 2];
+            if (neighbor >= 0) sum += pressure[neighbor] * yWeight;
+            neighbor = neighbors[base + 3];
+            if (neighbor >= 0) sum += pressure[neighbor] * yWeight;
+            neighbor = neighbors[base + 4];
+            if (neighbor >= 0) sum += pressure[neighbor] * zWeight;
+            neighbor = neighbors[base + 5];
+            if (neighbor >= 0) sum += pressure[neighbor] * zWeight;
             const target = (sum + boundarySource[index] - divergence[index] / timeStep) / diagonal[index];
             pressure[index] += relaxation * (target - pressure[index]);
           }
@@ -793,14 +823,19 @@ function projectVelocity(u, v, w, grid, solid, outlets, windowPressure, windowFl
   }
 }
 
-function diffuse(field, coefficient, timeStep, grid, solid, clampMin, clampMax) {
-  if (coefficient === 0) return field;
-  const next = new Float32Array(field.length);
+function diffuse(field, coefficient, timeStep, grid, solid, clampMin, clampMax, next = new Float32Array(field.length)) {
+  if (coefficient === 0) {
+    next.set(field);
+    return next;
+  }
   for (let j = 0; j < grid.ny; j += 1) {
     for (let k = 0; k < grid.nz; k += 1) {
       for (let i = 0; i < grid.nx; i += 1) {
         const index = indexOf(i, j, k, grid);
-        if (solid[index]) continue;
+        if (solid[index]) {
+          next[index] = 0;
+          continue;
+        }
         next[index] = clamp(field[index] + coefficient * timeStep * laplacian(field, i, j, k, grid, solid), clampMin, clampMax);
       }
     }
@@ -817,9 +852,11 @@ function addHeatSources(temperature, heaters, grid, solid, settings, timeStep) {
         for (let i = 0; i < grid.nx; i += 1) {
           const index = indexOf(i, j, k, grid);
           if (solid[index]) continue;
-          const position = cellPosition(i, j, k, grid);
-          const distanceSquared = (position.x - heater.position.x) ** 2
-            + (position.y - centerY) ** 2 + (position.z - heater.position.z) ** 2;
+          const x = (i + 0.5) * grid.dx;
+          const y = (j + 0.5) * grid.dy;
+          const z = (k + 0.5) * grid.dz;
+          const distanceSquared = (x - heater.position.x) ** 2
+            + (y - centerY) ** 2 + (z - heater.position.z) ** 2;
           temperature[index] += settings.heaterRate * (heater.intensity ?? 1) * Math.exp(-distanceSquared / radiusSquared) * timeStep;
         }
       }
@@ -920,52 +957,58 @@ function createSimulationState(scene, options) {
     pressureWorkspace: buildPressureWorkspace(count),
     vorticityWorkspace: buildVorticityWorkspace(count),
     fanAcceleration: buildFanAccelerationField(scene, grid, solid, settings),
-    heaters: scene.objects.filter((object) => object.model === 'heater'),
+    heaters: scene.objects.filter((object) => object.model === 'heater' && object.enabled !== false),
     u: new Float32Array(count),
     v: new Float32Array(count),
     w: new Float32Array(count),
     temperature: new Float32Array(count).fill(settings.ambientTemperature),
+    nextU: new Float32Array(count),
+    nextV: new Float32Array(count),
+    nextW: new Float32Array(count),
+    nextTemperature: new Float32Array(count),
   };
 }
 
 function advanceSimulation(state) {
   const { settings, grid, solid, outlets, windowPressure, windowFlow, pressureStencil, pressureWorkspace, vorticityWorkspace, fanAcceleration, heaters } = state;
-  let { u, v, w, temperature } = state;
+  const { u, v, w, temperature, nextU, nextV, nextW, nextTemperature } = state;
   const previousU = u;
   const previousV = v;
   const previousW = w;
   if (settings.vorticityConfinement > 0) {
     calculateVorticity(previousU, previousV, previousW, grid, solid, vorticityWorkspace);
   }
-  u = advect(previousU, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true);
-  v = advect(previousV, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true);
-  w = advect(previousW, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true);
-  applyFanForces(u, v, w, fanAcceleration, settings.timeStep);
-  applyVorticityConfinement(u, v, w, grid, solid, vorticityWorkspace, settings.timeStep, settings.vorticityConfinement);
-  applyBuoyancy(v, temperature, solid, settings.timeStep, settings.ambientTemperature);
+  advect(temperature, previousU, previousV, previousW, grid, solid, settings.timeStep,
+    settings.ambientTemperature, true, nextTemperature);
+  advect(previousU, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true, nextU);
+  advect(previousV, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true, nextV);
+  advect(previousW, previousU, previousV, previousW, grid, solid, settings.timeStep, 0, true, nextW);
+  applyFanForces(nextU, nextV, nextW, fanAcceleration, settings.timeStep);
+  applyVorticityConfinement(nextU, nextV, nextW, grid, solid, vorticityWorkspace, settings.timeStep, settings.vorticityConfinement);
+  applyBuoyancy(nextV, temperature, solid, settings.timeStep, settings.ambientTemperature);
 
   const damp = Math.exp(-0.08 * settings.timeStep);
-  for (let index = 0; index < u.length; index += 1) {
+  for (let index = 0; index < nextU.length; index += 1) {
     if (solid[index]) continue;
-    u[index] = clamp(u[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-    v[index] = clamp(v[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-    w[index] = clamp(w[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-    const speed = Math.hypot(u[index], v[index], w[index]);
+    nextU[index] = clamp(nextU[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+    nextV[index] = clamp(nextV[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+    nextW[index] = clamp(nextW[index] * damp, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+    const speed = Math.hypot(nextU[index], nextV[index], nextW[index]);
     if (speed > LIMITS.maxSpeed) {
       const scale = LIMITS.maxSpeed / speed;
-      u[index] *= scale;
-      v[index] *= scale;
-      w[index] *= scale;
+      nextU[index] *= scale;
+      nextV[index] *= scale;
+      nextW[index] *= scale;
     }
   }
-  u = diffuse(u, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-  v = diffuse(v, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
-  w = diffuse(w, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed);
+  diffuse(nextU, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed, u);
+  diffuse(nextV, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed, v);
+  diffuse(nextW, settings.kinematicViscosity, settings.timeStep, grid, solid, -LIMITS.maxSpeed, LIMITS.maxSpeed, w);
   projectVelocity(u, v, w, grid, solid, outlets, windowPressure, windowFlow,
     pressureStencil, pressureWorkspace, settings.timeStep, settings.pressureIterations);
 
-  temperature = advect(temperature, previousU, previousV, previousW, grid, solid, settings.timeStep, settings.ambientTemperature, true);
-  temperature = diffuse(temperature, settings.effectiveThermalDiffusivity, settings.timeStep, grid, solid, 0, LIMITS.maxTemperature);
+  diffuse(nextTemperature, settings.effectiveThermalDiffusivity, settings.timeStep, grid, solid,
+    0, LIMITS.maxTemperature, temperature);
   for (let index = 0; index < temperature.length; index += 1) {
     if (solid[index]) {
       temperature[index] = settings.ambientTemperature;
@@ -987,7 +1030,6 @@ function advanceSimulation(state) {
   for (let index = 0; index < temperature.length; index += 1) {
     temperature[index] = clamp(temperature[index], 0, LIMITS.maxTemperature);
   }
-  Object.assign(state, { u, v, w, temperature });
 }
 
 function finishSimulation(state) {
@@ -995,7 +1037,7 @@ function finishSimulation(state) {
   const stats = calculateStats(u, v, w, temperature, solid, outlets, windowFlow, grid,
     settings.ambientTemperature, state.pressureWorkspace.projectedDivergence, state.pressureWorkspace.faces);
   return {
-    grid: { ...grid, cellSize: settings.cellSize },
+    grid: { ...grid },
     fields: { u, v, w, temperature, solid, outlets, windowPressure, windowFlow },
     backend: 'cpu-preview',
     ambientTemperature: settings.ambientTemperature,

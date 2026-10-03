@@ -41,3 +41,14 @@ test('GPU inputs preserve rotated fan direction and voxelize room obstacles', ()
   assert.ok(Math.abs(inputs.heaters[1] - 0.2) < 1e-6);
   assert.equal(inputs.heaters[2], 1);
 });
+
+test('disabled heaters are omitted from GPU source inputs', () => {
+  const scene = createRoomScene();
+  const heater = { ...scene.objects.find((object) => object.model === 'heater'), enabled: false };
+  const inputs = prepareWebGpuInputs({ ...scene, objects: [heater] }, {
+    width: 5.2, height: 2.7, depth: 4,
+    nx: 52, ny: 27, nz: 40, dx: 0.1, dy: 0.1, dz: 0.1,
+  });
+
+  assert.equal(inputs.heaterCount, 0);
+});

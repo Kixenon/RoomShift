@@ -276,20 +276,6 @@ export function createScalarSliceLayer(result, mode, height) {
   return mesh;
 }
 
-function insideRoom(point, grid) {
-  return point.x >= 0 && point.x <= grid.width
-    && point.y >= 0 && point.y <= grid.height
-    && point.z >= 0 && point.z <= grid.depth;
-}
-
-function isFluidPoint(point, grid, solid) {
-  if (!insideRoom(point, grid)) return false;
-  const i = Math.min(grid.nx - 1, Math.floor(point.x / grid.dx));
-  const j = Math.min(grid.ny - 1, Math.floor(point.y / grid.dy));
-  const k = Math.min(grid.nz - 1, Math.floor(point.z / grid.dz));
-  return !solid[indexOf(i, j, k, grid)];
-}
-
 function isGasPointOpen(x, y, z, volume) {
   const { grid, margin, blocked, roomGrid, roomSolid } = volume;
   if (x < -margin || x > grid.width - margin || y < 0 || y > grid.height
@@ -367,28 +353,6 @@ function getAirEmitters(result, roomScene) {
       radius,
       'fan',
       Math.max(0.002, outletSpeed * Math.PI * radius ** 2),
-    ));
-  }
-
-  for (const heater of roomScene?.objects ?? []) {
-    if (heater.model !== 'heater' || heater.enabled === false || (heater.intensity ?? 1) <= 0) continue;
-    const topCell = Math.min(result.grid.ny - 1, Math.ceil((heater.position.y + heater.dimensions.height) / result.grid.dy));
-    const position = new THREE.Vector3(
-      heater.position.x,
-      Math.min(result.grid.height - result.grid.dy * 0.5, (topCell + 0.5) * result.grid.dy),
-      heater.position.z,
-    );
-    if (!isFluidPoint(position, result.grid, result.fields.solid)) continue;
-    const plumeRadius = Math.max(0.08, Math.min(heater.dimensions.width * 0.22, heater.dimensions.depth * 1.2));
-    const plumeSpeed = Math.max(0, sampleVelocity(result, position).y);
-    if (plumeSpeed < 0.02) continue;
-    emitters.push(makeEmitter(
-      position,
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(1, 0, 0),
-      plumeRadius,
-      'heater',
-      Math.max(0.002, plumeSpeed * Math.PI * plumeRadius ** 2),
     ));
   }
 
@@ -474,6 +438,7 @@ function getAirEmitters(result, roomScene) {
   return emitters;
 }
 
+const MAX_GAS_VOXELS = 125_000;
 const GAS_STEP = 1 / 30;
 const GAS_DIFFUSIVITY = 0.012;
 const GAS_TRACER_DECAY_RATE = 0.08;
@@ -606,18 +571,26 @@ function addGasSources(volume, emitters) {
 function createGasVolume(result, roomScene, emitters, margin = 0.8) {
   const { grid: roomGrid, fields } = result;
   const displaySpeedRange = airflowDisplayRange(result);
-  const cellSize = Math.max(0.1, Math.min(0.15, Math.max(roomGrid.dx, roomGrid.dy, roomGrid.dz) * 2));
+  const requestedCellSize = Math.max(0.1, Math.min(0.15, Math.max(roomGrid.dx, roomGrid.dy, roomGrid.dz) * 2));
   const dimensions = { width: roomGrid.width + margin * 2, height: roomGrid.height, depth: roomGrid.depth + margin * 2 };
-  const grid = {
-    ...dimensions,
-    nx: Math.ceil(dimensions.width / cellSize),
-    ny: Math.ceil(dimensions.height / cellSize),
-    nz: Math.ceil(dimensions.depth / cellSize),
-  };
+  let cellSize = requestedCellSize;
+  let grid;
+  let voxelCount;
+  do {
+    grid = {
+      ...dimensions,
+      nx: Math.ceil(dimensions.width / cellSize),
+      ny: Math.ceil(dimensions.height / cellSize),
+      nz: Math.ceil(dimensions.depth / cellSize),
+    };
+    voxelCount = grid.nx * grid.ny * grid.nz;
+    if (voxelCount > MAX_GAS_VOXELS) cellSize *= Math.cbrt(voxelCount / MAX_GAS_VOXELS) * 1.001;
+  } while (voxelCount > MAX_GAS_VOXELS);
   grid.dx = dimensions.width / grid.nx;
   grid.dy = dimensions.height / grid.ny;
   grid.dz = dimensions.depth / grid.nz;
-  const voxelCount = grid.nx * grid.ny * grid.nz;
+  grid.cellSize = Math.max(grid.dx, grid.dy, grid.dz);
+  grid.requestedCellSize = requestedCellSize;
   const density = new Float32Array(voxelCount);
   const nextDensity = new Float32Array(voxelCount);
   const sourceRate = new Float32Array(voxelCount);
@@ -768,7 +741,7 @@ function createGasVolume(result, roomScene, emitters, margin = 0.8) {
   mesh.renderOrder = 2;
   mesh.frustumCulled = false;
   mesh.userData.voxelCount = voxelCount;
-  mesh.userData.voxelSize = Math.max(grid.dx, grid.dy, grid.dz);
+  mesh.userData.voxelSize = grid.cellSize;
   mesh.userData.boundsCenter = new THREE.Vector3(0, roomGrid.height / 2, 0);
   mesh.userData.boundsHalfSize = new THREE.Vector3(dimensions.width / 2, dimensions.height / 2, dimensions.depth / 2);
   const layer = new THREE.Group();

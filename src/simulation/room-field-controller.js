@@ -97,10 +97,6 @@ export class RoomFieldController {
     return this.displayStyles[this.mode] ?? null;
   }
 
-  get isVolumetricView() {
-    return this.displayStyle === 'volume';
-  }
-
   setDisplayStyle(style) {
     if (!this.mode || !DISPLAY_STYLES[this.mode]?.has(style)) return;
     if (this.displayStyles[this.mode] === style) return;
@@ -141,11 +137,6 @@ export class RoomFieldController {
       });
     }
     this.onState({ mode: this.mode, loading: Boolean(this.pendingRequest || this.inFlight), result: this.result, error: null, displayStyle: this.displayStyle });
-  }
-
-  setVolumetricView(enabled) {
-    if (this.mode === 'airflow') this.setDisplayStyle(enabled ? 'volume' : 'gas');
-    if (this.mode === 'temperature') this.setDisplayStyle(enabled ? 'volume' : 'surfaces');
   }
 
   scheduleUpdate({ preserveResult = false } = {}) {
@@ -189,7 +180,9 @@ export class RoomFieldController {
     const isCurrent = request.requestId === this.latestRequestId && request.mode === this.mode;
     if (isCurrent) {
       if (response.error) {
-        this.onState({ mode: this.mode, loading: false, result: null, error: response.error });
+        this.result = null;
+        this.viewport.clearFields();
+        this.onState({ mode: this.mode, loading: false, result: null, error: response.error, displayStyle: this.displayStyle });
       } else {
         this.result = response.result;
         this.viewport.setFields(response.result, this.mode, {
@@ -204,8 +197,19 @@ export class RoomFieldController {
   }
 
   handleWorkerError(event) {
+    const request = this.inFlight;
     this.inFlight = null;
-    this.onState({ mode: this.mode, loading: false, result: null, error: event.message || 'Field worker failed.' });
+    if (request?.requestId === this.latestRequestId && request.mode === this.mode) {
+      this.result = null;
+      this.viewport.clearFields();
+      this.onState({
+        mode: this.mode,
+        loading: false,
+        result: null,
+        error: event.message || 'Field worker failed.',
+        displayStyle: this.displayStyle,
+      });
+    }
     if (this.pendingRequest) this.pump();
   }
 

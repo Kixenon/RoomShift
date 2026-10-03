@@ -24,7 +24,8 @@ test('an unforced room has a bounded 3D metre grid and remains at ambient temper
   const { u, v, w, temperature, solid } = result.fields;
   const cellCount = nx * ny * nz;
 
-  assert.equal(result.grid.cellSize, 0.15);
+  assert.equal(result.grid.cellSize, Math.max(dx, dy, dz));
+  assert.equal(result.grid.requestedCellSize, 0.15);
   assert.ok(nx > 1 && ny > 1 && nz > 1);
   assert.ok(Math.abs(dx * nx - 5.2) < 1e-10);
   assert.ok(Math.abs(dy * ny - 2.7) < 1e-10);
@@ -218,6 +219,18 @@ test('the sample room has a heater so its initial temperature field varies', () 
   assert.ok(result.stats.maxTemperature > result.ambientTemperature);
 });
 
+test('disabled heaters contribute no heat', () => {
+  const heater = {
+    id: 'heater', primitive: 'box', model: 'heater', name: 'Heater', intensity: 1,
+    position: { x: 2.6, y: 0.4, z: 2 }, rotation: { x: 0, y: 0, z: 0 },
+    dimensions: { width: 0.4, height: 0.4, depth: 0.4 },
+  };
+  const scene = { ...sceneWithoutSources(), objects: [{ ...heater, enabled: false }] };
+  const result = simulateRoomFields(scene, { steps: 20 });
+
+  assert.equal(result.stats.maxTemperature, result.ambientTemperature);
+});
+
 test('maximum room/grid work is bounded and all returned fields stay finite', () => {
   const room = { ...sceneWithoutSources(), room: { width: 20, depth: 20, height: 6 }, objects: [] };
   const result = simulateRoomFields(room, {
@@ -227,6 +240,8 @@ test('maximum room/grid work is bounded and all returned fields stay finite', ()
 
   assert.ok(result.grid.nx <= 40 && result.grid.ny <= 24 && result.grid.nz <= 40);
   assert.ok(result.fields.u.length <= 38_400);
+  assert.equal(result.grid.cellSize, 0.5);
+  assert.equal(result.grid.requestedCellSize, 0.25);
   for (const field of [result.fields.u, result.fields.v, result.fields.w, result.fields.temperature]) {
     assert.ok(Array.from(field).every(Number.isFinite));
   }

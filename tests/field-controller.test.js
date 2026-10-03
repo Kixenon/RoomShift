@@ -93,3 +93,41 @@ test('clearing the field mode cancels pending work and clears the overlay', asyn
   assert.equal(harness.states.at(-1).mode, null);
   assert.equal(harness.states.at(-1).loading, false);
 });
+
+test('a failed current solve clears the previous field instead of leaving stale results visible', async (t) => {
+  const harness = createHarness(t);
+  harness.controller.setScene(scene('one'));
+  harness.controller.setMode('temperature');
+  await flushTimers();
+  const first = harness.worker.requests[0];
+  harness.worker.respond({ requestId: first.requestId, result: { grid: {}, fields: {}, stats: {} } });
+
+  harness.controller.setScene(scene('two'));
+  await flushTimers();
+  const latest = harness.worker.requests[1];
+  harness.worker.respond({ requestId: latest.requestId, error: { message: 'solve failed' } });
+
+  assert.equal(harness.controller.result, null);
+  assert.ok(harness.cleared.length >= 2);
+  assert.equal(harness.states.at(-1).result, null);
+  assert.equal(harness.states.at(-1).error.message, 'solve failed');
+});
+
+test('a worker crash clears the current field result', async (t) => {
+  const harness = createHarness(t);
+  harness.controller.setScene(scene('one'));
+  harness.controller.setMode('airflow');
+  await flushTimers();
+  const request = harness.worker.requests[0];
+  harness.worker.respond({ requestId: request.requestId, result: { grid: {}, fields: {}, stats: {} } });
+
+  harness.controller.setScene(scene('two'));
+  await flushTimers();
+  const failure = new Event('error');
+  failure.message = 'worker crashed';
+  harness.worker.dispatchEvent(failure);
+
+  assert.equal(harness.controller.result, null);
+  assert.ok(harness.cleared.length >= 2);
+  assert.equal(harness.states.at(-1).error, 'worker crashed');
+});

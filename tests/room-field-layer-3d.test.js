@@ -92,6 +92,52 @@ test('airflow advects and diffuses a continuous 3D gas field', () => {
   assert.equal(layer.userData.airflowVisualization, 'advected-density');
 });
 
+test('gas animation caps work for the largest supported room', () => {
+  const grid = { width: 20, height: 6, depth: 20, nx: 40, ny: 24, nz: 40, dx: 0.5, dy: 0.25, dz: 0.5 };
+  const count = grid.nx * grid.ny * grid.nz;
+  const result = {
+    ...sampleFields,
+    grid,
+    fields: {
+      u: new Float32Array(count), v: new Float32Array(count), w: new Float32Array(count),
+      temperature: new Float32Array(count).fill(20), light: new Float32Array(count).fill(0.1),
+      solid: new Uint8Array(count),
+    },
+    stats: { maxSpeed: 0, maxTemperature: 20, maxLight: 0.1 },
+  };
+  const layer = createRoomFieldLayer(result, 'airflow', { room: { width: 20, depth: 20, height: 6 }, objects: [] });
+
+  assert.ok(layer.userData.gasVoxelCount <= 125_000);
+});
+
+test('standard 5 cm fields retain their 10 cm gas animation grid', () => {
+  const grid = { width: 5.2, height: 2.7, depth: 4, nx: 104, ny: 54, nz: 80, dx: 0.05, dy: 0.05, dz: 0.05 };
+  const count = grid.nx * grid.ny * grid.nz;
+  const result = {
+    ...sampleFields,
+    grid,
+    fields: {
+      u: new Float32Array(count), v: new Float32Array(count), w: new Float32Array(count),
+      temperature: new Float32Array(count).fill(20), light: new Float32Array(count).fill(0.1),
+      solid: new Uint8Array(count),
+    },
+    stats: { maxSpeed: 0, maxTemperature: 20, maxLight: 0.1 },
+  };
+
+  const layer = createRoomFieldLayer(result, 'airflow');
+
+  assert.equal(layer.userData.gasVoxelCount, 102_816);
+});
+
+test('heater heat is shown by temperature fields, not as a separate gas source', () => {
+  const roomScene = createRoomScene();
+  const heater = roomScene.objects.find((object) => object.model === 'heater');
+  const scene = { ...roomScene, objects: [heater] };
+  const layer = createRoomFieldLayer(sampleFields, 'airflow', scene);
+
+  assert.equal(layer.userData.gasSourceCounts.heater, undefined);
+});
+
 test('gas follows open-window outflow beyond the wall', () => {
   const grid = { width: 2, height: 2, depth: 2, nx: 16, ny: 16, nz: 16, dx: 0.125, dy: 0.125, dz: 0.125 };
   const count = grid.nx * grid.ny * grid.nz;

@@ -31,7 +31,7 @@ export function prepareWebGpuInputs(scene, grid, settings = {}) {
   const solid = Uint32Array.from(mask);
   const boundary = buildWindowBoundary(scene, grid, physics);
   const outlets = Uint32Array.from(boundary.outlets);
-  const heaters = scene.objects.filter((object) => object.model === 'heater');
+  const heaters = scene.objects.filter((object) => object.model === 'heater' && object.enabled !== false);
   const heaterData = new Float32Array(Math.max(1, heaters.length) * 8);
   const fanForces = buildFanAccelerationField(scene, grid, solid, physics);
 
