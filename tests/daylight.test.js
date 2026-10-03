@@ -24,7 +24,7 @@ const near = (actual, expected, tolerance, label) => {
 
 const sceneWithWindow = (wall = 'back', open = true) => {
   const withWindow = addWindow(createRoomScene(), wall);
-  return open ? setWindowOpen(withWindow.scene, 'window-1', true).scene : withWindow.scene;
+  return setWindowOpen(withWindow.scene, 'window-1', open).scene;
 };
 
 test('sun direction is a unit vector pointing up and toward the azimuth', () => {

@@ -160,9 +160,9 @@ test('dragging empty canvas orbits the room', async () => {
   assert.equal(before.equals(after), false, 'camera orbit should change the rendered room view');
 });
 
-test('a box can be named and assigned a model without changing its geometry', async () => {
-  await page.locator('[data-add-box]').click();
-  const row = page.locator('[data-select-object="box-5"]');
+test('an object can be named and assigned a furniture model without changing its geometry', async () => {
+  await page.locator('#add-object').click();
+  const row = page.locator('[data-select-object="object-5"]');
   await row.waitFor();
   assert.equal(await row.getAttribute('aria-pressed'), 'true');
 
@@ -173,12 +173,12 @@ test('a box can be named and assigned a model without changing its geometry', as
   await nameInput.blur();
   await page.locator('[data-object-model]').selectOption('bed');
 
-  await page.waitForFunction(() => document.querySelector('[data-select-object="box-5"]')?.textContent.includes('Reading bed'));
+  await page.waitForFunction(() => document.querySelector('[data-select-object="object-5"]')?.textContent.includes('Reading bed'));
   assert.match(await row.textContent(), /Reading bed/);
   assert.equal(await page.locator('[data-object-name]').inputValue(), 'Reading bed');
   assert.deepEqual(await sizeInputs.evaluateAll((inputs) => inputs.map((input) => input.value)), initialSizes);
 
-  for (const model of ['box', 'fan', 'sofa', 'bed', 'desk', 'table', 'lamp', 'heater']) {
+  for (const model of ['box', 'sofa', 'bed', 'desk', 'table']) {
     await page.locator('[data-object-model]').selectOption(model);
     assert.equal(await page.locator('[data-object-model]').inputValue(), model);
     assert.match(await row.textContent(), /Reading bed/);
@@ -221,6 +221,7 @@ test('air, heat, and light fields update automatically and after scene edits', a
   assert.ok(Number(await canvas.getAttribute('data-gas-density-max')) > 0);
   assert.ok(Number(await canvas.getAttribute('data-gas-occupied-voxels')) > 0);
 
+  await page.locator('#field-display-button').click();
   await page.locator('[data-display-style="volume"]').click();
   assert.ok(Number(await canvas.getAttribute('data-field-volume-voxels')) > 0);
 
@@ -245,7 +246,7 @@ test('air, heat, and light fields update automatically and after scene edits', a
   const roomWidth = page.locator('#room-width');
   await roomWidth.fill('5.5');
   await roomWidth.blur();
-  await page.waitForFunction(() => document.querySelector('#room-summary')?.textContent === '5.5 × 4.0 × 2.7 m');
+  await page.waitForFunction(() => document.querySelector('#room-width')?.value === '5.5');
   assert.equal(await canvas.getAttribute('data-field-mode'), 'light');
   assert.equal(await canvas.getAttribute('data-lighting-preview'), 'true');
   assert.equal(await page.locator('#show-light').getAttribute('aria-pressed'), 'true');
@@ -278,7 +279,8 @@ test('room edits, object properties, camera controls, and delete work end to end
   await width.blur();
   await depth.fill('4.6');
   await depth.blur();
-  assert.equal(await page.locator('#room-summary').textContent(), '6.4 × 4.6 × 2.7 m');
+  assert.equal(await width.inputValue(), '6.4');
+  assert.equal(await depth.inputValue(), '4.6');
 
   await width.fill('1');
   await width.blur();
@@ -309,6 +311,20 @@ test('room edits, object properties, camera controls, and delete work end to end
   assert.equal(await page.locator('[data-select-object]').count(), initialObjectCount - 1);
   assert.equal(await page.locator('#delete-object').isDisabled(), true);
 
+});
+
+test('asset and properties menus can be collapsed and expanded', async () => {
+  const assetToggle = page.locator('#toggle-asset-rail');
+  await assetToggle.click();
+  assert.equal(await assetToggle.getAttribute('aria-expanded'), 'false');
+  await assetToggle.click();
+  assert.equal(await assetToggle.getAttribute('aria-expanded'), 'true');
+
+  const inspectorToggle = page.locator('#toggle-inspector');
+  await inspectorToggle.click();
+  assert.equal(await inspectorToggle.getAttribute('aria-expanded'), 'false');
+  await inspectorToggle.click();
+  assert.equal(await inspectorToggle.getAttribute('aria-expanded'), 'true');
 });
 
 test('narrow screens keep the canvas and field controls usable', async () => {

@@ -174,7 +174,8 @@ test('a window in shade drops its patch mesh', () => {
 });
 
 test('a closed window produces no patch mesh', () => {
-  const closed = addWindow(createRoomScene(), 'back').scene;
+  const placed = addWindow(createRoomScene(), 'back');
+  const closed = setWindowOpen(placed.scene, 'window-1', false).scene;
   const viewport = harness({ roomScene: closed });
   setClock(viewport, 10 * 60);
   assert.equal(viewport.sunPatchMeshes.length, 0);

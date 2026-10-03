@@ -4,9 +4,8 @@ import test from 'node:test';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-// Covers the time-of-day controls end to end. The clock, the lamp override and
-// the sun patches are driven through the real DOM, so this catches wiring that
-// the unit tests cannot see.
+// Covers the room daylight controls end to end. The clock, device settings and
+// sun patches are driven through the real DOM.
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const browserExecutable = process.env.ROOMSHIFT_BROWSER || undefined;
@@ -14,6 +13,7 @@ const browserExecutable = process.env.ROOMSHIFT_BROWSER || undefined;
 let server;
 let browser;
 let page;
+let baseUrl;
 let browserErrors = [];
 
 test.before(async () => {
@@ -24,7 +24,7 @@ test.before(async () => {
     server: { host: '127.0.0.1', port: 0, strictPort: false },
   });
   await server.listen();
-  const baseUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
+  baseUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
   browser = await chromium.launch({ args: ['--no-sandbox'], executablePath: browserExecutable, headless: true });
   page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on('pageerror', (error) => browserErrors.push(error.message));
@@ -33,6 +33,16 @@ test.before(async () => {
   });
   await page.goto(baseUrl, { waitUntil: 'load' });
   await page.waitForSelector('#room-canvas');
+});
+
+test.beforeEach(async () => {
+  browserErrors = [];
+  await page.goto(baseUrl, { waitUntil: 'load' });
+  await page.waitForSelector('#room-canvas');
+});
+
+test.afterEach(() => {
+  assert.deepEqual(browserErrors, [], `browser reported errors: ${browserErrors.join('; ')}`);
 });
 
 test.after(async () => {
@@ -64,21 +74,25 @@ const setClock = async (minutes) => {
 
 // Range inputs do not respond to locator.fill(), so the slider is driven the way
 // a drag would: set the value and dispatch the event.
-test('the time controls only appear while the light preview is up', async () => {
-  assert.equal(await page.evaluate(() => document.querySelector('#time-controls').hidden), true);
+test('the room clock appears only in the light preview', async () => {
+  assert.equal(await page.evaluate(() => document.querySelector('#room-daylight-control').hidden), true);
 
   await page.locator('#show-airflow').click();
   await page.waitForTimeout(600);
-  assert.equal(await page.evaluate(() => document.querySelector('#time-controls').hidden), true,
-    'airflow has no time of day');
+  assert.equal(await page.evaluate(() => document.querySelector('#room-daylight-control').hidden), true);
 
   await page.locator('#show-light').click();
   await page.waitForTimeout(800);
-  assert.equal(await page.evaluate(() => document.querySelector('#time-controls').hidden), false);
+  assert.equal(await page.evaluate(() => document.querySelector('#room-daylight-control').hidden), false);
 
-  await page.locator('#show-airflow').click();
-  await page.waitForTimeout(600);
-  assert.equal(await page.evaluate(() => document.querySelector('#time-controls').hidden), true);
+  await page.locator('#field-display-button').click();
+  await page.locator('[data-display-style="map"]').click();
+  assert.equal(await page.evaluate(() => document.querySelector('#room-daylight-control').hidden), true,
+    'the illumination map has no time-of-day control');
+
+  await page.locator('#field-display-button').click();
+  await page.locator('[data-display-style="preview"]').click();
+  assert.equal(await page.evaluate(() => document.querySelector('#room-daylight-control').hidden), false);
 });
 
 test('the clock reads a plausible solar altitude for Hong Kong', async () => {
@@ -107,6 +121,7 @@ test('the clock reads a plausible solar altitude for Hong Kong', async () => {
 });
 
 test('the clock label follows the slider', async () => {
+  await page.locator('#show-light').click();
   for (const [minutes, label] of [[0, '00:00'], [9 * 60 + 5, '09:05'], [23 * 60 + 55, '23:55']]) {
     await setClock(minutes);
     assert.equal(await page.locator('#clock-label').textContent(), label);
@@ -114,6 +129,7 @@ test('the clock label follows the slider', async () => {
 });
 
 test('the sun sweeps across the compass through the day', async () => {
+  await page.locator('#show-light').click();
   await setClock(9 * 60);
   const morning = await canvasState();
   await setClock(16 * 60);
@@ -124,63 +140,32 @@ test('the sun sweeps across the compass through the day', async () => {
   assert.ok(morning.altitude > 0 && afternoon.altitude > 0);
 });
 
-test('the lamp button is a plain on and off switch', async () => {
-  await setClock(13 * 60);
-  assert.equal((await canvasState()).lampsOn, 'false');
-  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'false');
-
-  // Switch them on during the day.
-  await page.locator('#lamps-toggle').click();
-  await page.waitForTimeout(220);
-  assert.equal((await canvasState()).lampsOn, 'true');
-  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'true');
-
-  // A manual choice survives a change of time in either direction.
-  await setClock(22 * 60);
-  assert.equal((await canvasState()).lampsOn, 'true');
-
-  // And now the important half: at night, with the lamps lit, the switch turns
-  // them off rather than only ever being able to force them on.
-  await page.locator('#lamps-toggle').click();
-  await page.waitForTimeout(220);
-  assert.equal((await canvasState()).lampsOn, 'false');
-  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'false');
-
-  await setClock(13 * 60);
-  assert.equal((await canvasState()).lampsOn, 'false', 'the switch stays off through the day');
-
-  await page.locator('#lamps-toggle').click();
-  await page.waitForTimeout(220);
-  assert.equal((await canvasState()).lampsOn, 'true');
-});
-
-test('the lamp button follows dusk until it is touched', async () => {
-  await page.reload({ waitUntil: 'load' });
-  await page.waitForSelector('#room-canvas');
+test('device power is controlled in its properties and stays independent of time', async () => {
   await page.locator('#show-light').click();
-  await page.waitForTimeout(800);
+  await page.locator('#add-lamp').click();
+  assert.equal(await page.locator('[data-device-enabled]').isChecked(), true, 'new devices start on');
+  await page.locator('[data-device-enabled]').uncheck();
 
-  await setClock(13 * 60);
+  await page.locator('[data-select-object="lamp-1"]').click();
+  await page.locator('[data-device-enabled]').uncheck();
   assert.equal((await canvasState()).lampsOn, 'false');
-  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'false');
-
-  // Crossing dusk lights the lamps and the button reflects it with no click.
   await setClock(22 * 60);
-  assert.equal((await canvasState()).lampsOn, 'true');
-  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-pressed'), 'true');
+  assert.equal((await canvasState()).lampsOn, 'false', 'night does not switch devices on');
 
-  // The button explains whether the state came from dusk or from the user.
-  assert.match(await page.locator('#lamps-toggle').getAttribute('title'), /following dusk/);
-  assert.equal(await page.locator('#lamps-toggle').getAttribute('aria-label'), 'Switch the lamps off');
+  await page.locator('[data-device-enabled]').check();
+  assert.equal((await canvasState()).lampsOn, 'true');
+  await setClock(13 * 60);
+  assert.equal((await canvasState()).lampsOn, 'true', 'day does not switch devices off');
 });
 
 test('a closed window casts no sun patch but an open sunward one does', async () => {
+  await page.locator('#show-light').click();
   await setClock(10 * 60);
   assert.equal((await canvasState()).patches, 0, 'the default scene has no windows');
 
   await page.locator('#add-window').click();
   await page.locator('[data-window-wall]').selectOption('back');
-  await page.locator('[data-window-open]').check();
+  assert.equal(await page.locator('[data-window-open]').isChecked(), true, 'new openings start open');
   await page.waitForTimeout(500);
   assert.equal((await canvasState()).patches, 1, 'an open sunward window should throw a patch');
 
@@ -190,8 +175,10 @@ test('a closed window casts no sun patch but an open sunward one does', async ()
 });
 
 test('a shaded wall casts no patch at the same moment', async () => {
+  await page.locator('#show-light').click();
   // 10:00 puts the sun in the east-south-east, so the north wall is in shade.
   await setClock(10 * 60);
+  await page.locator('#add-window').click();
   await page.locator('[data-window-wall]').selectOption('front');
   await page.locator('[data-window-open]').check();
   await page.waitForTimeout(500);
@@ -199,6 +186,7 @@ test('a shaded wall casts no patch at the same moment', async () => {
 });
 
 test('the daylight dataset is cleared when the preview closes', async () => {
+  await page.locator('#show-light').click();
   await page.locator('#show-airflow').click();
   await page.waitForTimeout(700);
   const data = await page.evaluate(() => {
@@ -212,33 +200,20 @@ test('the daylight dataset is cleared when the preview closes', async () => {
   assert.deepEqual(data, { clock: undefined, altitude: undefined, patches: undefined });
 });
 
-test('the time controls sit clear of their neighbours', async () => {
+test('the room time control is inside the room menu', async () => {
   await page.locator('#show-light').click();
   await page.waitForTimeout(700);
-  const boxes = await page.evaluate(() => {
-    const box = (selector) => {
-      const rect = document.querySelector(selector).getBoundingClientRect();
-      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-    };
-    return {
-      controls: box('#time-controls'),
-      lightButton: box('#show-light'),
-      statusText: document.querySelector('#field-status').textContent,
-      statusVisible: getComputedStyle(document.querySelector('#field-status')).display !== 'none',
-    };
+  const insideRoomSection = await page.evaluate(() => {
+    const section = document.querySelector('.room-section').getBoundingClientRect();
+    const control = document.querySelector('#room-daylight-control').getBoundingClientRect();
+    return control.left >= section.left && control.right <= section.right
+      && control.top >= section.top && control.bottom <= section.bottom;
   });
-
-  // Idle light mode has nothing to say, so the status collapses out of the way.
-  assert.equal(boxes.statusText, '', `idle status was "${boxes.statusText}"`);
-  assert.equal(boxes.statusVisible, false, 'an empty status should not take up room');
-
-  // The clock group follows the Light button without colliding with it.
-  assert.ok(boxes.controls.left >= boxes.lightButton.right,
-    `controls start at ${boxes.controls.left} but the Light button ends at ${boxes.lightButton.right}`);
-  assert.ok(boxes.controls.right > boxes.controls.left, 'the controls have width');
+  assert.equal(insideRoomSection, true);
 });
 
 test('the clock label is legible against the toolbar', async () => {
+  await page.locator('#show-light').click();
   const contrast = await page.evaluate(() => {
     const clock = document.querySelector('#clock-label');
     const style = getComputedStyle(clock);
