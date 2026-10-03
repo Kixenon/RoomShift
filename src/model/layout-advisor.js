@@ -1,5 +1,18 @@
 import { MODEL_PRESETS, isWallItem, objectMaterial, moveObject, rotateObject } from './room-scene.js';
-import { lightContext, luxAt, wifiAt } from '../simulation/room-propagation.js';
+import { lightContext, luxAt, roomAcoustics, wifiAt } from '../simulation/room-propagation.js';
+import { heatBalance, ventilation } from './environment.js';
+
+// Issue categories, in the order the Insights panel shows them.
+export const CATEGORIES = Object.freeze({
+  space: { label: 'Space', icon: '⬚' },
+  safety: { label: 'Safety', icon: '⚠' },
+  comfort: { label: 'Comfort', icon: '♨' },
+  light: { label: 'Light', icon: '☀' },
+  air: { label: 'Air', icon: '≋' },
+  sound: { label: 'Sound', icon: '♪' },
+  connectivity: { label: 'WiFi', icon: '⌔' },
+  ergonomics: { label: 'Ergonomics', icon: '⑁' },
+});
 
 // Livability check and layout search. Rules follow common residential planning
 // guidance: ~60 cm minimum circulation width, 60–90 cm in front of storage, door
@@ -94,14 +107,17 @@ function distanceToWall(object, room) {
   return Math.min(object.position.x - ex, room.width - object.position.x - ex, object.position.z - ez, room.depth - object.position.z - ez);
 }
 
-export function evaluateLayout(scene, { environment = null } = {}) {
+export function evaluateLayout(scene, { environment = null, weather = null } = {}) {
   const { room } = scene;
   const issues = [];
   const wins = [];
   let penalty = 0;
+  let area = 'space';
+  const categoryPenalty = Object.fromEntries(Object.keys(CATEGORIES).map((key) => [key, 0]));
   const add = (severity, text, objectId = null, weight = severity === 'high' ? 14 : severity === 'medium' ? 7 : 3) => {
-    issues.push({ severity, text, objectId });
+    issues.push({ severity, text, objectId, category: area });
     penalty += weight;
+    categoryPenalty[area] += weight * 2.2;
   };
 
   const floorObjects = scene.objects.filter(blocksFloor);
@@ -213,6 +229,7 @@ export function evaluateLayout(scene, { environment = null } = {}) {
     if (blocker) add('medium', `${blocker.object.name} blocks ${window.name}`, blocker.object.id);
   }
 
+  area = 'safety';
   // Heater clearance from fabric (≈3 ft rule for space heaters)
   for (const heater of scene.objects.filter((object) => object.model === 'heater')) {
     for (const object of scene.objects) {
@@ -223,6 +240,7 @@ export function evaluateLayout(scene, { environment = null } = {}) {
     }
   }
 
+  area = 'comfort';
   // Comfort: radiant heat makes a seat or desk within ~60 cm unpleasant.
   for (const heater of scene.objects.filter((object) => object.model === 'heater')) {
     for (const object of scene.objects.filter((item) => ['desk', 'chair', 'sofa', 'bed'].includes(item.model))) {
@@ -233,11 +251,13 @@ export function evaluateLayout(scene, { environment = null } = {}) {
     }
   }
 
+  area = 'connectivity';
   // Routers on the floor lose range to furniture and bodies.
   for (const router of scene.objects.filter((object) => object.model === 'router')) {
     if (router.position.y < 0.4) add('low', `${router.name} is on the floor — raise it to 1–2 m for better coverage`, router.id);
   }
 
+  area = 'comfort';
   // Comfort: AC jet straight onto the bed; fan aimed at nobody.
   const seats = scene.objects.filter((object) => SEATS.has(object.model));
   const aims = (source, target, maxDistance) => {
@@ -257,6 +277,7 @@ export function evaluateLayout(scene, { environment = null } = {}) {
     else add('low', `${fan.name} isn't aimed at a bed, desk or sofa`, fan.id);
   }
 
+  area = 'ergonomics';
   // A sofa should face the TV from a comfortable viewing distance.
   for (const tv of scene.objects.filter((object) => object.model === 'tv')) {
     const sofas = scene.objects.filter((object) => object.model === 'sofa');
@@ -267,6 +288,7 @@ export function evaluateLayout(scene, { environment = null } = {}) {
     else add('medium', `No sofa faces ${tv.name} from 1.5–4.5 m`, tv.id);
   }
 
+  area = 'light';
   // Daylight at the desk
   const windows = scene.objects.filter((object) => object.model === 'window');
   for (const desk of scene.objects.filter((object) => object.model === 'desk')) {
@@ -278,9 +300,11 @@ export function evaluateLayout(scene, { environment = null } = {}) {
       if (lux < 300) add('low', `${desk.name} gets ${Math.round(lux)} lux at ${String(Math.floor(environment.hour)).padStart(2, '0')}:00 — add a desk lamp (300–500 lux for work)`, desk.id);
     }
     const signal = wifiAt(scene, { x: desk.position.x, y: 1.0, z: desk.position.z });
+    area = 'connectivity';
     if (signal !== null && signal < -67) add('medium', `Weak WiFi at ${desk.name} (${signal.toFixed(0)} dBm)`, desk.id);
   }
 
+  area = 'space';
   // Free floor
   const freeCells = free.reduce((sum, value) => sum + value, 0);
   const reachable = reach.reduce((sum, value) => sum + value, 0);
@@ -288,7 +312,102 @@ export function evaluateLayout(scene, { environment = null } = {}) {
   if (freeCells && reachable / freeCells < 0.8) add('medium', 'Part of the floor is cut off by furniture', null, 6);
   if (openFloor < 0.25) add('medium', 'Under 25% of the floor is walkable — the room will feel cramped', null, 6);
 
+  // ─── Ergonomics ─────────────────────────────────────────────────────────
+  area = 'ergonomics';
+  const distance2d = (a, b) => Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
+  const chairs = scene.objects.filter((object) => object.model === 'chair');
+  for (const desk of scene.objects.filter((object) => object.model === 'desk')) {
+    if (!chairs.some((chair) => distance2d(chair, desk) < Math.max(desk.dimensions.width, desk.dimensions.depth) / 2 + 0.6)) {
+      add('low', `${desk.name} has no chair at it`, desk.id);
+    }
+  }
+  for (const bed of scene.objects.filter((object) => object.model === 'bed')) {
+    // The headboard is the bed's local −z end; it should rest against a wall.
+    const fp = footprint(bed);
+    const head = { x: fp.cx - fp.front.x * fp.hd, z: fp.cz - fp.front.z * fp.hd };
+    const toWall = Math.min(head.x, head.z, room.width - head.x, room.depth - head.z);
+    if (toWall > 0.25) add('low', `${bed.name}'s headboard isn't against a wall — beds feel and sleep better anchored`, bed.id);
+    else wins.push(`${bed.name} is anchored to a wall`);
+  }
+  // Screen glare: a window straight ahead of the screen (you face the bright
+  // window) or straight behind you (it reflects in the screen).
+  const glare = (screenOwner, viewerFacing, name) => {
+    for (const window of scene.objects.filter((object) => object.model === 'window')) {
+      const dx = window.position.x - screenOwner.position.x;
+      const dz = window.position.z - screenOwner.position.z;
+      const length = Math.hypot(dx, dz) || 1;
+      const alignment = (dx * viewerFacing.x + dz * viewerFacing.z) / length;
+      if (alignment > 0.8) return add('low', `${name} faces ${window.name} — the bright window behind the screen strains your eyes`, screenOwner.id);
+      if (alignment < -0.8) return add('low', `${window.name} is behind you at ${name} — it will reflect in the screen`, screenOwner.id);
+    }
+    return null;
+  };
+  area = 'light';
+  for (const desk of scene.objects.filter((object) => object.model === 'desk')) {
+    const fp = footprint(desk);
+    // You sit on the desk's front side, facing back across it.
+    glare(desk, { x: -fp.front.x, z: -fp.front.z }, desk.name);
+  }
+  for (const tv of scene.objects.filter((object) => object.model === 'tv')) {
+    const fp = footprint(tv);
+    for (const window of scene.objects.filter((object) => object.model === 'window')) {
+      const dx = window.position.x - tv.position.x;
+      const dz = window.position.z - tv.position.z;
+      if ((dx * fp.front.x + dz * fp.front.z) / (Math.hypot(dx, dz) || 1) > 0.8) add('low', `${window.name} faces ${tv.name} — expect reflections on the screen by day`, tv.id);
+    }
+  }
+
+  if (environment) {
+    // Plants: most houseplants need roughly 1,000 lux or more for several hours.
+    const context = lightContext(scene, environment, weather?.cloudCover);
+    for (const plant of scene.objects.filter((object) => object.model === 'plant')) {
+      const lux = luxAt(context, { x: plant.position.x, y: plant.position.y + plant.dimensions.height, z: plant.position.z });
+      if (lux < 500) add('low', `${plant.name} gets ${Math.round(lux)} lux — most houseplants want 1,000+; move it toward a window`, plant.id);
+    }
+
+    // ─── Air ──────────────────────────────────────────────────────────────
+    area = 'air';
+    const people = environment.people ?? 1;
+    const air = ventilation(scene, { windSpeed: weather?.windSpeed ?? null, people });
+    if (people > 0 && air.co2 > 1400) add('medium', `With everything closed, CO₂ builds to ~${air.co2} ppm for ${people} ${people === 1 ? 'person' : 'people'} — open a window`, null);
+    else if (people > 0 && air.litresPerPerson < 8) add('low', `Fresh air is ${air.litresPerPerson.toFixed(1)} L/s per person; 8–10 is comfortable`, null);
+    else if (air.mode === 'cross') wins.push('Cross-ventilation between two walls');
+
+    // ─── Comfort (heat balance) ───────────────────────────────────────────
+    area = 'comfort';
+    const heat = heatBalance(scene, environment, { outdoor: weather?.temperature ?? null, windSpeed: weather?.windSpeed ?? null, cloudCover: weather?.cloudCover });
+    if (heat.indoor > 28) add('medium', `The room settles around ${heat.indoor.toFixed(1)} °C — shade sunny windows, open up, or add cooling`, null);
+    else if (heat.indoor < 18) add('low', `The room settles around ${heat.indoor.toFixed(1)} °C — on the cold side`, null);
+    if (heat.capacity > 0 && heat.coolingShort > 300) add('low', `The AC is ~${Math.round(heat.coolingShort)} W short of holding 24 °C`, scene.objects.find((object) => object.model === 'ac')?.id ?? null);
+    const sunnyWindow = heat.solarByWindow.reduce((best, entry) => (entry.watts > (best?.watts ?? 0) ? entry : best), null);
+    if (sunnyWindow && sunnyWindow.watts > 400) add('low', `${sunnyWindow.window.name} lets in ${Math.round(sunnyWindow.watts)} W of sun right now — like a heater; a blind or curtain cuts it`, sunnyWindow.window.id);
+  }
+
+  // ─── Sound ──────────────────────────────────────────────────────────────
+  area = 'sound';
+  const acoustics = roomAcoustics(scene);
+  if (acoustics.rt60 > 0.9) add('medium', `Echo time is ${acoustics.rt60.toFixed(2)} s — the room will ring; a rug, curtains or fabric seating help`, null);
+  else if (acoustics.rt60 < 0.25) add('low', `Echo time is only ${acoustics.rt60.toFixed(2)} s — the room may feel acoustically dead`, null);
+  for (const bed of scene.objects.filter((object) => object.model === 'bed')) {
+    const fridge = scene.objects.find((object) => object.model === 'fridge' && distance2d(object, bed) < 1.8);
+    if (fridge) add('low', `${fridge.name} hums within ${distance2d(fridge, bed).toFixed(1)} m of ${bed.name}`, fridge.id);
+    const window = scene.objects.find((object) => object.model === 'window' && object.open && distance2d(object, bed) < 1.2);
+    if (window) add('low', `${bed.name} is right by open ${window.name} — street noise and drafts at night`, bed.id);
+  }
+  area = 'connectivity';
+  for (const seat of scene.objects.filter((object) => object.model === 'bed' || object.model === 'sofa')) {
+    const signal = wifiAt(scene, { x: seat.position.x, y: 0.9, z: seat.position.z });
+    if (signal !== null && signal < -72) add('low', `Weak WiFi at ${seat.name} (${signal.toFixed(0)} dBm)`, seat.id);
+  }
+
+  const categories = Object.fromEntries(Object.entries(CATEGORIES).map(([key, info]) => [key, {
+    ...info,
+    score: Math.max(0, Math.round(100 - categoryPenalty[key])),
+    issues: issues.filter((issue) => issue.category === key).length,
+  }]));
+
   return {
+    categories,
     score: Math.max(0, Math.round(100 - penalty)),
     issues: issues.sort((a, b) => ({ high: 0, medium: 1, low: 2 })[a.severity] - ({ high: 0, medium: 1, low: 2 })[b.severity]),
     wins,
@@ -336,7 +455,7 @@ function randomMove(scene, object, room, random) {
 }
 
 // Simulated annealing over unlocked floor furniture. Yields to the UI between chunks.
-export async function suggestLayout(scene, { iterations = 1400, onProgress = () => {}, seed = Date.now(), isCancelled = () => false } = {}) {
+export async function suggestLayout(scene, { iterations = 1400, onProgress = () => {}, seed = Date.now(), isCancelled = () => false, environment = null, weather = null } = {}) {
   let state = seed >>> 0;
   const random = () => {
     state = (state * 1664525 + 1013904223) >>> 0;
@@ -347,7 +466,10 @@ export async function suggestLayout(scene, { iterations = 1400, onProgress = () 
   let currentScore = objective(scene);
   let best = current;
   let bestScore = currentScore;
-  if (!movable.length) return { scene, before: currentScore.result, after: currentScore.result, improved: false };
+  if (!movable.length) {
+    const result = evaluateLayout(scene, { environment, weather });
+    return { scene, before: result, after: result, improved: false };
+  }
   for (let iteration = 0; iteration < iterations; iteration += 1) {
     if (iteration % 60 === 0) {
       onProgress(iteration / iterations, bestScore.result.score);
@@ -370,6 +492,8 @@ export async function suggestLayout(scene, { iterations = 1400, onProgress = () 
     }
   }
   onProgress(1, bestScore.result.score);
-  const before = evaluateLayout(scene);
-  return { scene: best, before, after: bestScore.result, improved: bestScore.result.score > before.score };
+  // The search scores layout only (fast); the reported scores include the site.
+  const before = evaluateLayout(scene, { environment, weather });
+  const after = evaluateLayout(best, { environment, weather });
+  return { scene: best, before, after, improved: after.score > before.score };
 }

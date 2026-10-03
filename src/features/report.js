@@ -18,13 +18,8 @@ export function reportHtml({ project, scene, image, metrics }) {
   const catalogNames = new Set(CATALOG.map((item) => item.name.replace(/^IKEA /, '')));
   const shopping = furniture.filter((object) => catalogNames.has(object.name));
   const recommendations = [
-    ...metrics.issues.filter((issue) => issue.severity !== 'low').map((issue) => issue.text),
-    metrics.deskLux !== null && metrics.deskLux < 300 ? `Add a desk lamp: the desk gets ${Math.round(metrics.deskLux)} lux, 300–500 is comfortable for work.` : null,
-    metrics.rt60 > 0.8 ? `Soften the room: echo is ${metrics.rt60.toFixed(2)} s. A rug, curtains or a fabric sofa bring it toward 0.5 s.` : null,
-    metrics.ach < 2 ? `Open windows on two walls for cross-ventilation: fresh air is only ${metrics.ach.toFixed(1)} changes per hour.` : null,
-    metrics.indoor > 27 && !scene.objects.some((object) => object.model === 'ac') ? `Expect ${metrics.indoor.toFixed(1)} °C without cooling. Shade sunny windows or add an AC unit.` : null,
-    metrics.deskWifi !== null && metrics.deskWifi < -67 ? `Move the router closer to the desk or keep metal out of the way (desk signal ${Math.round(metrics.deskWifi)} dBm).` : null,
-  ].filter(Boolean);
+    ...metrics.issues.map((issue) => issue.text),
+  ];
   const tone = metrics.score >= 85 ? '#2f9e6e' : metrics.score >= 60 ? '#d08a2c' : '#d4513f';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8" /><title>${escapeHtml(project.name)} — RoomShift report</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" />
@@ -48,6 +43,8 @@ export function reportHtml({ project, scene, image, metrics }) {
     ul { margin: 0; padding-left: 18px; }
     li { margin: 4px 0; }
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .bar { height: 8px; border-radius: 4px; background: #eceef1; overflow: hidden; } .bar i { display: block; height: 100%; }
+    .cats td { padding: 6px; }
     .print { position: fixed; top: 16px; right: 16px; padding: 10px 16px; border: 0; border-radius: 10px; background: #15181e; color: #fff; font: 600 13px Geist, sans-serif; cursor: pointer; }
     footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #eceef1; color: #9ca3af; font-size: 11px; }
     @media print { .print { display: none; } body { padding: 0; } }
@@ -58,6 +55,8 @@ export function reportHtml({ project, scene, image, metrics }) {
     <div><div class="muted">Livability</div><div class="score">${metrics.score}</div>
     <p>${metrics.score >= 85 ? 'Easy to live in.' : metrics.score >= 60 ? 'Workable, with a few snags.' : 'Hard to live in as arranged.'} ${Math.round(metrics.walkable * 100)}% of the floor is walkable at 60 cm.</p>
     ${metrics.wins.length ? `<ul>${metrics.wins.slice(0, 4).map((win) => `<li>${escapeHtml(win)}</li>`).join('')}</ul>` : ''}</div></div>
+  <h2>How it scores</h2>
+  <table class="cats">${Object.values(metrics.categories).map((category) => `<tr><td>${category.icon} ${category.label}</td><td style="width:55%"><div class="bar"><i style="width:${category.score}%;background:${category.score >= 85 ? '#2f9e6e' : category.score >= 60 ? '#d08a2c' : '#d4513f'}"></i></div></td><td class="num">${category.score}</td><td class="muted">${category.issues ? `${category.issues} to fix` : 'fine'}</td></tr>`).join('')}</table>
   <h2>What to change</h2>
   ${recommendations.length ? `<ul>${recommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : '<p>Nothing urgent — this arrangement works.</p>'}
   <div class="grid2"><div><h2>Comfort numbers</h2><table>${METRIC_ROWS.map(([label, get, format]) => {

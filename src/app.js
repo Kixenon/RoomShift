@@ -378,8 +378,8 @@ function ensureViewport() {
   viewport.setTheme(resolvedTheme());
   fieldController = new RoomFieldController({
     worker: new Worker(new URL('./simulation/room-field-worker.js', import.meta.url), { type: 'module' }),
-    viewport,
-    onState: renderFieldState,
+    viewport: solverViewport(),
+    onState: (state) => { if (state.mode) renderFieldState(state); },
   });
   window.addEventListener('pagehide', () => {
     flushSave();
@@ -468,10 +468,20 @@ function solverScene() {
     objects: roomScene.objects.map((object) => {
       if (object.model === 'door') return { ...object, model: 'window' };
       // The jet follows the fan head (yaw, tilt) or the AC louver.
-      if (object.model === 'fan' || object.model === 'ac') {
-        const yaw = object.model === 'fan' ? object.props?.yaw ?? 0 : 0;
-        const tilt = object.model === 'fan' ? object.props?.tilt ?? 0 : object.props?.louver ?? 30;
-        return { ...object, model: 'fan', rotation: { ...object.rotation, x: (object.rotation.x ?? 0) + tilt, y: object.rotation.y + yaw } };
+      if (object.model === 'fan') {
+        return { ...object, rotation: { ...object.rotation, x: (object.rotation.x ?? 0) - (object.props?.tilt ?? 0), y: object.rotation.y + (object.props?.yaw ?? 0) } };
+      }
+      // An AC unit is a jet from its outlet, aimed down by the louver; model it as
+      // a small fan there so the tilt never pushes it through the ceiling.
+      if (object.model === 'ac') {
+        const size = 0.2;
+        return {
+          ...object,
+          model: 'fan',
+          dimensions: { width: size, height: size, depth: size },
+          position: { x: object.position.x, y: Math.min(roomScene.room.height - size - 0.05, object.position.y + object.dimensions.height / 2 - size / 2), z: object.position.z + object.dimensions.depth / 2 },
+          rotation: { x: object.props?.louver ?? 30, y: object.rotation.y, z: 0 },
+        };
       }
       return object;
     }),
@@ -999,37 +1009,66 @@ $('#add-box').addEventListener('click', () => placeModel('box'));
 $('#add-window').addEventListener('click', () => placeModel('window'));
 
 // ─── Lenses ───────────────────────────────────────────────────────────────
-function setLens(mode) {
+// Lenses can be combined: `lenses` is everything showing, `lens` the primary one
+// (the legend, probe and narrator follow it). Shift-click adds or removes a lens.
+const lenses = new Set();
+const lensFields = {};
+let solverResult = null;
+
+function setLens(mode, { additive = false } = {}) {
   if (!fieldController) return;
   if (mode === 'wifi' && !roomScene.objects.some((object) => object.model === 'router')) autoPlace('router');
   if (mode === 'sound' && !roomScene.objects.some((object) => object.model === 'speaker')) autoPlace('speaker');
-  lens = mode;
-  document.body.dataset.lens = mode ?? 'none';
-  fieldResult = null;
-  planeField = null;
-  volumeField = null;
-  for (const button of $$('.lens[data-mode]')) {
-    button.classList.toggle('active', mode === button.dataset.mode);
-    button.setAttribute('aria-pressed', String(mode === button.dataset.mode));
+  if (!additive) lenses.clear();
+  if (mode) {
+    if (additive && lenses.has(mode)) lenses.delete(mode);
+    else lenses.add(mode);
   }
-  $('#lens-clear').hidden = !mode;
+  lens = mode && lenses.has(mode) ? mode : [...lenses].at(-1) ?? null;
+  applyLenses();
+}
+
+function applyLenses() {
+  document.body.dataset.lens = lens ?? 'none';
+  for (const button of $$('.lens[data-mode]')) {
+    const on = lenses.has(button.dataset.mode);
+    button.classList.toggle('active', on);
+    button.classList.toggle('secondary', on && button.dataset.mode !== lens);
+    button.setAttribute('aria-pressed', String(on));
+  }
+  $('#lens-clear').hidden = !lenses.size;
   clearPins();
   viewport.setProbeLine(null);
-  viewport.probeHeight = mode ? Math.min(roomScene.room.height - 0.1, probeHeights[mode] ?? DEFAULT_PROBE_HEIGHT[mode]) : undefined;
+  viewport.probeHeight = lens ? Math.min(roomScene.room.height - 0.1, probeHeights[lens] ?? DEFAULT_PROBE_HEIGHT[lens]) : undefined;
   viewport.clearPlaneField();
   viewport.setOverlayField(null);
-  viewport.setSurfaceMap(null);
-  fieldController.setMode(SOLVER_LENSES.has(mode) || mode === 'light' ? mode : null);
-  if (!mode) legend.box.hidden = true;
-  $('#sun-dock').hidden = mode !== 'light';
+  // One airflow solve feeds both Air and Heat.
+  const wantsSolver = lenses.has('airflow') || lenses.has('temperature');
+  if (!wantsSolver) {
+    solverResult = null;
+    viewport.clearLayer('airflow');
+    viewport.clearLayer('temperature');
+  }
+  if (wantsSolver && fieldController.mode !== 'airflow') fieldController.setMode('airflow');
+  else if (!wantsSolver && fieldController.mode) fieldController.setMode(null);
+  else if (solverResult) showSolverLayers();
+  viewport.setLightingPreview(lenses.has('light'));
+  if (!lenses.size) legend.box.hidden = true;
+  $('#sun-dock').hidden = !lenses.has('light');
   $('#probe').hidden = true;
-  if (mode === 'light') renderSunDock();
+  if (lenses.has('light')) renderSunDock();
+  fieldResult = SOLVER_LENSES.has(lens) ? solverResult : null;
   refreshLensFields();
+  if (SOLVER_LENSES.has(lens)) renderSolverLegend();
   renderNarrator();
   renderModeInsights();
 }
-const toggleLens = (mode) => setLens(lens === mode ? null : mode);
-for (const button of $$('.lens[data-mode]')) button.addEventListener('click', () => toggleLens(button.dataset.mode));
+
+const toggleLens = (mode, additive = false) => setLens(!additive && lens === mode && lenses.size === 1 ? null : mode, { additive });
+for (const button of $$('.lens[data-mode]')) {
+  button.title = `${button.title} · Shift-click to combine`;
+  button.addEventListener('click', (event) => toggleLens(button.dataset.mode, event.shiftKey || event.metaKey));
+}
 $('#lens-clear').addEventListener('click', () => setLens(null));
 
 // A lens needs its source: put one somewhere sensible and say so.
@@ -1055,22 +1094,33 @@ function scheduleLensFrame() {
 }
 
 function refreshLensFields() {
-  if (!lens || !roomScene) return;
-  if (VOLUME_LENSES.has(lens)) {
-    volumeField = computeVolumeField(roomScene, lens, { cellSize: isDragging ? 0.16 : 0.12 });
-    planeField = computePlaneField(roomScene, lens, { cellSize: 0.15 });
-    if (volumeField) viewport.setFields(volumeField, lens);
-    renderVolumeLegend();
-  } else if (lens === 'light') {
+  if (!roomScene) return;
+  for (const mode of VOLUME_LENSES) {
+    if (lenses.has(mode)) {
+      const volume = computeVolumeField(roomScene, mode, { cellSize: isDragging ? 0.16 : 0.12 });
+      lensFields[mode] = { volume, plane: computePlaneField(roomScene, mode, { cellSize: 0.15 }) };
+      if (volume) viewport.setLayer(mode, volume);
+    } else {
+      delete lensFields[mode];
+      viewport.clearLayer(mode);
+    }
+  }
+  if (lenses.has('light')) {
     const environment = environmentOf(project);
-    planeField = computePlaneField(roomScene, 'light', { environment, cloudCover: weather?.cloudCover, cellSize: 0.2 });
-    const context = planeField.light;
-    volumeField = { light: context, min: planeField.min, max: planeField.max };
+    const plane = computePlaneField(roomScene, 'light', { environment, cloudCover: weather?.cloudCover, cellSize: 0.2 });
+    const context = plane.light;
+    lensFields.light = { plane, volume: { light: context, min: plane.min, max: plane.max } };
     // Repaint the lux map when a drag ends; mid-drag the last map stays put.
     if (luxMapOn && !isDragging) viewport.setSurfaceMap((point, normal) => luxAt(context, point, normal));
     else if (!luxMapOn) viewport.setSurfaceMap(null);
-    renderLightLegend();
+  } else {
+    delete lensFields.light;
+    viewport.setSurfaceMap(null);
   }
+  planeField = lensFields[lens]?.plane ?? null;
+  volumeField = lensFields[lens]?.volume ?? null;
+  if (VOLUME_LENSES.has(lens)) renderVolumeLegend();
+  else if (lens === 'light') renderLightLegend();
   refreshPins();
   renderNarrator();
   renderModeInsights();
@@ -1116,7 +1166,7 @@ function renderLightLegend() {
   if (!volumeField?.light) return;
   showLegend('light', 'Illuminance · lux', '50', '1500+',
     `<div class="segmented legend-toggle"><button type="button" data-luxmap="off" class="${luxMapOn ? '' : 'active'}">Rendered</button><button type="button" data-luxmap="on" class="${luxMapOn ? 'active' : ''}">Lux map</button></div>
-    <span>Dark bands at 100 · 300 · 500 · 1000 lux. ${fmt(volumeField.light.indirect)} lux here is light reflected off your walls, floor and ceiling.</span>`);
+    <span>Desk work wants 300–500 lux. ${fmt(volumeField.light.indirect)} lux in the middle of the room is light reflected off your walls, floor and ceiling.</span>`);
 }
 legend.box.addEventListener('click', (event) => {
   const toggle = event.target.closest('[data-luxmap]');
@@ -1125,15 +1175,47 @@ legend.box.addEventListener('click', (event) => {
   refreshLensFields();
 });
 
-function renderFieldState({ mode, loading, result, error }) {
-  if (VOLUME_LENSES.has(lens) || lens !== mode) return;
+function showSolverLayers() {
+  for (const mode of SOLVER_LENSES) {
+    if (lenses.has(mode) && solverResult) viewport.setLayer(mode, solverResult);
+    else viewport.clearLayer(mode);
+  }
+}
+
+let solverState = { loading: false, error: null };
+function renderFieldState({ loading, result, error }) {
+  solverState = { loading, error };
   $('#viewport').setAttribute('aria-busy', String(loading));
-  if (mode === 'light') { renderLightLegend(); return; }
-  if (!mode) { legend.box.hidden = true; return; }
-  fieldResult = result;
-  if (loading) {
+  if (loading || error) {
+    solverResult = null;
+    viewport.clearLayer('airflow');
+    viewport.clearLayer('temperature');
+  } else if (result) {
+    solverResult = result;
+    showSolverLayers();
+    refreshPins();
+  }
+  fieldResult = SOLVER_LENSES.has(lens) ? solverResult : null;
+  if (SOLVER_LENSES.has(lens)) renderSolverLegend();
+  renderNarrator();
+  renderModeInsights();
+}
+
+// The controller drives one solve; the app decides which layers show it.
+function solverViewport() {
+  return {
+    setFields: (result) => renderFieldState({ loading: false, result, error: null }),
+    clearFields: () => {},
+    setLightingPreview: () => {},
+  };
+}
+
+function renderSolverLegend() {
+  const mode = lens;
+  const { loading, error } = solverState;
+  const result = solverResult;
+  if (loading || (!result && !error)) {
     showLegend(mode, `${LENSES[mode]} · solving`, '', '', '<span class="spinner"></span> Running the 3D Navier–Stokes solver…');
-    renderNarrator();
     return;
   }
   if (error || !result) {
@@ -1142,15 +1224,12 @@ function renderFieldState({ mode, loading, result, error }) {
   }
   const cellSize = result.grid.cellSize ?? Math.max(result.grid.dx, result.grid.dy, result.grid.dz);
   const backend = result.backend === 'webgpu' ? 'GPU' : 'CPU preview';
-  const status = `${backend} · ${cellSize < 0.1 ? `${Math.round(cellSize * 100)} cm` : `${fmt(cellSize, 2)} m`} grid`;
-  refreshPins();
-  if (mode === 'airflow') showLegend(mode, 'Air speed · particles ride the flow', '0 m/s', `${fmt(result.stats.maxSpeed, 2)} m/s`, status);
+  const status = `${backend} · ${cellSize < 0.1 ? `${Math.round(cellSize * 100)} cm` : `${fmt(cellSize, 2)} m`} grid${lenses.size > 1 ? ` · also showing ${[...lenses].filter((item) => item !== mode).map((item) => LENSES[item]).join(', ')}` : ''}`;
+  if (mode === 'airflow') showLegend(mode, 'Air speed · streaks follow the flow', '0 m/s', `${fmt(result.stats.maxSpeed, 2)} m/s`, status);
   else {
     const digits = result.stats.maxTemperature - result.ambientTemperature >= 1 ? 1 : 2;
     showLegend(mode, 'Air temperature', `${fmt(result.ambientTemperature, digits)} °C`, `${fmt(result.stats.maxTemperature, digits)} °C`, status);
   }
-  renderNarrator();
-  renderModeInsights();
 }
 
 // Value under the cursor
@@ -1388,19 +1467,33 @@ function issueList(report) {
 }
 function renderLayoutReport() {
   if (!roomScene) return;
-  layoutReport = evaluateLayout(roomScene, { environment: environmentOf(project) });
+  layoutReport = evaluateLayout(roomScene, { environment: environmentOf(project), weather });
   const score = layoutReport.score;
   $('#orb-score').textContent = score;
   const orb = $('#orb-value');
   orb.style.strokeDashoffset = String(100.5 * (1 - score / 100));
   orb.style.stroke = `var(--${score >= 85 ? 'good' : score >= 60 ? 'warn' : 'bad'})`;
+  const filtered = categoryFilter ? { ...layoutReport, issues: layoutReport.issues.filter((issue) => issue.category === categoryFilter) } : layoutReport;
   $('#layout-report').innerHTML = `
     <div class="score-row">${scoreRing(score)}<div><strong>${score >= 85 ? 'Easy to live in' : score >= 60 ? 'Workable, with snags' : 'Hard to live in'}</strong>
       <span>${Math.round(layoutReport.openFloor * 100)}% of the floor is walkable at 60 cm</span></div></div>
-    ${issueList(layoutReport)}`;
+    <div class="category-grid">${Object.entries(layoutReport.categories).map(([key, category]) => `
+      <button type="button" class="category ${categoryFilter === key ? 'active' : ''} ${scoreTone(category.score)}" data-category="${key}" title="${category.issues} issue${category.issues === 1 ? '' : 's'}">
+        <span class="category-icon">${category.icon}</span><span class="category-label">${category.label}</span>
+        <span class="category-bar"><i style="width:${category.score}%"></i></span><b class="mono">${category.score}</b></button>`).join('')}</div>
+    ${categoryFilter ? `<p class="note">Showing ${layoutReport.categories[categoryFilter].label.toLowerCase()} only · <button type="button" class="link-btn" data-category="">show all</button></p>` : ''}
+    ${issueList(filtered)}`;
   renderOutline();
   if (!lens) renderNarrator();
 }
+let categoryFilter = '';
+$('#layout-report').addEventListener('click', (event) => {
+  const category = event.target.closest('[data-category]');
+  if (!category) return;
+  categoryFilter = categoryFilter === category.dataset.category ? '' : category.dataset.category;
+  renderLayoutReport();
+});
+
 function selectFromIssue(event) {
   const item = event.target.closest('[data-issue-object]');
   if (item) select(item.dataset.issueObject);
@@ -1647,6 +1740,8 @@ async function runSuggestion() {
   const locked = roomScene.objects.filter((object) => object.locked).length;
   $('#suggest-body').innerHTML = `<p class="muted">Trying arrangements that keep walkways, the door swing and windows clear${locked ? `, leaving ${locked} locked object${locked > 1 ? 's' : ''} alone` : ''}…</p><div class="progress"><span id="suggest-progress"></span></div>`;
   const result = await suggestLayout(roomScene, {
+    environment: environmentOf(project),
+    weather,
     seed: Date.now() + run,
     isCancelled: () => run !== suggestRun || !dialog.open,
     onProgress: (fraction) => { const bar = $('#suggest-progress'); if (bar) bar.style.width = `${Math.round(fraction * 100)}%`; },
@@ -1977,7 +2072,7 @@ document.addEventListener('keydown', (event) => {
   const arrows = { arrowleft: [-step, 0], arrowright: [step, 0], arrowup: [0, -step], arrowdown: [0, step] };
   if (arrows[key] && selectedId) { event.preventDefault(); nudge(...arrows[key]); return; }
   if (key === 'tab') { event.preventDefault(); cycleSelection(event.shiftKey ? -1 : 1); return; }
-  if (key === ' ') { event.preventDefault(); if (!toggleOpen() && lens === 'light') toggleSunPlay(); return; }
+  if (key === ' ') { event.preventDefault(); if (!toggleOpen() && lenses.has('light')) toggleSunPlay(); return; }
   if (key === '[' || key === '{') spin(event.shiftKey || key === '{' ? -90 : -15);
   else if (key === ']' || key === '}') spin(event.shiftKey || key === '}' ? 90 : 15);
   else if (key === 'g') setTransformMode('translate');
@@ -1990,7 +2085,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'i' || key === 'l') openSheet('insights');
   else if (key === 'a') openPalette('Add ');
   else if (key === '?' || (key === '/' && event.shiftKey)) $('#shortcut-help').showModal();
-  else if (key >= '1' && key <= '5') toggleLens(Object.keys(LENSES)[Number(key) - 1]);
+  else if (/^Digit[1-5]$/.test(event.code)) toggleLens(Object.keys(LENSES)[Number(event.code.slice(5)) - 1], event.shiftKey);
   else if (key === '0') setLens(null);
   else if (key === 'escape') {
     $('#context-menu').hidden = true;

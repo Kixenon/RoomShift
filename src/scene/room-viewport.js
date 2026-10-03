@@ -371,8 +371,7 @@ const PLANE_RAMPS = Object.freeze({
   sound: [[0.16, 0.22, 0.42], [0.36, 0.33, 0.62], [0.72, 0.38, 0.6], [0.95, 0.55, 0.38], [0.99, 0.86, 0.5]],
 });
 
-// Lighting-design false colour on a log scale, with darker contour bands at
-// 100, 300, 500 and 1000 lux so the thresholds read at a glance.
+// Lighting-design false colour on a log scale.
 const LUX_STOPS = [[0, [0.12, 0.1, 0.32]], [50, [0.38, 0.2, 0.6]], [150, [0.85, 0.3, 0.45]], [300, [0.98, 0.55, 0.25]], [600, [1, 0.82, 0.3]], [1500, [1, 0.96, 0.62]], [5000, [1, 1, 0.95]]];
 export function luxColor(lux) {
   let color = LUX_STOPS.at(-1)[1];
@@ -385,8 +384,7 @@ export function luxColor(lux) {
       break;
     }
   }
-  const contour = [100, 300, 500, 1000].some((level) => Math.abs(Math.log(lux + 1) - Math.log(level)) < 0.035);
-  return contour ? color.map((value) => value * 0.55) : color;
+  return color;
 }
 
 function rampColor(ramp, t) {
@@ -1129,7 +1127,9 @@ export class RoomViewport {
       disposeTree(this.selectionBox);
       this.selectionBox = null;
     }
+    const keptLayers = [...(this.layers?.values() ?? [])];
     for (const child of [...this.sceneRoot.children]) {
+      if (keptLayers.includes(child)) continue;
       this.sceneRoot.remove(child);
       disposeTree(child);
     }
@@ -1143,6 +1143,24 @@ export class RoomViewport {
     else this.rebuildLights();
     if (keptPlane && !roomChanged) this.setPlaneField(keptPlane);
     this.positionReferences();
+  }
+
+  // Several lenses at once: one volume layer per lens.
+  setLayer(mode, result) {
+    this.layers ??= new Map();
+    this.clearLayer(mode);
+    if (!result) return;
+    const layer = createRoomFieldLayer(result, mode);
+    this.layers.set(mode, layer);
+    this.sceneRoot.add(layer);
+  }
+
+  clearLayer(mode) {
+    const layer = this.layers?.get(mode);
+    if (!layer) return;
+    this.sceneRoot.remove(layer);
+    disposeTree(layer);
+    this.layers.delete(mode);
   }
 
   setFields(result, mode) {
@@ -1252,7 +1270,9 @@ export class RoomViewport {
     const { width, depth, height } = this.roomScene.room;
     const group = new THREE.Group();
     group.name = 'lux-map';
-    const material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    // Front faces only, facing into the room: walls between you and the room
+    // stay see-through, like the walls themselves.
+    const material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.88, side: THREE.FrontSide, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 });
     const surface = (origin, u, v, normal, step, inset) => {
       const nu = Math.max(2, Math.round(Math.hypot(u.x, u.y, u.z) / step));
       const nv = Math.max(2, Math.round(Math.hypot(v.x, v.y, v.z) / step));
@@ -1283,6 +1303,14 @@ export class RoomViewport {
           const b1 = b0 + 1;
           if (!(alphaMask[a0] && alphaMask[a1] && alphaMask[b0] && alphaMask[b1])) continue;
           indices.push(a0, b0, a1, a1, b0, b1);
+        }
+      }
+      // Wind the triangles so their face normal is the inward normal.
+      if (indices.length) {
+        const p = (index) => new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
+        const face = new THREE.Vector3().crossVectors(p(indices[1]).sub(p(indices[0])), p(indices[2]).sub(p(indices[0])));
+        if (face.dot(new THREE.Vector3(normal.x, normal.y, normal.z)) < 0) {
+          for (let index = 0; index < indices.length; index += 3) [indices[index + 1], indices[index + 2]] = [indices[index + 2], indices[index + 1]];
         }
       }
       const geometry = new THREE.BufferGeometry();
@@ -1747,7 +1775,12 @@ export class RoomViewport {
   }
 
   updateFieldVolumeDepthTest() {
-    const volume = this.fieldLayer?.children?.find((child) => child.userData?.boundsHalfSize);
+    for (const layer of this.layers?.values() ?? []) this.updateLayerDepthTest(layer);
+    this.updateLayerDepthTest(this.fieldLayer);
+  }
+
+  updateLayerDepthTest(layer) {
+    const volume = layer?.children?.find((child) => child.userData?.boundsHalfSize);
     if (!volume) return;
     const { boundsCenter, boundsHalfSize } = volume.userData;
     const position = this.camera.position;
@@ -1764,6 +1797,7 @@ export class RoomViewport {
     this.frameRequest = requestAnimationFrame(this.animate);
     this.orbit.update();
     this.fieldLayer?.userData.animate?.(this.prefersReducedMotion ? 0 : time / 1000);
+    for (const layer of this.layers?.values() ?? []) layer.userData.animate?.(this.prefersReducedMotion ? 0 : time / 1000);
     this.selectionBox?.update();
     this.hoverBox?.update();
     this.updateFieldVolumeDepthTest();

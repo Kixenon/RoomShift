@@ -6,7 +6,7 @@ import { lightContext, luxAt, roomAcoustics, wifiAt } from '../simulation/room-p
 // Every value comes from the same models the lenses use.
 export function roomMetrics(scene, project, weather = null) {
   const environment = environmentOf(project);
-  const layout = evaluateLayout(scene, { environment });
+  const layout = evaluateLayout(scene, { environment, weather });
   const desk = scene.objects.find((object) => object.model === 'desk') ?? scene.objects.find((object) => object.model === 'table');
   const bed = scene.objects.find((object) => object.model === 'bed');
   const deskPoint = desk && { x: desk.position.x, y: desk.position.y + desk.dimensions.height + 0.01, z: desk.position.z };
@@ -16,6 +16,7 @@ export function roomMetrics(scene, project, weather = null) {
   const heat = heatBalance(scene, environment, { outdoor: weather?.temperature ?? null, windSpeed: weather?.windSpeed ?? null, cloudCover: weather?.cloudCover });
   return {
     score: layout.score,
+    categories: layout.categories,
     issues: layout.issues,
     wins: layout.wins,
     walkable: layout.openFloor,
