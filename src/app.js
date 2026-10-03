@@ -31,13 +31,32 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => (
   '"': '&quot;',
   "'": '&#39;',
 })[character]);
+const svgIcon = (paths, size = 'h-3.5 w-3.5') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="${size}">${paths}</svg>`;
+const MODEL_ICONS = Object.freeze({
+  box: svgIcon('<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>'),
+  fan: svgIcon('<path d="M10.827 16.379a6.082 6.082 0 0 1-8.618-7.002l5.412 1.45a6.082 6.082 0 0 1 7.002-8.618l-1.45 5.412a6.082 6.082 0 0 1 8.618 7.002l-5.412-1.45a6.082 6.082 0 0 1-7.002 8.618l1.45-5.412Z"/><path d="M12 12h.01"/>'),
+  sofa: svgIcon('<path d="M20 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3"/><path d="M2 16a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v2H6v-2a2 2 0 0 0-4 0Z"/><path d="M4 18v2"/><path d="M20 18v2"/>'),
+  bed: svgIcon('<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>'),
+  desk: svgIcon('<path d="M2 8h20"/><path d="M5 8v12"/><path d="M19 8v12"/><path d="M5 13h14"/>'),
+  table: svgIcon('<ellipse cx="12" cy="7" rx="9" ry="2.5"/><path d="M5 9.5V19"/><path d="M19 9.5V19"/><path d="M12 9.5V19"/>'),
+  lamp: svgIcon('<path d="M9 3h6l2.5 6h-11L9 3Z"/><path d="M12 9v11"/><path d="M8 20h8"/>'),
+  heater: svgIcon('<rect x="3" y="5" width="18" height="11" rx="2"/><path d="M7 5v11"/><path d="M12 5v11"/><path d="M17 5v11"/><path d="M4 20h16"/>'),
+  window: svgIcon('<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M12 3v18"/><path d="M4 12h16"/>'),
+});
+const modelIcon = (model) => MODEL_ICONS[model] ?? MODEL_ICONS.box;
 const roomInputs = {
   width: $('#room-width'),
   depth: $('#room-depth'),
   height: $('#room-height'),
 };
 const objectList = $('#object-list');
+const objectCount = $('#object-count');
 const properties = $('#object-properties');
+const solvingIndicator = {
+  badge: $('#field-solving'),
+  label: $('#field-solving-label'),
+  progress: $('#field-progress'),
+};
 const fieldControls = {
   airflow: $('#show-airflow'),
   temperature: $('#show-temperature'),
@@ -83,15 +102,27 @@ function updateScene(scene, { record = !isDragging } = {}) {
 
 function renderFieldState({ mode, loading, result, error }) {
   const viewportElement = $('#viewport');
+  const solvingLabels = {
+    airflow: 'Solving airflow…',
+    temperature: 'Solving temperature…',
+    light: 'Preparing light preview…',
+  };
   for (const [name, button] of Object.entries({
     airflow: fieldControls.airflow,
     temperature: fieldControls.temperature,
     light: fieldControls.light,
-  })) setPressed(button, mode === name);
+  })) {
+    setPressed(button, mode === name);
+    button.classList.toggle('solving', loading && mode === name);
+  }
+  solvingIndicator.badge.hidden = !loading;
+  solvingIndicator.progress.hidden = !loading;
+  solvingIndicator.label.textContent = solvingLabels[mode] ?? 'Solving…';
   viewportElement.classList.toggle('field-active', Boolean(mode));
   viewportElement.setAttribute('aria-busy', String(loading));
   fieldControls.legend.hidden = !mode || (mode !== 'light' && !result);
   fieldControls.status.textContent = loading ? 'Solving…' : error ? 'Unavailable' : '';
+  fieldControls.status.dataset.state = loading ? 'loading' : error ? 'error' : '';
   fieldControls.status.title = error?.message ?? '';
   if (mode === 'light') {
     fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : 'Realtime shadows';
@@ -176,20 +207,25 @@ function updateRoomSummary() {
 }
 
 function renderObjectList() {
-  objectList.innerHTML = roomScene.objects.map((object) => {
+  const rows = roomScene.objects.map((object) => {
     const model = MODEL_PRESETS[object.model] ?? MODEL_PRESETS.box;
+    const isSelected = object.id === selectedId;
     return `
-      <button class="object-row ${object.id === selectedId ? 'selected' : ''}" type="button" data-select-object="${escapeHtml(object.id)}" aria-pressed="${object.id === selectedId}">
-        <span class="object-row-icon" aria-hidden="true">${escapeHtml(model.icon)}</span>
-        <span class="object-row-name">${escapeHtml(object.name)}</span>
-        <span class="object-type">${escapeHtml(model.label)}</span>
+      <button type="button" data-select-object="${escapeHtml(object.id)}" aria-pressed="${isSelected}" title="${escapeHtml(object.name)}"
+        class="flex h-10 w-full shrink-0 items-center gap-2.5 rounded-lg border px-2 text-left transition-colors duration-100 ${isSelected ? 'border-emerald-200/80 bg-emerald-50/70 text-emerald-900' : 'border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900'}">
+        <span aria-hidden="true" class="grid h-6 w-6 shrink-0 place-items-center rounded-md ${isSelected ? 'bg-emerald-600/10 text-emerald-700' : 'bg-slate-100 text-slate-400'}">${modelIcon(object.model)}</span>
+        <span class="min-w-0 flex-1 truncate text-xs font-medium">${escapeHtml(object.name)}</span>
+        <span class="shrink-0 text-[9px] font-semibold uppercase tracking-wide ${isSelected ? 'text-emerald-600/90' : 'text-slate-300'}">${escapeHtml(model.label)}</span>
       </button>
     `;
   }).join('');
+  objectList.innerHTML = rows
+    || '<div class="rounded-lg border border-dashed border-slate-200 px-2 py-4 text-center text-[10px] leading-snug text-slate-400">No objects yet — add one from the left rail.</div>';
+  objectCount.textContent = String(roomScene.objects.length);
 }
 
 function propertyField(label, axis, value, kind, limits = {}) {
-  return `<label class="property-field"><span>${label}</span><input class="property-input" type="number" step="0.05" value="${value.toFixed(2)}" data-${kind}="${axis}" aria-label="${kind === 'position' ? 'Position' : 'Dimensions'} ${label}" ${limits.min === undefined ? '' : `min="${limits.min}"`} ${limits.max === undefined ? '' : `max="${limits.max}"`} /></label>`;
+  return `<label class="property-field"><span>${label}</span><input class="text-field" type="number" step="0.05" value="${value.toFixed(2)}" data-${kind}="${axis}" aria-label="${kind === 'position' ? 'Position' : 'Dimensions'} ${label}" ${limits.min === undefined ? '' : `min="${limits.min}"`} ${limits.max === undefined ? '' : `max="${limits.max}"`} /></label>`;
 }
 
 function renderProperties() {
@@ -197,7 +233,12 @@ function renderProperties() {
   const isWindow = object?.model === 'window';
   $('#delete-object').disabled = !object;
   if (!object) {
-    properties.innerHTML = '<div class="empty-properties">Select an object</div>';
+    properties.innerHTML = `
+      <div class="flex min-h-28 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-6 text-center">
+        <svg class="h-6 w-6 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>
+        <span class="text-xs font-medium text-slate-400">Nothing selected</span>
+        <span class="text-[10px] leading-snug text-slate-400">Click an object in the scene, or pick one from the objects list.</span>
+      </div>`;
     return;
   }
 
@@ -212,14 +253,23 @@ function renderProperties() {
   )).join('');
   properties.innerHTML = `
     <div class="properties-form">
-      <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
+      <label class="flex flex-col gap-1 border-b border-slate-100 pb-3 max-md:pb-2"><span class="text-[10px] font-semibold text-slate-400">Name</span><input class="text-field" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
       ${isWindow ? `
-        <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="Window wall">
+        <label class="property-field"><span>Wall</span><select class="select-field" data-window-wall aria-label="Window wall">
           <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
         </select></label>
-        <label class="window-open-toggle"><input type="checkbox" data-window-open ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow can escape' : 'Closed'}</span></label>
-      ` : `<label class="property-field"><span>Model</span><select class="property-input" data-object-model aria-label="Box model">${modelOptions}</select></label>`}
-      <div class="property-group">
+        <div class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+          <span class="flex min-w-0 flex-col">
+            <span class="text-xs font-semibold text-slate-700">Open window</span>
+            <span class="text-[10px] ${object.open ? 'text-emerald-600' : 'text-slate-400'}">${object.open ? 'Airflow can escape the room' : 'Sealed — blocks airflow'}</span>
+          </span>
+          <label class="relative inline-flex shrink-0 cursor-pointer items-center">
+            <input type="checkbox" data-window-open class="peer sr-only" aria-label="Window open" ${object.open ? 'checked' : ''} />
+            <span class="relative h-5 w-9 rounded-full bg-slate-300 shadow-inner transition-colors duration-150 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow-sm after:transition-all after:duration-150 after:content-[''] peer-checked:bg-emerald-500 peer-checked:after:translate-x-4 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-500/40 peer-focus-visible:ring-offset-2"></span>
+          </label>
+        </div>
+      ` : `<label class="property-field"><span>Model</span><select class="select-field" data-object-model aria-label="Box model">${modelOptions}</select></label>`}
+      <div class="flex flex-col gap-1.5">
         <div class="property-label">Position · m</div>
         <div class="property-fields">
           ${propertyField('X', 'x', object.position.x, 'position', { min: 0, max: roomScene.room.width })}
@@ -227,7 +277,7 @@ function renderProperties() {
           ${propertyField('Z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
         </div>
       </div>
-      <div class="property-group">
+      <div class="flex flex-col gap-1.5">
         <div class="property-label">Size · m</div>
         <div class="property-fields">
           ${propertyField('W', 'width', object.dimensions.width, 'dimension', isWindow ? { min: 0.4, max: maxWindowWidth } : dimensionLimits.width)}
@@ -235,15 +285,15 @@ function renderProperties() {
           ${isWindow ? '' : propertyField('D', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
         </div>
       </div>
-      ${isWindow ? '' : `<div class="property-group">
+      ${isWindow ? '' : `<div class="flex flex-col gap-1.5 max-md:hidden">
         <div class="property-label">Rotation · °</div>
-        <div class="property-fields rotation-fields">
+        <div class="property-fields">
           ${propertyField('X', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
           ${propertyField('Y', 'y', object.rotation.y, 'rotation', { min: -180, max: 180 })}
           ${propertyField('Z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
         </div>
       </div>`}
-      <div class="properties-note">${isWindow ? 'Open windows exhaust airflow and heat from the room.' : 'Drag the gizmo to move or rotate.'}</div>
+      <div class="properties-note ${isWindow ? 'bg-emerald-50/80 text-emerald-700' : 'bg-slate-50 text-slate-400'}">${isWindow ? 'Open windows exhaust airflow and heat from the room.' : 'Drag the gizmo to move or rotate.'}</div>
     </div>
   `;
   properties.querySelector('[data-object-name]').value = object.name;

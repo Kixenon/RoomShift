@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4f6f3" />
+    <meta name="theme-color" content="#f1f5f9" />
     <title>RoomShift — Room editor</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/styles.css" />
@@ -12,41 +12,61 @@
     <header class="topbar">
       <a class="brand" href="#" aria-label="RoomShift">
         <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><path d="M4 8.5 14 3l10 5.5v11L14 25 4 19.5v-11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 15 3.2 3.2L19.5 11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        <span>roomshift<span class="brand-period">.</span></span>
+        <span>roomshift<span class="text-emerald-500">.</span></span>
       </a>
-      <div class="scene-title"><span class="scene-dot"></span><span>Living room</span><span class="title-divider">/</span><span id="room-summary">5.2 × 4.0 × 2.7 m</span></div>
-      <button class="quiet-button" id="reset-scene" type="button" title="Reset room">Reset</button>
+      <div class="scene-title"><span class="scene-dot" aria-hidden="true"></span><span>Living room</span><span class="title-divider">/</span><span id="room-summary" class="tabular-nums text-slate-400">5.2 × 4.0 × 2.7 m</span></div>
+      <button class="quiet-button" id="reset-scene" type="button" title="Reset room">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="h-3.5 w-3.5"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8"/><path d="M3 3v5h5"/></svg>
+        <span>Reset</span>
+      </button>
     </header>
 
     <main class="editor-layout">
       <aside class="asset-rail" aria-label="Add objects">
-        <div class="rail-title">ADD</div>
-        <button class="asset-button" id="add-box" data-add-box type="button" aria-label="Add box" title="Add box">
-          <span class="asset-glyph">□</span><span>Box</span>
+        <div class="rail-title">Add</div>
+        <button class="asset-button group" id="add-box" data-add-box type="button" aria-label="Add box" title="Add box">
+          <span class="asset-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span>
+          <span class="asset-label">Box</span>
         </button>
-        <button class="asset-button" id="add-window" type="button" aria-label="Add window" title="Add window">
-          <span class="asset-glyph">▣</span><span>Window</span>
+        <button class="asset-button group" id="add-window" type="button" aria-label="Add window" title="Add window">
+          <span class="asset-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M12 3v18"/><path d="M4 12h16"/></svg></span>
+          <span class="asset-label">Window</span>
         </button>
+        <div class="rail-tip" aria-hidden="true">Click any object to edit it</div>
       </aside>
 
       <section class="viewport-wrap" aria-label="3D room">
         <div class="viewport-topline">
           <div class="camera-controls">
             <div class="view-toggle" role="group" aria-label="Camera view">
-            <button id="view-3d" class="view-button active" type="button" aria-pressed="true">3D</button>
-            <button id="view-top" class="view-button" type="button" aria-pressed="false">Top</button>
+              <button id="view-3d" class="view-button active" type="button" aria-pressed="true">3D</button>
+              <button id="view-top" class="view-button" type="button" aria-pressed="false">Top</button>
             </div>
             <div class="view-toggle" role="group" aria-label="Projection">
               <button id="projection-perspective" class="view-button active" type="button" aria-pressed="true">Persp</button>
               <button id="projection-orthographic" class="view-button" type="button" aria-pressed="false" title="Orthographic projection (O)">Ortho</button>
             </div>
           </div>
+
           <div class="field-controls" role="group" aria-label="Simulation and lighting views">
-            <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false">Air</button>
-            <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false">Heat</button>
-            <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false">Light</button>
+            <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false" title="Airflow estimate">
+              <span class="field-dot bg-sky-400" aria-hidden="true"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="h-3.5 w-3.5"><path d="M12.8 19.6A2 2 0 1 0 14 16H2"/><path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/><path d="M9.8 4.4A2 2 0 1 1 11 8H2"/></svg>
+              <span>Air</span>
+            </button>
+            <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false" title="Temperature estimate">
+              <span class="field-dot bg-orange-400" aria-hidden="true"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="h-3.5 w-3.5"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>
+              <span>Heat</span>
+            </button>
+            <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false" title="Lighting preview">
+              <span class="field-dot bg-amber-400" aria-hidden="true"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+              <span>Light</span>
+            </button>
             <span id="field-status" class="field-status" aria-live="polite"></span>
           </div>
+
           <div class="viewport-actions" role="group" aria-label="Object transform mode">
             <button id="mode-move" class="tool-button active" type="button" title="Move selected object (G)" aria-label="Move selected object">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M10 2 7.5 4.5M10 2l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -54,26 +74,36 @@
             <button id="mode-rotate" class="tool-button" type="button" title="Rotate selected object (R)" aria-label="Rotate selected object">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8.2A6.2 6.2 0 1 0 16.1 12M16 4.5v4h-4" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <span class="tool-separator"></span>
+            <span class="tool-separator" aria-hidden="true"></span>
             <button id="view-home" class="tool-button" type="button" title="Frame room" aria-label="Frame room">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M17 8V3h-5M3 12v5h5m9-5v5h-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <span class="tool-separator"></span>
+            <span class="tool-separator" aria-hidden="true"></span>
             <div class="viewport-info">
               <button id="show-shortcuts" class="tool-button info-button" type="button" aria-label="Show keyboard shortcuts" aria-expanded="false" aria-controls="shortcut-help" title="Keyboard shortcuts">i</button>
               <section id="shortcut-help" class="shortcut-help" aria-label="Keyboard shortcuts" hidden>
                 <div class="shortcut-heading">Shortcuts</div>
-                <div><span>Undo</span><kbd>⌘ Z / Ctrl Z</kbd></div>
-                <div><span>Redo</span><kbd>⌘ ⇧ Z / Ctrl Y</kbd></div>
-                <div><span>Move / rotate</span><kbd>G / R</kbd></div>
-                <div><span>Orthographic</span><kbd>O</kbd></div>
-                <div><span>Delete selection</span><kbd>⌫ / Delete</kbd></div>
-                <p>Drag to orbit · scroll to zoom</p>
+                <div class="shortcut-row"><span>Undo</span><kbd class="kbd">⌘ Z / Ctrl Z</kbd></div>
+                <div class="shortcut-row"><span>Redo</span><kbd class="kbd">⌘ ⇧ Z / Ctrl Y</kbd></div>
+                <div class="shortcut-row"><span>Move / rotate</span><kbd class="kbd">G / R</kbd></div>
+                <div class="shortcut-row"><span>Orthographic</span><kbd class="kbd">O</kbd></div>
+                <div class="shortcut-row"><span>Delete selection</span><kbd class="kbd">⌫ / Delete</kbd></div>
+                <p class="shortcut-note">Drag to orbit · scroll to zoom</p>
               </section>
             </div>
           </div>
         </div>
+
         <div id="viewport" class="viewport">
+          <div id="field-progress" hidden aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 z-10 h-[3px] overflow-hidden">
+            <div class="h-full w-1/3 animate-field-progress rounded-full bg-gradient-to-r from-emerald-400 via-teal-400 to-sky-400"></div>
+          </div>
+          <div id="field-solving" hidden role="status" class="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 max-md:hidden">
+            <div class="flex items-center gap-2 rounded-full border border-emerald-200/80 bg-white/95 py-1.5 pl-2.5 pr-3.5 shadow-lg shadow-emerald-900/10 backdrop-blur">
+              <svg class="h-4 w-4 animate-spin text-emerald-600" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-opacity=".2" stroke-width="2.5"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+              <span id="field-solving-label" class="text-[11px] font-semibold text-emerald-800">Solving…</span>
+            </div>
+          </div>
           <div class="field-legend" id="field-legend" hidden aria-label="Simulation map legend">
             <span id="field-legend-title" class="field-legend-title"></span>
             <span id="field-gradient" class="field-gradient" aria-hidden="true"></span>
@@ -83,24 +113,33 @@
       </section>
 
       <aside class="inspector" aria-label="Room and object properties">
-        <section class="inspector-section room-section">
-          <div class="section-heading"><span>Room</span></div>
-          <div class="dimension-fields">
-            <label class="field"><span>W</span><input id="room-width" aria-label="Room width in meters" type="number" min="2" max="20" step="0.1" value="5.2" /></label>
-            <label class="field"><span>D</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
-            <label class="field"><span>H</span><input id="room-height" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" value="2.7" /></label>
+        <section class="inspector-section room-section max-md:col-span-2">
+          <div class="section-heading">
+            <h2 class="section-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9v11h13V9"/><path d="M9.5 20v-6h5v6"/></svg>Room</h2>
+            <span class="text-[10px] font-medium text-slate-300">metres</span>
           </div>
-          <div class="unit-note">m</div>
+          <div class="dimension-fields">
+            <label class="dim-field"><span>W</span><input id="room-width" aria-label="Room width in meters" type="number" min="2" max="20" step="0.1" value="5.2" /></label>
+            <label class="dim-field"><span>D</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
+            <label class="dim-field"><span>H</span><input id="room-height" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" value="2.7" /></label>
+          </div>
+          <div class="unit-note">Dimensions are in metres.</div>
         </section>
 
         <section class="inspector-section object-list-section">
-          <div class="section-heading"><span>Objects</span></div>
+          <div class="section-heading">
+            <h2 class="section-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>Objects</h2>
+            <span id="object-count" class="object-count">0</span>
+          </div>
           <div id="object-list" class="object-list"></div>
         </section>
 
         <section class="inspector-section properties-section" id="properties-section">
-          <div class="section-heading"><span>Selection</span><button id="delete-object" class="delete-button" type="button" aria-label="Delete selected object" title="Delete selected object" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11m-9.5 0 .6 10h7.8l.6-10M8 6V4h4v2m-3 3v4m2-4v4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
-          <div id="object-properties" class="empty-properties">Select an object</div>
+          <div class="section-heading">
+            <h2 class="section-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>Selection</h2>
+            <button id="delete-object" class="delete-button" type="button" aria-label="Delete selected object" title="Delete selected object" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11m-9.5 0 .6 10h7.8l.6-10M8 6V4h4v2m-3 3v4m2-4v4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          </div>
+          <div id="object-properties"></div>
         </section>
       </aside>
     </main>
