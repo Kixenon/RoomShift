@@ -41,12 +41,28 @@
               <button id="projection-orthographic" class="view-button" type="button" aria-pressed="false" title="Orthographic projection (O)">Ortho</button>
             </div>
           </div>
-          <div class="field-controls" role="group" aria-label="Simulation and lighting views">
-            <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false">Air</button>
-            <button id="show-volume" class="field-button" type="button" aria-label="Show static 3D volume" aria-pressed="false" title="Show the active field as a static 3D volume">Vol</button>
-            <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false">Heat</button>
-            <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false">Light</button>
-            <span id="field-status" class="field-status" aria-live="polite"></span>
+          <div class="simulation-controls">
+            <div class="field-controls" role="group" aria-label="Simulation fields">
+              <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow" aria-pressed="false">Air</button>
+              <button id="show-temperature" class="field-button" type="button" aria-label="Show heat" aria-pressed="false">Heat</button>
+              <button id="show-light" class="field-button" type="button" aria-label="Show lighting" aria-pressed="false">Light</button>
+              <span id="field-status" class="field-status" aria-live="polite"></span>
+            </div>
+            <div id="field-display-controls" class="display-controls" role="group" aria-label="Field display" hidden>
+              <span class="display-label">DISPLAY</span>
+              <button class="display-button" data-display-style="gas" type="button" aria-pressed="false">Gas</button>
+              <button class="display-button" data-display-style="surfaces" type="button" aria-pressed="false">Surfaces</button>
+              <button class="display-button" data-display-style="volume" type="button" aria-pressed="false">Volume</button>
+              <button class="display-button" data-display-style="slice" type="button" aria-pressed="false">Slice</button>
+              <button class="display-button" data-display-style="preview" type="button" aria-pressed="false">Preview</button>
+              <button class="display-button" data-display-style="map" type="button" aria-pressed="false">Map</button>
+            </div>
+            <label id="slice-height-control" class="slice-height-control" hidden>
+              <span>Slice height</span>
+              <input id="slice-height" type="range" min="0" max="2.7" step="0.05" value="1.2" aria-label="Simulation slice height in meters" />
+              <output id="slice-height-value">1.20 m</output>
+            </label>
+            <span id="editor-status" class="editor-status" aria-live="polite"></span>
           </div>
           <div class="viewport-actions" role="group" aria-label="Object transform mode">
             <button id="mode-move" class="tool-button active" type="button" title="Move selected object (G)" aria-label="Move selected object">
@@ -91,7 +107,8 @@
             <label class="field"><span>D</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
             <label class="field"><span>H</span><input id="room-height" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" value="2.7" /></label>
           </div>
-          <div class="unit-note">m</div>
+          <label class="field outdoor-temperature-field"><span>Outside</span><input id="outdoor-temperature" aria-label="Outdoor temperature in degrees Celsius" type="number" min="-20" max="50" step="1" value="10" required /><span>°C</span></label>
+          <div class="unit-note">Room dimensions · m</div>
         </section>
 
         <section class="inspector-section object-list-section">

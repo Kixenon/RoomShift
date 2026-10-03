@@ -217,10 +217,11 @@ test('air, heat, and light fields update automatically and after scene edits', a
   assert.ok(Number.isFinite(Number(await canvas.getAttribute('data-field-rms-divergence'))));
   assert.match(await page.locator('#field-legend-title').textContent(), /Airflow/);
   assert.equal(await page.locator('#show-airflow').getAttribute('aria-pressed'), 'true');
-  assert.equal(Number(await canvas.getAttribute('data-field-volume-voxels')), 0);
-  assert.ok(Number(await canvas.getAttribute('data-gas-particles')) > 0);
+  assert.ok(Number(await canvas.getAttribute('data-field-volume-voxels')) > 0, 'animated gas should use a 3D density volume');
+  assert.ok(Number(await canvas.getAttribute('data-gas-density-max')) > 0);
+  assert.ok(Number(await canvas.getAttribute('data-gas-occupied-voxels')) > 0);
 
-  await page.locator('#show-volume').click();
+  await page.locator('[data-display-style="volume"]').click();
   assert.ok(Number(await canvas.getAttribute('data-field-volume-voxels')) > 0);
 
   await page.locator('#show-temperature').click();
@@ -263,7 +264,8 @@ test('a fan close to a wall keeps a visible resolved airflow field', async () =>
     const canvas = document.querySelector('#room-canvas');
     return canvas?.dataset.fieldMode === 'airflow'
       && Number(canvas.dataset.fieldMaxSpeed) > 0.05
-      && Number(canvas.dataset.gasParticles) > 0;
+      && Number(canvas.dataset.gasDensityMax) > 0
+      && Number(canvas.dataset.gasOccupiedVoxels) > 0;
   });
   assert.ok(Number(await page.locator('#room-canvas').getAttribute('data-field-cells')) > 0);
 });

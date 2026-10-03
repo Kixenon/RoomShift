@@ -16,6 +16,7 @@ import {
 } from './model/room-scene.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
+import { temperatureDisplayRange } from './simulation/room-field-display.js';
 import {
   createEditorState,
   resetEditorState,
@@ -38,13 +39,19 @@ const roomInputs = {
   depth: $('#room-depth'),
   height: $('#room-height'),
 };
+const outdoorTemperatureInput = $('#outdoor-temperature');
 const objectList = $('#object-list');
 const properties = $('#object-properties');
 const fieldControls = {
   airflow: $('#show-airflow'),
-  volume: $('#show-volume'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
+  display: $('#field-display-controls'),
+  displayButtons: [...document.querySelectorAll('[data-display-style]')],
+  sliceControl: $('#slice-height-control'),
+  sliceHeight: $('#slice-height'),
+  sliceValue: $('#slice-height-value'),
+  editorStatus: $('#editor-status'),
   status: $('#field-status'),
   legend: $('#field-legend'),
   legendTitle: $('#field-legend-title'),
@@ -76,6 +83,10 @@ function setPressed(button, pressed) {
   button.setAttribute('aria-pressed', String(pressed));
 }
 
+function setEditorStatus(message = '') {
+  fieldControls.editorStatus.textContent = message;
+}
+
 function updateScene(scene, { record = !isDragging } = {}) {
   if (JSON.stringify(scene) === JSON.stringify(roomScene)) return;
   if (record) recordHistory();
@@ -84,26 +95,40 @@ function updateScene(scene, { record = !isDragging } = {}) {
   fieldController?.setScene(scene);
 }
 
-function renderFieldState({ mode, loading, result, error }) {
+function renderFieldState({ mode, loading, result, error, stale }) {
   const viewportElement = $('#viewport');
-  const volumetric = fieldController?.isVolumetricView ?? false;
+  const displayStyle = fieldController?.displayStyle;
   for (const [name, button] of Object.entries({
     airflow: fieldControls.airflow,
     temperature: fieldControls.temperature,
     light: fieldControls.light,
   })) setPressed(button, mode === name);
-  fieldControls.volume.hidden = mode !== 'airflow' && mode !== 'temperature';
-  setPressed(fieldControls.volume, fieldController?.isVolumetricView ?? false);
-  fieldControls.volume.setAttribute(
-    'aria-label',
-    mode === 'temperature' ? 'Show volumetric heat field' : 'Show volumetric airflow field',
-  );
+  fieldControls.display.hidden = !mode;
+  const availableStyles = {
+    airflow: ['gas', 'volume', 'slice'],
+    temperature: ['surfaces', 'volume', 'slice'],
+    light: ['preview', 'map'],
+  }[mode] ?? [];
+  const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
+  for (const button of fieldControls.displayButtons) {
+    const style = button.dataset.displayStyle;
+    button.hidden = !availableStyles.includes(style);
+    button.textContent = styleLabels[style] ?? style;
+    button.setAttribute('aria-pressed', String(style === displayStyle));
+  }
+  const showSlice = (mode === 'airflow' || mode === 'temperature') && displayStyle === 'slice';
+  fieldControls.sliceControl.hidden = !showSlice;
+  if (fieldController?.scene) {
+    fieldControls.sliceHeight.max = String(fieldController.scene.room.height);
+    fieldControls.sliceHeight.value = String(fieldController.sliceHeight);
+    fieldControls.sliceValue.textContent = `${fieldController.sliceHeight.toFixed(2)} m`;
+  }
   viewportElement.classList.toggle('field-active', Boolean(mode));
   viewportElement.setAttribute('aria-busy', String(loading));
-  fieldControls.legend.hidden = !mode || (mode !== 'light' && !result);
-  fieldControls.status.textContent = loading ? (mode === 'light' ? 'Preparing…' : 'Solving…') : error ? 'Unavailable' : '';
+  fieldControls.legend.hidden = !mode || (!result && !(mode === 'light' && displayStyle === 'preview'));
+  fieldControls.status.textContent = loading ? (mode === 'light' ? 'Estimating…' : 'Solving…') : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
   fieldControls.status.title = error?.message ?? '';
-  if (mode === 'light') {
+  if (mode === 'light' && displayStyle === 'preview') {
     if (!loading && !error) fieldControls.status.textContent = 'Realtime shadows';
     fieldControls.status.title = error?.message ?? 'Monochrome room render with lamp point lights and cast shadows.';
     fieldControls.gradient.dataset.mode = 'light';
@@ -118,15 +143,22 @@ function renderFieldState({ mode, loading, result, error }) {
   let legend;
   if (mode === 'airflow') {
     legend = {
-      title: volumetric ? 'Airflow · static volume' : 'Airflow · advected gas',
+      title: displayStyle === 'volume' ? 'Air speed · 3D volume' : displayStyle === 'slice' ? 'Air speed · horizontal slice' : 'Airflow · moving gas',
       minimum: '0 m/s',
-      maximum: '1.2+ m/s',
+      maximum: `${(result.stats.maxSpeed ?? 1.2).toFixed(2)} m/s`,
     };
   } else if (mode === 'temperature') {
+    const { minimum, maximum } = temperatureDisplayRange(result);
     legend = {
-      title: volumetric ? 'Infrared · volumetric air temperature' : 'Infrared · room surfaces and objects',
-      minimum: `${(result.ambientTemperature - 4).toFixed(1)} °C`,
-      maximum: `${(result.ambientTemperature + 8).toFixed(1)}+ °C`,
+      title: displayStyle === 'volume' ? 'Air temperature · 3D volume' : displayStyle === 'slice' ? `Air temperature · ${fieldController.sliceHeight.toFixed(2)} m slice` : 'Air temperature · surfaces and objects',
+      minimum: `${minimum.toFixed(1)} °C`,
+      maximum: `${maximum.toFixed(1)} °C`,
+    };
+  } else if (displayStyle === 'map') {
+    legend = {
+      title: 'Estimated relative illumination',
+      minimum: `${result.ambientLevel.toFixed(2)} normalized`,
+      maximum: `${result.stats.maxLevel.toFixed(2)} normalized`,
     };
   } else {
     legend = {
@@ -174,6 +206,7 @@ function updateRoomSummary() {
   const { width, depth, height } = roomScene.room;
   $('#room-summary').textContent = `${width.toFixed(1)} × ${depth.toFixed(1)} × ${height.toFixed(1)} m`;
   for (const [dimension, input] of Object.entries(roomInputs)) input.value = roomScene.room[dimension];
+  outdoorTemperatureInput.value = roomScene.room.outdoorTemperature ?? 10;
 }
 
 function renderObjectList() {
@@ -196,7 +229,7 @@ function propertyField(label, axis, value, kind, limits = {}) {
 function renderProperties() {
   const object = selectedObject();
   const isWindow = object?.model === 'window';
-  const sourceLabels = { fan: 'Fan output', heater: 'Heat output', lamp: 'Lamp brightness' };
+  const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative' };
   const sourceLabel = sourceLabels[object?.model];
   const intensity = object?.intensity ?? 1;
   $('#delete-object').disabled = !object;
@@ -218,13 +251,13 @@ function renderProperties() {
     <div class="properties-form">
       <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
       ${isWindow ? `
-        <label class="window-open-toggle"><input type="checkbox" data-window-open ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
-        <label class="property-field"><span>Window flow</span><select class="property-input" data-window-flow-direction aria-label="Window airflow direction">
-          <option value="exchange">Exchange · in low, out high</option><option value="inlet">Inlet · source</option><option value="outlet">Outlet · sink</option>
+        <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="Window open" ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
+        <label class="property-field"><span>Window pressure</span><select class="property-input" data-window-flow-direction aria-label="Window exterior pressure direction">
+          <option value="exchange">Stack exchange · two-way</option><option value="inlet">Positive pressure · intake bias</option><option value="outlet">Negative pressure · exhaust bias</option>
         </select></label>
         <div class="property-group">
-          <div class="range-heading"><span>Flow speed</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
-          <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Window airflow speed in meters per second" />
+          <div class="range-heading"><span>Outside wind</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
+          <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Exterior wind speed in meters per second" />
         </div>
       ` : `<label class="property-field"><span>Model</span><select class="property-input" data-object-model aria-label="Box model">${modelOptions}</select></label>`}
       <div class="property-group">
@@ -237,7 +270,7 @@ function renderProperties() {
       </div>
       ${sourceLabel ? `<div class="property-group">
         ${object.model === 'fan' ? `<label class="window-open-toggle"><input type="checkbox" data-fan-enabled ${object.enabled !== false ? 'checked' : ''} /><span>${object.enabled !== false ? 'Fan running' : 'Fan off'}</span></label>` : ''}
-        <div class="range-heading"><span>${sourceLabel}</span><output data-range-output>${Math.round(intensity * 100)}%</output></div>
+        <div class="range-heading"><span>${sourceLabel}</span><output data-range-output>${intensity.toFixed(2)}×</output></div>
         <input class="property-slider" type="range" min="0" max="2" step="0.05" value="${intensity}" data-source-intensity aria-label="${sourceLabel}" />
       </div>` : ''}
       <div class="property-group">
@@ -297,33 +330,43 @@ function refreshScene() {
 }
 
 function addBox() {
-  const result = addObject(roomScene);
-  updateScene(result.scene);
-  updateSelection(result.object.id);
-  refreshScene();
+  try {
+    const result = addObject(roomScene);
+    updateScene(result.scene);
+    updateSelection(result.object.id);
+    setEditorStatus('');
+    refreshScene();
+  } catch (error) {
+    setEditorStatus(error.message);
+  }
 }
 
 function addRoomWindow() {
-  const result = addWindow(roomScene);
-  updateScene(result.scene);
-  updateSelection(result.object.id);
-  refreshScene();
+  try {
+    const result = addWindow(roomScene);
+    updateScene(result.scene);
+    updateSelection(result.object.id);
+    setEditorStatus('');
+    refreshScene();
+  } catch (error) {
+    setEditorStatus(error.message);
+  }
 }
 
 function toggleFieldMode(mode) {
   fieldController.setMode(fieldController.mode === mode ? null : mode);
 }
 
-function toggleFieldVolume() {
-  fieldController.setVolumetricView(!fieldController.isVolumetricView);
-}
-
 $('#add-box').addEventListener('click', addBox);
 $('#add-window').addEventListener('click', addRoomWindow);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
-fieldControls.volume.addEventListener('click', toggleFieldVolume);
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
+fieldControls.display.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-display-style]');
+  if (button && !button.hidden) fieldController.setDisplayStyle(button.dataset.displayStyle);
+});
+fieldControls.sliceHeight.addEventListener('input', () => fieldController.setSliceHeight(Number(fieldControls.sliceHeight.value)));
 
 objectList.addEventListener('click', (event) => {
   const row = event.target.closest('[data-select-object]');
@@ -339,14 +382,28 @@ for (const [dimension, input] of Object.entries(roomInputs)) {
     try {
       updateScene(resizeRoom(roomScene, dimensions));
       refreshScene();
-    } catch {
+    } catch (error) {
       input.value = roomScene.room[dimension];
       input.setCustomValidity('Enter a room dimension within the allowed range.');
       input.reportValidity();
       input.setCustomValidity('');
+      setEditorStatus(error.message);
     }
   });
 }
+
+outdoorTemperatureInput.addEventListener('change', () => {
+  const temperature = Number(outdoorTemperatureInput.value);
+  if (outdoorTemperatureInput.value.trim() === '' || !Number.isFinite(temperature) || temperature < -20 || temperature > 50) {
+    outdoorTemperatureInput.value = roomScene.room.outdoorTemperature ?? 10;
+    outdoorTemperatureInput.setCustomValidity('Enter an outdoor temperature from -20 °C to 50 °C.');
+    outdoorTemperatureInput.reportValidity();
+    outdoorTemperatureInput.setCustomValidity('');
+    return;
+  }
+  updateScene({ ...roomScene, room: { ...roomScene.room, outdoorTemperature: temperature } });
+  setEditorStatus('');
+});
 
 properties.addEventListener('change', (event) => {
   const input = event.target;
@@ -389,7 +446,8 @@ properties.addEventListener('change', (event) => {
       return;
     }
     refreshScene();
-  } catch {
+  } catch (error) {
+    setEditorStatus(error.message);
     renderProperties();
   }
 });
@@ -401,7 +459,7 @@ properties.addEventListener('input', (event) => {
   if (!output) return;
   output.textContent = input.matches('[data-window-flow-rate]')
     ? `${Number(input.value).toFixed(2)} m/s`
-    : `${Math.round(Number(input.value) * 100)}%`;
+    : `${Number(input.value).toFixed(2)}×`;
 });
 
 $('#delete-object').addEventListener('click', () => {
@@ -516,8 +574,10 @@ viewport = new RoomViewport($('#viewport'), {
     renderInspector();
   },
   onTransform: handleTransform,
+  onPlacementError: setEditorStatus,
   onDragChange(dragging) {
     isDragging = dragging;
+    fieldController?.setInteractionActive(dragging);
     if (dragging) {
       dragSnapshot = currentSnapshot();
     } else if (dragSnapshot) {

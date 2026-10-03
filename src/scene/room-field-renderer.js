@@ -1,10 +1,15 @@
 import * as THREE from 'three';
 import { rotationMatrixXYZ } from '../model/room-scene.js';
+import { temperatureDisplayRange } from '../simulation/room-field-display.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const indexOf = (i, j, k, grid) => (j * grid.nz + k) * grid.nx + i;
-const AIRFLOW_DISPLAY_RANGE = 1.2;
-const HEAT_DISPLAY_RANGE = 12;
+const airflowDisplayRange = (result) => Math.max(0.05, result.stats?.maxSpeed ?? 1.2);
+
+function normalizeTemperature(value, result) {
+  const { minimum, maximum } = temperatureDisplayRange(result);
+  return clamp((value - minimum) / (maximum - minimum), 0, 1) ** 0.82;
+}
 
 export function getAirflowColor(speed, maximumSpeed) {
   const intensity = clamp(Number.isFinite(speed) ? speed / Math.max(0.001, maximumSpeed) : 0, 0, 1);
@@ -59,8 +64,8 @@ function sampleVelocity(result, point, target = new THREE.Vector3()) {
 }
 
 function normalizeScalar(result, mode, value) {
-  if (mode === 'airflow') return clamp(value / AIRFLOW_DISPLAY_RANGE, 0, 1);
-  if (mode === 'temperature') return clamp((value - (result.ambientTemperature - 4)) / HEAT_DISPLAY_RANGE, 0, 1);
+  if (mode === 'airflow') return clamp(value / airflowDisplayRange(result), 0, 1);
+  if (mode === 'temperature') return normalizeTemperature(value, result);
   return clamp((value - result.ambientLevel) / Math.max((result.stats.maxLevel ?? result.stats.maxLight) - result.ambientLevel, 0.05), 0, 1);
 }
 
@@ -74,6 +79,13 @@ function createFieldTexture(result, mode) {
       : mode === 'temperature' ? fields.temperature[index] : fields.light[index];
     data[index * 4] = Math.round(normalizeScalar(result, mode, value) * 255);
     data[index * 4 + 1] = fields.solid?.[index] ? 255 : 0;
+    if (mode === 'temperature') {
+      const { minimum, maximum } = temperatureDisplayRange(result);
+      const span = Math.max(0.5, value < result.ambientTemperature
+        ? result.ambientTemperature - minimum
+        : maximum - result.ambientTemperature);
+      data[index * 4 + 2] = Math.round(clamp(Math.abs(value - result.ambientTemperature) / span, 0, 1) * 255);
+    }
   }
 
   const texture = new THREE.Data3DTexture(data, grid.nx, grid.nz, grid.ny);
@@ -101,7 +113,7 @@ export function createFieldVolume(result, mode) {
       uField: { value: texture },
       uVolumeSize: { value: new THREE.Vector3(grid.width, grid.height, grid.depth) },
       uStepLength: { value: stepLength },
-      uOpacity: { value: mode === 'airflow' ? 1.8 : mode === 'temperature' ? 1.1 : 2.1 },
+      uOpacity: { value: mode === 'airflow' ? 1.2 : mode === 'temperature' ? 1.5 : 2.1 },
       uFieldMode: { value: mode === 'airflow' ? 0 : mode === 'temperature' ? 1 : 2 },
     },
     side: THREE.DoubleSide,
@@ -134,33 +146,26 @@ export function createFieldVolume(result, mode) {
 
       vec3 palette(float value) {
         if (uFieldMode == 1) {
-          vec3 cold = vec3(0.094, 0.043, 0.247);
-          vec3 blue = vec3(0.149, 0.231, 0.71);
-          vec3 cyan = vec3(0.031, 0.659, 0.847);
-          vec3 green = vec3(0.212, 0.843, 0.639);
-          vec3 yellow = vec3(0.941, 0.843, 0.22);
-          vec3 red = vec3(0.91, 0.29, 0.157);
-          if (value < 0.2) return mix(cold, blue, value / 0.2);
-          if (value < 0.4) return mix(blue, cyan, (value - 0.2) / 0.2);
-          if (value < 0.58) return mix(cyan, green, (value - 0.4) / 0.18);
-          if (value < 0.73) return mix(green, yellow, (value - 0.58) / 0.15);
-          if (value < 0.88) return mix(yellow, red, (value - 0.73) / 0.15);
-          return mix(red, vec3(1.0, 0.949, 0.835), (value - 0.88) / 0.12);
+          vec3 navy = vec3(0.0052, 0.0116, 0.2307);
+          vec3 blue = vec3(0.0091, 0.1046, 0.7370);
+          vec3 cyan = vec3(0.0027, 0.4780, 0.7480);
+          vec3 green = vec3(0.0350, 0.6940, 0.1710);
+          vec3 yellow = vec3(0.8710, 0.7450, 0.0380);
+          vec3 orange = vec3(0.8670, 0.1450, 0.0210);
+          if (value < 0.18) return mix(navy, blue, value / 0.18);
+          if (value < 0.38) return mix(blue, cyan, (value - 0.18) / 0.20);
+          if (value < 0.58) return mix(cyan, green, (value - 0.38) / 0.20);
+          if (value < 0.76) return mix(green, yellow, (value - 0.58) / 0.18);
+          if (value < 0.9) return mix(yellow, orange, (value - 0.76) / 0.14);
+          return mix(orange, vec3(1.0, 0.905, 0.723), (value - 0.9) / 0.1);
         }
         vec3 navy = vec3(0.015, 0.025, 0.11);
         vec3 blue = vec3(0.02, 0.22, 0.95);
         vec3 cyan = vec3(0.0, 0.86, 1.0);
-        vec3 green = vec3(0.12, 0.92, 0.46);
-        vec3 yellow = vec3(1.0, 0.78, 0.05);
-        vec3 red = vec3(1.0, 0.08, 0.018);
-        if (uFieldMode == 2) {
-          navy = vec3(0.08, 0.025, 0.2);
-          blue = vec3(0.28, 0.09, 0.85);
-          cyan = vec3(0.96, 0.08, 0.66);
-          green = vec3(1.0, 0.31, 0.18);
-          yellow = vec3(1.0, 0.82, 0.28);
-          red = vec3(1.0, 0.98, 0.77);
-        }
+      vec3 green = vec3(0.12, 0.92, 0.46);
+      vec3 yellow = vec3(1.0, 0.78, 0.05);
+      vec3 red = vec3(1.0, 0.08, 0.018);
+        if (uFieldMode == 2) return vec3(value);
         if (value < 0.25) return mix(navy, blue, value * 4.0);
         if (value < 0.5) return mix(blue, cyan, (value - 0.25) * 4.0);
         if (value < 0.72) return mix(cyan, green, (value - 0.5) * 4.545);
@@ -203,8 +208,9 @@ export function createFieldVolume(result, mode) {
           vec3 roomCoordinate = point / uVolumeSize + 0.5;
           vec3 textureCoordinate = vec3(roomCoordinate.x, roomCoordinate.z, roomCoordinate.y);
           vec4 field = texture(uField, textureCoordinate);
-          float density = smoothstep(0.006, 0.28, field.r);
-          if (uFieldMode == 1) { density = 0.065 + 0.16 * smoothstep(0.34, 0.95, field.r); }
+          float density = 0.012 * smoothstep(0.002, 0.035, field.r)
+            + 0.28 * smoothstep(0.04, 0.22, field.r);
+          if (uFieldMode == 1) { density = 0.015 + 0.65 * smoothstep(0.002, 0.08, field.b); }
           density *= 1.0 - step(0.5, field.g);
           float alpha = 1.0 - exp(-density * 2.35 * stepLength * uOpacity);
           float contribution = (1.0 - accumulated.a) * alpha;
@@ -229,68 +235,183 @@ export function createFieldVolume(result, mode) {
   return volume;
 }
 
-function insideRoom(point, grid) {
-  return point.x >= 0 && point.x <= grid.width
-    && point.y >= 0 && point.y <= grid.height
-    && point.z >= 0 && point.z <= grid.depth;
+export function createScalarSliceLayer(result, mode, height) {
+  const { grid, fields } = result;
+  const geometry = new THREE.PlaneGeometry(grid.width, grid.depth, grid.nx - 1, grid.nz - 1);
+  const positions = geometry.attributes.position;
+  const colors = new Float32Array(positions.count * 4);
+  const point = new THREE.Vector3();
+  const color = new THREE.Color();
+
+  for (let index = 0; index < positions.count; index += 1) {
+    point.fromBufferAttribute(positions, index);
+    const x = point.x + grid.width / 2;
+    const z = grid.depth / 2 - point.y;
+    if (mode === 'airflow') {
+      const speed = Math.hypot(
+        sampleField(fields.u, x, height, z, grid, fields.solid),
+        sampleField(fields.v, x, height, z, grid, fields.solid),
+        sampleField(fields.w, x, height, z, grid, fields.solid),
+      );
+      getAirflowColor(speed, airflowDisplayRange(result)).toArray(colors, index * 4);
+    } else {
+      const temperature = sampleField(fields.temperature, x, height, z, grid, fields.solid, result.ambientTemperature);
+      infraredColor(temperature, result, color).toArray(colors, index * 4);
+    }
+    colors[index * 4 + 3] = 0.82;
+  }
+
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  }));
+  mesh.name = `field-slice-${mode}`;
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = clamp(height, 0, grid.height);
+  mesh.renderOrder = 1;
+  return mesh;
 }
 
-function isFluidPoint(point, grid, solid) {
-  if (!insideRoom(point, grid)) return false;
-  const i = Math.min(grid.nx - 1, Math.floor(point.x / grid.dx));
-  const j = Math.min(grid.ny - 1, Math.floor(point.y / grid.dy));
-  const k = Math.min(grid.nz - 1, Math.floor(point.z / grid.dz));
-  return !solid[indexOf(i, j, k, grid)];
+function isGasPointOpen(x, y, z, volume) {
+  const { grid, margin, blocked, roomGrid, roomSolid } = volume;
+  if (x < -margin || x > grid.width - margin || y < 0 || y > grid.height
+    || z < -margin || z > grid.depth - margin) return false;
+  if (x >= 0 && x <= roomGrid.width && y >= 0 && y <= roomGrid.height
+    && z >= 0 && z <= roomGrid.depth) {
+    const roomI = clamp(Math.floor(x / roomGrid.dx), 0, roomGrid.nx - 1);
+    const roomJ = clamp(Math.floor(y / roomGrid.dy), 0, roomGrid.ny - 1);
+    const roomK = clamp(Math.floor(z / roomGrid.dz), 0, roomGrid.nz - 1);
+    if (roomSolid[indexOf(roomI, roomJ, roomK, roomGrid)]) return false;
+  }
+  const i = clamp(Math.floor((x + margin) / grid.dx), 0, grid.nx - 1);
+  const j = clamp(Math.floor(y / grid.dy), 0, grid.ny - 1);
+  const k = clamp(Math.floor((z + margin) / grid.dz), 0, grid.nz - 1);
+  return !blocked[indexOf(i, j, k, grid)];
+}
+
+function clipGasBacktrace(volume, x, y, z, endX, endY, endZ, target) {
+  const distance = Math.hypot(endX - x, endY - y, endZ - z);
+  const stepLength = Math.min(volume.grid.dx, volume.grid.dy, volume.grid.dz) * 0.4;
+  const steps = Math.max(1, Math.ceil(distance / stepLength));
+  let clippedX = x;
+  let clippedY = y;
+  let clippedZ = z;
+  for (let step = 1; step <= steps; step += 1) {
+    const fraction = step / steps;
+    const candidateX = x + (endX - x) * fraction;
+    const candidateY = y + (endY - y) * fraction;
+    const candidateZ = z + (endZ - z) * fraction;
+    if (!isGasPointOpen(candidateX, candidateY, candidateZ, volume)) break;
+    clippedX = candidateX;
+    clippedY = candidateY;
+    clippedZ = candidateZ;
+  }
+  return target.set(clippedX, clippedY, clippedZ);
+}
+
+function makeEmitter(position, direction, axis, radius, kind = 'flow', weight = 1) {
+  const normal = direction.clone().normalize();
+  const spanAxis = axis.clone().addScaledVector(normal, -axis.dot(normal));
+  if (spanAxis.lengthSq() < 1e-6) {
+    spanAxis.set(0, 0, 1).addScaledVector(normal, -normal.z);
+  }
+  spanAxis.normalize();
+  const sideAxis = new THREE.Vector3().crossVectors(normal, spanAxis).normalize();
+  return { position, direction: normal, axis: spanAxis, sideAxis, radius, kind, weight };
 }
 
 function getAirEmitters(result, roomScene) {
+  const { grid, fields } = result;
   const emitters = [];
   for (const fan of roomScene?.objects ?? []) {
     if (fan.model !== 'fan' || fan.enabled === false || (fan.intensity ?? 1) <= 0) continue;
     const matrix = rotationMatrixXYZ(fan.rotation);
-    const local = { x: 0, y: fan.dimensions.height * 0.24, z: fan.dimensions.depth * 0.1 };
+    const local = {
+      x: 0,
+      y: fan.dimensions.height * 0.24,
+      z: fan.dimensions.depth / 2 + Math.min(grid.dx, grid.dy, grid.dz) * 0.5,
+    };
     const position = new THREE.Vector3(
       fan.position.x + matrix[0][0] * local.x + matrix[0][1] * local.y + matrix[0][2] * local.z,
       fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * local.x + matrix[1][1] * local.y + matrix[1][2] * local.z,
       fan.position.z + matrix[2][0] * local.x + matrix[2][1] * local.y + matrix[2][2] * local.z,
     );
-    emitters.push({
+    const direction = new THREE.Vector3(matrix[0][2], matrix[1][2], matrix[2][2]);
+    const radius = Math.max(0.06, fan.dimensions.width * 0.32);
+    const grillePoint = position.clone().addScaledVector(direction, Math.min(0.04, Math.min(grid.dx, grid.dy, grid.dz) * 0.5));
+    const sampledSpeed = Math.max(0, sampleVelocity(result, grillePoint).dot(direction));
+    const intensity = fan.intensity ?? 1;
+    const outletSpeed = Math.min(1.2 * intensity, Math.max(sampledSpeed, 0.15 * intensity));
+    emitters.push(makeEmitter(
       position,
-      direction: new THREE.Vector3(matrix[0][2], matrix[1][2], matrix[2][2]).normalize(),
-      axis: new THREE.Vector3(matrix[0][0], matrix[1][0], matrix[2][0]).normalize(),
-      speed: Math.max(0.2, result.stats.maxSpeed * 0.58),
-      radius: Math.max(0.05, fan.dimensions.width * 0.16),
-    });
+      direction,
+      new THREE.Vector3(matrix[0][0], matrix[1][0], matrix[2][0]),
+      radius,
+      'fan',
+      Math.max(0.002, outletSpeed * Math.PI * radius ** 2),
+    ));
   }
 
   for (const window of roomScene?.objects ?? []) {
-    if (window.model !== 'window' || !window.open || (window.flowRate ?? 0.35) <= 0
-      || window.flowDirection === 'outlet') continue;
+    if (window.model !== 'window' || !window.open) continue;
     const alongX = window.wall === 'back' || window.wall === 'front';
-    const exchange = (window.flowDirection ?? 'exchange') === 'exchange';
-    const height = window.dimensions.height * (exchange ? 0.46 : 0.9);
-    const position = new THREE.Vector3(window.position.x, window.position.y + height / 2, window.position.z);
-    const direction = {
-      front: new THREE.Vector3(0, 0, 1),
-      back: new THREE.Vector3(0, 0, -1),
-      left: new THREE.Vector3(1, 0, 0),
-      right: new THREE.Vector3(-1, 0, 0),
+    const outward = {
+      front: new THREE.Vector3(0, 0, -1),
+      back: new THREE.Vector3(0, 0, 1),
+      left: new THREE.Vector3(-1, 0, 0),
+      right: new THREE.Vector3(1, 0, 0),
     }[window.wall];
-    if (window.wall === 'front') position.z += window.dimensions.depth / 2;
-    if (window.wall === 'back') position.z -= window.dimensions.depth / 2;
-    if (window.wall === 'left') position.x += window.dimensions.depth / 2;
-    if (window.wall === 'right') position.x -= window.dimensions.depth / 2;
-    emitters.push({
-      position,
-      direction,
-      axis: alongX ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1),
-      speed: window.flowRate ?? 0.35,
-      radius: Math.max(0.08, window.dimensions.width * 0.36),
-    });
+    const axis = alongX ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+    const side = window.wall === 'left' ? 1 : window.wall === 'right' ? 2
+      : window.wall === 'front' ? 16 : 32;
+    const alongSpacing = alongX ? grid.dx : grid.dz;
+    const alongCells = alongX ? grid.nx : grid.nz;
+    const alongPosition = alongX ? window.position.x : window.position.z;
+    const firstAlong = clamp(Math.floor((alongPosition - window.dimensions.width / 2) / alongSpacing), 0, alongCells - 1);
+    const lastAlong = clamp(Math.floor((alongPosition + window.dimensions.width / 2) / alongSpacing), 0, alongCells - 1);
+    const firstJ = clamp(Math.floor(window.position.y / grid.dy), 0, grid.ny - 1);
+    const lastJ = clamp(Math.floor((window.position.y + window.dimensions.height) / grid.dy), 0, grid.ny - 1);
+    const middleJ = Math.floor((firstJ + lastJ) / 2);
+    const inflow = [0, 1].map(() => ({ weight: 0, position: new THREE.Vector3() }));
+    for (let j = firstJ; j <= lastJ; j += 1) {
+      for (let along = firstAlong; along <= lastAlong; along += 1) {
+        const i = alongX ? along : window.wall === 'left' ? 0 : grid.nx - 1;
+        const k = alongX ? window.wall === 'front' ? 0 : grid.nz - 1 : along;
+        const index = indexOf(i, j, k, grid);
+        if (!(fields.outlets[index] & side)) continue;
+        const outwardSpeed = fields.windowFlow[index] * outward.x
+          + fields.windowFlow[index] * outward.z;
+        if (outwardSpeed >= -0.01) continue;
+        const band = j <= middleJ ? 0 : 1;
+        const weight = -outwardSpeed;
+        inflow[band].weight += weight;
+        inflow[band].position.add(new THREE.Vector3(
+          (i + 0.5) * grid.dx,
+          (j + 0.5) * grid.dy,
+          (k + 0.5) * grid.dz,
+        ).multiplyScalar(weight));
+      }
+    }
+    for (const opening of inflow) {
+      if (opening.weight <= 0.01) continue;
+      const position = opening.position.multiplyScalar(1 / opening.weight)
+        .addScaledVector(outward, -0.02);
+      emitters.push(makeEmitter(
+        position,
+        outward.clone().negate(),
+        axis,
+        Math.max(0.08, window.dimensions.width * 0.36),
+        'window',
+        opening.weight * alongSpacing * grid.dy,
+      ));
+    }
   }
 
   if (emitters.length) return emitters;
-  const { grid, fields } = result;
   const candidates = [];
   for (let j = 1; j < grid.ny - 1; j += 2) {
     for (let k = 1; k < grid.nz - 1; k += 2) {
@@ -310,186 +431,446 @@ function getAirEmitters(result, roomScene) {
   candidates.sort((a, b) => b.speed - a.speed);
   for (const candidate of candidates) {
     if (emitters.every((emitter) => emitter.position.distanceTo(candidate.position) > 0.55)) {
-      emitters.push({ ...candidate, axis: new THREE.Vector3(1, 0, 0), radius: 0.13 });
+      emitters.push(makeEmitter(candidate.position, candidate.direction, new THREE.Vector3(1, 0, 0), 0.13, 'flow', candidate.speed * grid.dx * grid.dz));
       if (emitters.length === 5) break;
     }
   }
   return emitters;
 }
 
-function createGasLayer(result, roomScene) {
-  const { grid, fields } = result;
-  const emitters = getAirEmitters(result, roomScene);
-  const particleCount = emitters.length ? clamp(emitters.length * 260, 520, 1560) : 0;
-  const trailCount = 7;
-  const pointCount = particleCount * trailCount;
-  const positions = new Float32Array(pointCount * 3);
-  const lifeValues = new Float32Array(pointCount);
-  const speedValues = new Float32Array(pointCount);
-  const trailValues = new Float32Array(pointCount);
-  const current = new Float32Array(particleCount * 3);
-  const ages = new Float32Array(particleCount);
-  const lifetimes = new Float32Array(particleCount);
-  const history = new Float32Array(pointCount * 3);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
-  geometry.setAttribute('aLife', new THREE.BufferAttribute(lifeValues, 1).setUsage(THREE.DynamicDrawUsage));
-  geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speedValues, 1).setUsage(THREE.DynamicDrawUsage));
-  geometry.setAttribute('aTrail', new THREE.BufferAttribute(trailValues, 1));
-  for (let particle = 0; particle < particleCount; particle += 1) {
-    for (let trail = 0; trail < trailCount; trail += 1) trailValues[particle * trailCount + trail] = 1 - trail / trailCount;
+const MAX_GAS_VOXELS = 125_000;
+const GAS_STEP = 1 / 30;
+const GAS_DIFFUSIVITY = 0.012;
+const GAS_TRACER_DECAY_RATE = 0.08;
+const WINDOW_WALLS = Object.freeze({
+  front: { axis: 'z', along: 'x', boundary: (room) => 0, normal: new THREE.Vector3(0, 0, -1), side: 16 },
+  back: { axis: 'z', along: 'x', boundary: (room) => room.depth, normal: new THREE.Vector3(0, 0, 1), side: 32 },
+  left: { axis: 'x', along: 'z', boundary: (room) => 0, normal: new THREE.Vector3(-1, 0, 0), side: 1 },
+  right: { axis: 'x', along: 'z', boundary: (room) => room.width, normal: new THREE.Vector3(1, 0, 0), side: 2 },
+});
+
+function windowCorridor(x, y, z, roomScene, margin, spread) {
+  if (!roomScene) return null;
+  const { room } = roomScene;
+  for (const window of roomScene.objects) {
+    if (window.model !== 'window' || !window.open) continue;
+    const wall = WINDOW_WALLS[window.wall];
+    if (!wall) continue;
+    const boundary = wall.boundary(room);
+    const distance = (wall.axis === 'x' ? x : z) - boundary;
+    const outwardDistance = distance * wall.normal[wall.axis];
+    const along = wall.along === 'x' ? x : z;
+    const windowAlong = window.position[wall.along];
+    if (outwardDistance < -1e-6 || outwardDistance > margin
+      || Math.abs(along - windowAlong) > window.dimensions.width / 2 + spread
+      || y < window.position.y - spread
+      || y > window.position.y + window.dimensions.height + spread) continue;
+    return { window, wall, boundary, outwardDistance };
   }
-  const material = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
-    uniforms: { uSize: { value: 112 } },
-    vertexShader: `
-      uniform float uSize;
-      attribute float aLife;
-      attribute float aSpeed;
-      attribute float aTrail;
-      varying float vLife;
-      varying float vSpeed;
-      varying float vTrail;
-      void main() {
-        vLife = aLife;
-        vSpeed = aSpeed;
-        vTrail = aTrail;
-        vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_Position = projectionMatrix * viewPosition;
-        gl_PointSize = clamp(uSize * (0.7 + aSpeed * 0.45) / max(1.0, -viewPosition.z), 2.0, 30.0);
-      }
-    `,
-    fragmentShader: `
-      varying float vLife;
-      varying float vSpeed;
-      varying float vTrail;
-      void main() {
-        float radius = length(gl_PointCoord - vec2(0.5));
-        float vapor = exp(-radius * radius * 15.0);
-        float alpha = vapor * vLife * (0.06 + vTrail * 0.13);
-        if (alpha < 0.006) discard;
-        vec3 slow = vec3(0.12, 0.52, 0.78);
-        vec3 fast = vec3(0.46, 0.91, 1.0);
-        gl_FragColor = vec4(mix(slow, fast, clamp(vSpeed, 0.0, 1.0)), alpha);
-      }
-    `,
-  });
-  const layer = new THREE.Points(geometry, material);
-  layer.name = 'advected-room-gas';
-  layer.renderOrder = 2;
-  layer.frustumCulled = false;
-
-  const respawn = (index, seed = false) => {
-    const emitter = emitters[index % emitters.length];
-    const offset = index * 3;
-    const along = (Math.random() - 0.5) * emitter.radius;
-    const side = (Math.random() - 0.5) * emitter.radius * 0.34;
-    const initialAge = seed ? Math.random() * 1.4 : 0;
-    const travel = initialAge * Math.min(emitter.speed, Math.max(result.stats.maxSpeed, 0.12)) * 0.38;
-    current[offset] = emitter.position.x + emitter.axis.x * along + emitter.direction.x * travel;
-    current[offset + 1] = emitter.position.y + emitter.axis.y * along + emitter.direction.y * travel;
-    current[offset + 2] = emitter.position.z + emitter.axis.z * along + emitter.direction.z * travel;
-    current[offset] += side * emitter.direction.z;
-    current[offset + 2] -= side * emitter.direction.x;
-    ages[index] = initialAge;
-    lifetimes[index] = 5.5 + Math.random() * 4.5;
-    for (let trail = 0; trail < trailCount; trail += 1) {
-      const pointOffset = (index * trailCount + trail) * 3;
-      history[pointOffset] = current[offset];
-      history[pointOffset + 1] = current[offset + 1];
-      history[pointOffset + 2] = current[offset + 2];
-    }
-  };
-  if (particleCount) for (let index = 0; index < particleCount; index += 1) respawn(index, true);
-
-  const position = new THREE.Vector3();
-  const midpoint = new THREE.Vector3();
-  const next = new THREE.Vector3();
-  const velocity = new THREE.Vector3();
-  const middleVelocity = new THREE.Vector3();
-  const eddy = new THREE.Vector3();
-  let lastTime = null;
-  let trailClock = 0;
-  const update = (time) => {
-    if (!particleCount) return;
-    const dt = lastTime === null ? 1 / 60 : clamp(time - lastTime, 0, 0.05);
-    lastTime = time;
-    trailClock += dt;
-    const captureTrail = trailClock >= 0.06;
-    if (captureTrail) trailClock %= 0.06;
-    const speedRange = Math.max(result.stats.maxSpeed, 0.25);
-
-    for (let index = 0; index < particleCount; index += 1) {
-      const offset = index * 3;
-      if (ages[index] >= lifetimes[index]) respawn(index);
-      position.set(current[offset], current[offset + 1], current[offset + 2]);
-      sampleVelocity(result, position, velocity);
-      const speed = velocity.length();
-      midpoint.copy(position).addScaledVector(velocity, dt * 0.5);
-      sampleVelocity(result, midpoint, middleVelocity);
-      const turbulence = 0.014;
-      eddy.set(
-          Math.sin(index * 12.9898 + time * 1.7),
-          Math.sin(index * 4.1414 + time * 1.13),
-          Math.sin(index * 7.771 + time * 1.47),
-        ).multiplyScalar(turbulence * Math.sqrt(dt));
-      next.copy(position).addScaledVector(middleVelocity, dt).add(eddy);
-      if (isFluidPoint(next, grid, fields.solid)) {
-        current[offset] = next.x;
-        current[offset + 1] = next.y;
-        current[offset + 2] = next.z;
-      } else if (!insideRoom(next, grid)) {
-        ages[index] = Math.max(ages[index], lifetimes[index] - 0.35);
-      }
-      ages[index] += dt;
-      if (captureTrail) {
-        const firstHistory = index * trailCount * 3;
-        history.copyWithin(firstHistory + 3, firstHistory, firstHistory + (trailCount - 1) * 3);
-        history[firstHistory] = current[offset];
-        history[firstHistory + 1] = current[offset + 1];
-        history[firstHistory + 2] = current[offset + 2];
-      }
-      const life = smoothstep01(ages[index] / 0.22)
-        * (1 - smoothstep01((ages[index] / lifetimes[index] - 0.78) / 0.22));
-      for (let trail = 0; trail < trailCount; trail += 1) {
-        const pointIndex = index * trailCount + trail;
-        const pointOffset = pointIndex * 3;
-        positions[pointOffset] = history[pointOffset] - grid.width / 2;
-        positions[pointOffset + 1] = history[pointOffset + 1];
-        positions[pointOffset + 2] = history[pointOffset + 2] - grid.depth / 2;
-        lifeValues[pointIndex] = life * (1 - trail / (trailCount + 0.3));
-        speedValues[pointIndex] = clamp(speed / speedRange, 0, 1);
-      }
-    }
-    geometry.attributes.position.needsUpdate = true;
-    geometry.attributes.aLife.needsUpdate = true;
-    geometry.attributes.aSpeed.needsUpdate = true;
-    geometry.computeBoundingSphere();
-  };
-  return { layer, update, particleCount };
+  return null;
 }
 
-function smoothstep01(value) {
-  const t = clamp(value, 0, 1);
-  return t * t * (3 - 2 * t);
+function sampleExteriorVelocity(x, y, z, result, roomScene, margin, target) {
+  const corridor = windowCorridor(x, y, z, roomScene, margin, 0.18);
+  if (!corridor) return target.set(0, 0, 0);
+  const { window, wall, boundary } = corridor;
+  const interior = target.clone().set(x, y, z);
+  interior[wall.axis] = boundary;
+  interior.addScaledVector(wall.normal, -Math.min(result.grid.dx, result.grid.dy, result.grid.dz) * 0.25);
+  const i = clamp(Math.floor(interior.x / result.grid.dx), 0, result.grid.nx - 1);
+  const j = clamp(Math.floor(interior.y / result.grid.dy), 0, result.grid.ny - 1);
+  const k = clamp(Math.floor(interior.z / result.grid.dz), 0, result.grid.nz - 1);
+  const index = indexOf(i, j, k, result.grid);
+  if (!(result.fields.outlets?.[index] & wall.side)) return target.set(0, 0, 0);
+  const outwardSpeed = (result.fields.windowFlow?.[index] ?? 0) * wall.normal[wall.axis];
+  sampleVelocity(result, interior, target);
+  target.addScaledVector(wall.normal, outwardSpeed - target.dot(wall.normal));
+  return target;
+}
+
+function sampleGasDensity(density, x, y, z, volume) {
+  const { grid, margin, blocked } = volume;
+  if (x < -margin || x > grid.width - margin
+    || y < 0 || y > grid.height
+    || z < -margin || z > grid.depth - margin) return 0;
+  const gx = clamp((x + margin) / grid.dx - 0.5, 0, grid.nx - 1);
+  const gy = clamp(y / grid.dy - 0.5, 0, grid.ny - 1);
+  const gz = clamp((z + margin) / grid.dz - 0.5, 0, grid.nz - 1);
+  const x0 = Math.floor(gx);
+  const y0 = Math.floor(gy);
+  const z0 = Math.floor(gz);
+  const tx = gx - x0;
+  const ty = gy - y0;
+  const tz = gz - z0;
+  let value = 0;
+  let totalWeight = 0;
+  for (let oy = 0; oy <= 1; oy += 1) {
+    for (let oz = 0; oz <= 1; oz += 1) {
+      for (let ox = 0; ox <= 1; ox += 1) {
+        const i = Math.min(x0 + ox, grid.nx - 1);
+        const j = Math.min(y0 + oy, grid.ny - 1);
+        const k = Math.min(z0 + oz, grid.nz - 1);
+        const weight = (ox ? tx : 1 - tx) * (oy ? ty : 1 - ty) * (oz ? tz : 1 - tz);
+        const id = indexOf(i, j, k, grid);
+        if (blocked[id]) continue;
+        value += density[id] * weight;
+        totalWeight += weight;
+      }
+    }
+  }
+  return totalWeight > 1e-8 ? value / totalWeight : 0;
+}
+
+function addGasSources(volume, emitters) {
+  const { grid, margin, blocked, sourceRate } = volume;
+  const sourceWeight = new Float32Array(sourceRate.length);
+  const ids = [];
+  const weights = [];
+  for (const emitter of emitters) {
+    if (emitter.weight <= 0) continue;
+    ids.length = 0;
+    weights.length = 0;
+    let totalWeight = 0;
+    const extent = Math.max(emitter.radius * 1.8, grid.dx * 1.5);
+    const minI = clamp(Math.floor((emitter.position.x + margin - extent) / grid.dx), 0, grid.nx - 1);
+    const maxI = clamp(Math.ceil((emitter.position.x + margin + extent) / grid.dx), 0, grid.nx - 1);
+    const minJ = clamp(Math.floor((emitter.position.y - extent) / grid.dy), 0, grid.ny - 1);
+    const maxJ = clamp(Math.ceil((emitter.position.y + extent) / grid.dy), 0, grid.ny - 1);
+    const minK = clamp(Math.floor((emitter.position.z + margin - extent) / grid.dz), 0, grid.nz - 1);
+    const maxK = clamp(Math.ceil((emitter.position.z + margin + extent) / grid.dz), 0, grid.nz - 1);
+    const sigma = Math.max(emitter.radius * 0.68, Math.min(grid.dx, grid.dy, grid.dz) * 0.55);
+    const axialSigma = Math.min(grid.dx, grid.dy, grid.dz) * 0.62;
+    for (let j = minJ; j <= maxJ; j += 1) {
+      for (let k = minK; k <= maxK; k += 1) {
+        for (let i = minI; i <= maxI; i += 1) {
+          const id = indexOf(i, j, k, grid);
+          if (blocked[id]) continue;
+          const x = (i + 0.5) * grid.dx - margin - emitter.position.x;
+          const y = (j + 0.5) * grid.dy - emitter.position.y;
+          const z = (k + 0.5) * grid.dz - margin - emitter.position.z;
+          const axial = x * emitter.direction.x + y * emitter.direction.y + z * emitter.direction.z;
+          if (Math.abs(axial) > axialSigma * 1.8) continue;
+          const radialX = x * emitter.axis.x + y * emitter.axis.y + z * emitter.axis.z;
+          const radialY = x * emitter.sideAxis.x + y * emitter.sideAxis.y + z * emitter.sideAxis.z;
+          const weight = Math.exp(-0.5 * ((radialX ** 2 + radialY ** 2) / sigma ** 2 + axial ** 2 / axialSigma ** 2));
+          if (weight < 0.01) continue;
+          ids.push(id);
+          weights.push(weight);
+          totalWeight += weight;
+        }
+      }
+    }
+    const voxelVolume = grid.dx * grid.dy * grid.dz;
+    for (let index = 0; index < ids.length; index += 1) {
+      sourceWeight[ids[index]] += emitter.weight * weights[index] / Math.max(totalWeight, 1e-8) / voxelVolume;
+    }
+  }
+  sourceRate.set(sourceWeight);
+}
+
+function createGasVolume(result, roomScene, emitters, margin = 0.8) {
+  const { grid: roomGrid, fields } = result;
+  const displaySpeedRange = airflowDisplayRange(result);
+  const requestedCellSize = Math.max(0.1, Math.min(0.15, Math.max(roomGrid.dx, roomGrid.dy, roomGrid.dz) * 2));
+  const dimensions = { width: roomGrid.width + margin * 2, height: roomGrid.height, depth: roomGrid.depth + margin * 2 };
+  let cellSize = requestedCellSize;
+  let grid;
+  let voxelCount;
+  do {
+    grid = {
+      ...dimensions,
+      nx: Math.ceil(dimensions.width / cellSize),
+      ny: Math.ceil(dimensions.height / cellSize),
+      nz: Math.ceil(dimensions.depth / cellSize),
+    };
+    voxelCount = grid.nx * grid.ny * grid.nz;
+    if (voxelCount > MAX_GAS_VOXELS) cellSize *= Math.cbrt(voxelCount / MAX_GAS_VOXELS) * 1.001;
+  } while (voxelCount > MAX_GAS_VOXELS);
+  grid.dx = dimensions.width / grid.nx;
+  grid.dy = dimensions.height / grid.ny;
+  grid.dz = dimensions.depth / grid.nz;
+  grid.cellSize = Math.max(grid.dx, grid.dy, grid.dz);
+  grid.requestedCellSize = requestedCellSize;
+  const density = new Float32Array(voxelCount);
+  const nextDensity = new Float32Array(voxelCount);
+  const sourceRate = new Float32Array(voxelCount);
+  const blocked = new Uint8Array(voxelCount);
+  const velocityX = new Float32Array(voxelCount);
+  const velocityY = new Float32Array(voxelCount);
+  const velocityZ = new Float32Array(voxelCount);
+  const data = new Uint8Array(voxelCount * 4);
+  const sample = new THREE.Vector3();
+  const position = new THREE.Vector3();
+  for (let j = 0; j < grid.ny; j += 1) {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        const id = indexOf(i, j, k, grid);
+        const x = (i + 0.5) * grid.dx - margin;
+        const y = (j + 0.5) * grid.dy;
+        const z = (k + 0.5) * grid.dz - margin;
+        if (x >= 0 && x <= roomGrid.width && y >= 0 && y <= roomGrid.height && z >= 0 && z <= roomGrid.depth) {
+          const roomI = clamp(Math.floor(x / roomGrid.dx), 0, roomGrid.nx - 1);
+          const roomJ = clamp(Math.floor(y / roomGrid.dy), 0, roomGrid.ny - 1);
+          const roomK = clamp(Math.floor(z / roomGrid.dz), 0, roomGrid.nz - 1);
+          const roomId = indexOf(roomI, roomJ, roomK, roomGrid);
+          blocked[id] = fields.solid[roomId];
+          if (blocked[id]) continue;
+          position.set(x, y, z);
+          sampleVelocity(result, position, sample);
+        } else {
+          if (!windowCorridor(x, y, z, roomScene, margin, 0.18)) {
+            blocked[id] = 1;
+            continue;
+          }
+          sampleExteriorVelocity(x, y, z, result, roomScene, margin, sample);
+        }
+        velocityX[id] = sample.x;
+        velocityY[id] = sample.y;
+        velocityZ[id] = sample.z;
+      }
+    }
+  }
+  addGasSources({ grid, margin, blocked, sourceRate }, emitters);
+
+  const texture = new THREE.Data3DTexture(data, grid.nx, grid.nz, grid.ny);
+  texture.format = THREE.RGBAFormat;
+  texture.type = THREE.UnsignedByteType;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.wrapR = THREE.ClampToEdgeWrapping;
+  texture.unpackAlignment = 1;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+
+  const volumeSize = new THREE.Vector3(dimensions.width, dimensions.height, dimensions.depth);
+  const stepLength = Math.max(Math.min(grid.dx, grid.dy, grid.dz) * 0.7,
+    Math.hypot(dimensions.width, dimensions.height, dimensions.depth) / 176);
+  const vertexShader = [
+    'varying vec3 vLocalPosition;',
+    'varying vec3 vRayOrigin;',
+    'void main() {',
+    '  vec4 worldPosition = modelMatrix * vec4(position, 1.0);',
+    '  vLocalPosition = position;',
+    '  vRayOrigin = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;',
+    '  gl_Position = projectionMatrix * viewMatrix * worldPosition;',
+    '}',
+  ].join('\n');
+  const fragmentShader = [
+    'precision highp sampler3D;',
+    'uniform sampler3D uGas;',
+    'uniform vec3 uVolumeSize;',
+    'uniform vec3 uVoxelSize;',
+    'uniform float uStepLength;',
+    'varying vec3 vLocalPosition;',
+    'varying vec3 vRayOrigin;',
+    'out vec4 fragColor;',
+    'void main() {',
+    '  vec3 halfSize = uVolumeSize * 0.5;',
+    '  vec3 direction = vLocalPosition - vRayOrigin;',
+    '  float rayLength = length(direction);',
+    '  if (rayLength < 1e-6) discard;',
+    '  direction /= rayLength;',
+    '  bool cameraInside = all(lessThan(abs(vRayOrigin), halfSize));',
+    '  if (gl_FrontFacing == cameraInside) discard;',
+    '  vec3 inverseDirection = 1.0 / direction;',
+    '  vec3 near = (-halfSize - vRayOrigin) * inverseDirection;',
+    '  vec3 far = (halfSize - vRayOrigin) * inverseDirection;',
+    '  vec3 entry = min(near, far);',
+    '  vec3 exit = max(near, far);',
+    '  float startDistance = max(max(entry.x, entry.y), entry.z);',
+    '  float endDistance = min(min(exit.x, exit.y), exit.z);',
+    '  startDistance = max(startDistance, 0.0);',
+    '  if (endDistance <= startDistance) discard;',
+    '  int stepCount = min(192, int(ceil((endDistance - startDistance) / uStepLength)));',
+    '  vec4 accumulated = vec4(0.0);',
+    '  for (int index = 0; index < 192; index++) {',
+    '    if (index >= stepCount) break;',
+    '    float distance = startDistance + (float(index) + 0.5) * uStepLength;',
+    '    vec3 point = vRayOrigin + direction * distance;',
+    '    vec3 coordinate = point / uVolumeSize + 0.5;',
+    '    vec4 gas = texture(uGas, vec3(coordinate.x, coordinate.z, coordinate.y));',
+    '    float moving = smoothstep(0.01, 0.035, gas.g);',
+    '    float density = 0.55 * smoothstep(0.01, 0.1, gas.r) * moving * (1.0 - step(0.5, gas.b));',
+    '    float alpha = 1.0 - exp(-density * 1.6 * uStepLength);',
+    '    float contribution = (1.0 - accumulated.a) * alpha;',
+    '    float speed = clamp(gas.g, 0.0, 1.0);',
+    '    vec3 densityGradient = vec3(',
+    '      texture(uGas, coordinate + vec3(uVoxelSize.x, 0.0, 0.0)).r - texture(uGas, coordinate - vec3(uVoxelSize.x, 0.0, 0.0)).r,',
+    '      texture(uGas, coordinate + vec3(0.0, uVoxelSize.y, 0.0)).r - texture(uGas, coordinate - vec3(0.0, uVoxelSize.y, 0.0)).r,',
+    '      texture(uGas, coordinate + vec3(0.0, 0.0, uVoxelSize.z)).r - texture(uGas, coordinate - vec3(0.0, 0.0, uVoxelSize.z)).r);',
+    '    vec3 normal = normalize(-densityGradient + vec3(1e-4));',
+    '    float lighting = 0.62 + 0.38 * max(dot(normal, normalize(vec3(-0.4, 0.8, 0.55))), 0.0);',
+    '    vec3 blue = vec3(0.03, 0.28, 0.82);',
+    '    vec3 cyan = vec3(0.0, 0.86, 1.0);',
+    '    vec3 green = vec3(0.14, 0.93, 0.48);',
+    '    vec3 yellow = vec3(1.0, 0.84, 0.0);',
+    '    vec3 red = vec3(1.0, 0.1, 0.08);',
+    '    vec3 flowColor = speed < 0.2 ? mix(vec3(0.07, 0.13, 0.28), blue, speed / 0.2)',
+    '      : speed < 0.4 ? mix(blue, cyan, (speed - 0.2) / 0.2)',
+    '      : speed < 0.6 ? mix(cyan, green, (speed - 0.4) / 0.2)',
+    '      : speed < 0.8 ? mix(green, yellow, (speed - 0.6) / 0.2)',
+    '      : mix(yellow, red, (speed - 0.8) / 0.2);',
+    '    accumulated.rgb += flowColor * lighting * contribution;',
+    '    accumulated.a += contribution;',
+    '    if (accumulated.a > 0.9) break;',
+    '  }',
+    '  if (accumulated.a < 0.008) discard;',
+    '  fragColor = linearToOutputTexel(vec4(accumulated.rgb, accumulated.a));',
+    '}',
+  ].join('\n');
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(dimensions.width, dimensions.height, dimensions.depth), new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    uniforms: {
+      uGas: { value: texture },
+      uVolumeSize: { value: volumeSize },
+      uVoxelSize: { value: new THREE.Vector3(1 / grid.nx, 1 / grid.nz, 1 / grid.ny) },
+      uStepLength: { value: stepLength },
+    },
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    toneMapped: false,
+    vertexShader,
+    fragmentShader,
+  }));
+  mesh.position.y = roomGrid.height / 2;
+  mesh.name = 'advected-room-gas-volume';
+  mesh.renderOrder = 2;
+  mesh.frustumCulled = false;
+  mesh.userData.voxelCount = voxelCount;
+  mesh.userData.voxelSize = grid.cellSize;
+  mesh.userData.boundsCenter = new THREE.Vector3(0, roomGrid.height / 2, 0);
+  mesh.userData.boundsHalfSize = new THREE.Vector3(dimensions.width / 2, dimensions.height / 2, dimensions.depth / 2);
+  const layer = new THREE.Group();
+  layer.name = 'advected-room-gas';
+  layer.add(mesh);
+  return {
+    layer, grid, margin, density, nextDensity, sourceRate, blocked,
+    velocityX, velocityY, velocityZ, data, texture, voxelCount, stepLength,
+    backtrace: new THREE.Vector3(), displaySpeedRange,
+  };
+}
+
+function advanceGasVolume(volume, dt) {
+  const { grid, margin, density, nextDensity, sourceRate, blocked, velocityX, velocityY, velocityZ, backtrace } = volume;
+  const ix = GAS_DIFFUSIVITY * dt / grid.dx ** 2;
+  const iy = GAS_DIFFUSIVITY * dt / grid.dy ** 2;
+  const iz = GAS_DIFFUSIVITY * dt / grid.dz ** 2;
+  for (let j = 0; j < grid.ny; j += 1) {
+    for (let k = 0; k < grid.nz; k += 1) {
+      for (let i = 0; i < grid.nx; i += 1) {
+        const id = indexOf(i, j, k, grid);
+        if (blocked[id]) {
+          nextDensity[id] = 0;
+          continue;
+        }
+        const x = (i + 0.5) * grid.dx - margin;
+        const y = (j + 0.5) * grid.dy;
+        const z = (k + 0.5) * grid.dz - margin;
+        clipGasBacktrace(
+          volume,
+          x, y, z,
+          x - velocityX[id] * dt,
+          y - velocityY[id] * dt,
+          z - velocityZ[id] * dt,
+          backtrace,
+        );
+        const advected = sampleGasDensity(density, backtrace.x, backtrace.y, backtrace.z, volume);
+        const center = density[id];
+        const left = i > 0 && !blocked[id - 1] ? density[id - 1] : center;
+        const right = i + 1 < grid.nx && !blocked[id + 1] ? density[id + 1] : center;
+        const down = j > 0 && !blocked[id - grid.nz * grid.nx] ? density[id - grid.nz * grid.nx] : center;
+        const up = j + 1 < grid.ny && !blocked[id + grid.nz * grid.nx] ? density[id + grid.nz * grid.nx] : center;
+        const front = k > 0 && !blocked[id - grid.nx] ? density[id - grid.nx] : center;
+        const back = k + 1 < grid.nz && !blocked[id + grid.nx] ? density[id + grid.nx] : center;
+        const laplacian = (left - 2 * center + right) * ix
+          + (down - 2 * center + up) * iy
+          + (front - 2 * center + back) * iz;
+        nextDensity[id] = Math.max(0, advected + laplacian + sourceRate[id] * dt)
+          * Math.exp(-GAS_TRACER_DECAY_RATE * dt);
+      }
+    }
+  }
+  volume.density.set(nextDensity);
+}
+
+function updateGasTexture(volume) {
+  const { grid, margin, density, blocked, data, texture, velocityX, velocityY, velocityZ, roomGrid, displaySpeedRange } = volume;
+  let maxDensity = 0;
+  let occupiedVoxels = 0;
+  let tracerVolumeM3 = 0;
+  let exteriorTracerVolumeM3 = 0;
+  const voxelVolume = grid.dx * grid.dy * grid.dz;
+  for (let id = 0; id < density.length; id += 1) {
+    const concentration = clamp(1 - Math.exp(-density[id]), 0, 1);
+    data[id * 4] = Math.round(concentration * 255);
+    data[id * 4 + 1] = Math.round(clamp(Math.hypot(velocityX[id], velocityY[id], velocityZ[id]) / displaySpeedRange, 0, 1) * 255);
+    data[id * 4 + 2] = blocked[id] ? 255 : 0;
+    data[id * 4 + 3] = 255;
+    maxDensity = Math.max(maxDensity, concentration);
+    tracerVolumeM3 += density[id] * voxelVolume;
+    if (concentration > 0.025) occupiedVoxels += 1;
+    if (roomGrid) {
+      const i = id % grid.nx;
+      const k = Math.floor(id / grid.nx) % grid.nz;
+      const x = (i + 0.5) * grid.dx - margin;
+      const z = (k + 0.5) * grid.dz - margin;
+      if (x < 0 || x > roomGrid.width || z < 0 || z > roomGrid.depth) {
+        exteriorTracerVolumeM3 += density[id] * voxelVolume;
+      }
+    }
+  }
+  texture.needsUpdate = true;
+  return { maxDensity, occupiedVoxels, tracerVolumeM3, exteriorTracerVolumeM3 };
+}
+
+function createGasLayer(result, roomScene) {
+  const emitters = getAirEmitters(result, roomScene);
+  const volume = createGasVolume(result, roomScene, emitters);
+  volume.roomGrid = result.grid;
+  volume.roomSolid = result.fields.solid;
+  const { layer } = volume;
+  for (let step = 0; step < 15; step += 1) advanceGasVolume(volume, GAS_STEP);
+  Object.assign(layer.userData, updateGasTexture(volume));
+  const sourceCounts = Object.fromEntries(emitters.map((emitter) => [emitter.kind, 0]));
+  for (const emitter of emitters) sourceCounts[emitter.kind] += 1;
+  layer.userData.gasVoxelCount = volume.voxelCount;
+  layer.userData.gasSourceCounts = sourceCounts;
+  layer.userData.maxDensity = 0;
+  layer.userData.occupiedVoxels = 0;
+  layer.userData.tracerVolumeM3 = 0;
+  layer.userData.exteriorTracerVolumeM3 = 0;
+  let lastTime = null;
+  let accumulator = GAS_STEP;
+  const update = (time) => {
+    if (lastTime !== null) accumulator += clamp(time - lastTime, 0, 0.05);
+    lastTime = time;
+    let changed = false;
+    while (accumulator >= GAS_STEP) {
+      advanceGasVolume(volume, GAS_STEP);
+      accumulator -= GAS_STEP;
+      changed = true;
+    }
+    if (changed) Object.assign(layer.userData, updateGasTexture(volume));
+  };
+  return { layer, update, voxelCount: volume.voxelCount, sourceCounts };
 }
 
 const INFRARED_STOPS = [
-  [0, 0x180b3f],
-  [0.2, 0x263bb5],
-  [0.4, 0x08a8d8],
-  [0.58, 0x36d7a3],
-  [0.73, 0xf0d738],
-  [0.88, 0xe84a28],
-  [1, 0xfff2d5],
+  [0, 0x101b84],
+  [0.18, 0x185bde],
+  [0.38, 0x09b8e0],
+  [0.58, 0x35d973],
+  [0.76, 0xf0df37],
+  [0.9, 0xef6b28],
+  [1, 0xfff4dd],
 ].map(([position, color]) => ({ position, color: new THREE.Color(color) }));
 
-function infraredColor(value, ambient, target) {
-  const normalized = clamp((value - (ambient - 4)) / 12, 0, 1);
+function infraredColor(value, result, target) {
+  const normalized = normalizeTemperature(value, result);
   const upperIndex = INFRARED_STOPS.findIndex((stop) => stop.position >= normalized);
   const upper = INFRARED_STOPS[Math.max(1, upperIndex)];
   const lower = INFRARED_STOPS[Math.max(0, upperIndex - 1)];
@@ -499,11 +880,13 @@ function infraredColor(value, ambient, target) {
 function createInfraredPlane(result, scene, wall) {
   const { grid } = result;
   const floor = wall === 'floor';
-  const alongX = floor || wall === 'front' || wall === 'back';
+  const ceiling = wall === 'ceiling';
+  const horizontal = floor || ceiling;
+  const alongX = horizontal || wall === 'front' || wall === 'back';
   const span = alongX ? grid.width : grid.depth;
   const segmentsX = alongX ? grid.nx - 1 : grid.nz - 1;
-  const segmentsY = floor ? grid.nz - 1 : grid.ny - 1;
-  const geometry = new THREE.PlaneGeometry(span, floor ? grid.depth : grid.height, segmentsX, segmentsY);
+  const segmentsY = horizontal ? grid.nz - 1 : grid.ny - 1;
+  const geometry = new THREE.PlaneGeometry(span, horizontal ? grid.depth : grid.height, segmentsX, segmentsY);
   const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
     vertexColors: true,
     transparent: true,
@@ -512,9 +895,9 @@ function createInfraredPlane(result, scene, wall) {
     toneMapped: false,
   }));
   mesh.name = `infrared-${wall}`;
-  if (floor) {
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = 0.012;
+  if (horizontal) {
+    mesh.rotation.x = floor ? -Math.PI / 2 : Math.PI / 2;
+    mesh.position.y = floor ? 0.012 : grid.height - 0.012;
   } else {
     mesh.position.y = grid.height / 2;
     if (wall === 'front') mesh.position.z = -grid.depth / 2 + 0.008;
@@ -540,17 +923,20 @@ function createInfraredPlane(result, scene, wall) {
   for (let index = 0; index < positions.count; index += 1) {
     point.fromBufferAttribute(positions, index).applyMatrix4(mesh.matrixWorld);
     const x = point.x + grid.width / 2;
-    const y = floor ? Math.max(0.04, grid.dy * 0.55) : point.y;
+    const y = floor ? Math.max(0.04, grid.dy * 0.55)
+      : ceiling ? Math.min(grid.height - 0.04, grid.height - grid.dy * 0.55) : point.y;
     const z = point.z + grid.depth / 2;
     const temperature = sampleField(result.fields.temperature, x, y, z, grid, result.fields.solid, result.ambientTemperature);
-    infraredColor(temperature, result.ambientTemperature, color).toArray(colors, index * 4);
+    infraredColor(temperature, result, color).toArray(colors, index * 4);
     const along = wall === 'left' || wall === 'right' ? z : x;
     const insideOpening = openings.some((window) => {
       const center = wall === 'left' || wall === 'right' ? window.position.z : window.position.x;
       return Math.abs(along - center) <= window.dimensions.width / 2
         && point.y >= window.position.y && point.y <= window.position.y + window.dimensions.height;
     });
-    colors[index * 4 + 3] = insideOpening ? 0 : floor ? 0.86 : 0.78;
+    const thermalContrast = clamp(Math.abs(temperature - result.ambientTemperature) / 2, 0, 1);
+    colors[index * 4 + 3] = insideOpening ? 0
+      : (horizontal ? 0.24 : 0.16) + thermalContrast * 0.36;
   }
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
   mesh.renderOrder = 1;
@@ -560,7 +946,7 @@ function createInfraredPlane(result, scene, wall) {
 export function createTemperatureSurfaceLayer(result, roomScene) {
   const layer = new THREE.Group();
   layer.name = 'infrared-temperature-surfaces';
-  for (const wall of ['floor', 'front', 'back', 'left', 'right']) {
+  for (const wall of ['floor', 'ceiling', 'front', 'back', 'left', 'right']) {
     layer.add(createInfraredPlane(result, roomScene, wall));
   }
   return layer;
@@ -603,7 +989,7 @@ export function createTemperatureObjectLayer(result, objectGroups = new Map()) {
       const geometry = sourceMesh.geometry.clone();
       const vertices = geometry.attributes.position;
       const normals = geometry.attributes.normal;
-      const colors = new Float32Array(vertices.count * 3);
+      const colors = new Float32Array(vertices.count * 4);
       normalMatrix.getNormalMatrix(sourceMesh.matrixWorld);
       for (let vertex = 0; vertex < vertices.count; vertex += 1) {
         point.fromBufferAttribute(vertices, vertex).applyMatrix4(sourceMesh.matrixWorld);
@@ -620,9 +1006,11 @@ export function createTemperatureObjectLayer(result, objectGroups = new Map()) {
           result.fields.solid,
           result.ambientTemperature,
         );
-        infraredColor(temperature, result.ambientTemperature, color).toArray(colors, vertex * 3);
+        infraredColor(temperature, result, color).toArray(colors, vertex * 4);
+        const contrast = clamp(Math.abs(temperature - result.ambientTemperature) / 2, 0, 1);
+        colors[vertex * 4 + 3] = 0.22 + contrast * 0.48;
       }
-      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
       overlayMesh.geometry = geometry;
       overlayMesh.material = material;
       overlayMesh.renderOrder = 3;
@@ -635,5 +1023,5 @@ export function createTemperatureObjectLayer(result, objectGroups = new Map()) {
 export function createAirflowLayers(result, roomScene) {
   const gas = createGasLayer(result, roomScene);
   gas.update(0);
-  return { streamlines: null, tracers: gas.layer, update: gas.update, particleCount: gas.particleCount };
+  return { volume: gas.layer, update: gas.update, gasVoxelCount: gas.voxelCount, sourceCounts: gas.sourceCounts };
 }

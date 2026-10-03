@@ -5,7 +5,8 @@ import { addObject, createRoomScene, resizeObject, rotateObject } from '../src/m
 import { RoomViewport } from '../src/scene/room-viewport.js';
 
 test('a rejected gizmo rotation restores the last valid scene pose', () => {
-  const added = addObject(createRoomScene());
+  const emptyRoom = { ...createRoomScene(), objects: [] };
+  const added = addObject(emptyRoom);
   const resized = resizeObject(added.scene, added.object.id, { width: 5 });
   const source = resized.object;
   const group = {
@@ -19,7 +20,8 @@ test('a rejected gizmo rotation restores the last valid scene pose', () => {
   const viewport = Object.assign(Object.create(RoomViewport.prototype), {
     roomScene: resized.scene,
     transform: { object: group },
-    selectionBox: { update() { selectionBoxUpdates += 1; } },
+    selectionBox: { update() { selectionBoxUpdates += 1; }, material: { color: { set() {} } } },
+    onPlacementError() {},
     onTransform: () => rotateObject(resized.scene, source.id, { y: 45 }),
   });
 
@@ -49,17 +51,19 @@ test('a fan with zero output does not animate its rotor', () => {
   assert.equal(viewport.fanRotors.get(fan.id).userData.enabled, false);
 });
 
-test('viewport frames advance the airflow layer animation clock', () => {
+test('viewport frames advance field animation while reduced motion stops decorative rotors', () => {
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
   let animationTime = null;
   globalThis.requestAnimationFrame = () => 1;
+  const rotor = { rotation: { z: 0 }, userData: { enabled: true } };
   const viewport = {
     animate: RoomViewport.prototype.animate,
-    updateFieldVolumeDepthTest: RoomViewport.prototype.updateFieldVolumeDepthTest,
+    updateFieldVolumeDepthTest: () => {},
     orbit: { update() {} },
     selectionBox: null,
     hoverBox: null,
-    fanRotors: new Map(),
+    prefersReducedMotion: true,
+    fanRotors: new Map([['fan', rotor]]),
     fieldLayer: { userData: { animate: (time) => { animationTime = time; } } },
     renderer: { render() {} },
     scene: {},
@@ -74,4 +78,5 @@ test('viewport frames advance the airflow layer animation clock', () => {
   }
 
   assert.equal(animationTime, 2.5);
+  assert.equal(rotor.rotation.z, 0);
 });
