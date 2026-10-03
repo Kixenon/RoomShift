@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4173",
+    "site": "vite --host 127.0.0.1 --port 4173 --open /site/",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "node --test tests/",
@@ -12,6 +13,7 @@
     "test:all": "node --test"
   },
   "dependencies": {
+    "gsap": "^3.15.0",
     "three": "^0.186.1"
   },
   "devDependencies": {

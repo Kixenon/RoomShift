@@ -60,3 +60,11 @@ The scene model is solver-independent (`src/model/room-scene.js`); rendering and
 - `src/app.js` — editor and simulation controls.
 - `tests/` — headless-safe model, solver, and scene-graph tests, run by `npm test`.
 - `browser-tests/` — Playwright browser interaction tests, run separately by `npm run test:browser`.
+
+## Launch site and deck
+
+`npm run site` serves the launch site at <http://127.0.0.1:4173/site/>, with the product page, the experiment (`evidence.html`), the business case (`business.html`), and the presentation deck at `/site/slides/` (add `?pitch` for the shorter pitch cut). Scripts in `site/scripts/` regenerate the renders, orbit clips and experiment data from the editor and solver.
+
+## Credits
+
+Built at HacKU 2026. Open-source libraries and assets: [Three.js](https://threejs.org) (MIT), [GSAP](https://gsap.com) (GSAP standard licence), [Vite](https://vite.dev) (MIT), [Playwright](https://playwright.dev) (Apache-2.0), and the [Archivo](https://fonts.google.com/specimen/Archivo) typeface (SIL Open Font License).

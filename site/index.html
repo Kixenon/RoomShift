@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f8f6" />
+    <title>RoomShift — Move it here first</title>
+    <meta name="description" content="RoomShift is a 3D room editor that shows how a furniture layout changes the air, warmth and light in your room before you move anything." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" />
+    <link rel="stylesheet" href="./site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="RoomShift home">
+        <svg class="brand-mark" viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M4 8.5 14 3l10 5.5v11L14 25 4 19.5v-11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 15 3.2 3.2L19.5 11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span translate="no">roomshift</span>
+      </a>
+      <nav class="site-nav" aria-label="Pages">
+        <a href="./" aria-current="page">Product</a>
+        <a href="./evidence.html">The experiment</a>
+        <a href="./business.html">Business</a>
+        <a href="./slides/">Deck</a>
+      </nav>
+      <a class="button button-small" href="../">Open the editor</a>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <h1 id="hero-title" data-stretch>Move it here first.</h1>
+          <p class="lede">RoomShift is a 3D editor for the room you already live in. Rebuild it in a few minutes, rearrange it freely, and see how each layout changes the air, warmth and light, before you drag anything across the floor.</p>
+          <div class="actions">
+            <a class="button" href="../">Open the editor</a>
+            <a class="button button-quiet" href="#compare">See two layouts compared</a>
+          </div>
+        </div>
+
+        <figure class="hero-figure">
+          <div class="swipe" data-swipe style="--pos: 50%">
+            <img src="./img/layout-a-air.webp" width="1920" height="1460" alt="Layout A: the pedestal fan stands by the left wall and its airflow rises toward the back of the room, away from the desk." fetchpriority="high" />
+            <div class="swipe-top">
+              <img src="./img/layout-b-air.webp" width="1920" height="1460" alt="Layout B: the fan stands beside the desk and its airflow streams straight across the work surface." />
+            </div>
+            <div class="swipe-line" aria-hidden="true"></div>
+            <button class="swipe-handle" type="button" role="slider" aria-label="Compare layout A and layout B" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-valuetext="Half layout A, half layout B">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6 3 12l6 6M15 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="swipe-tag swipe-tag-a"><b>A</b> Fan in the corner</span>
+            <span class="swipe-tag swipe-tag-b"><b>B</b> Fan beside the desk</span>
+          </div>
+          <figcaption class="hero-caption">
+            <p>Same room, same furniture, two arrangements. Airflow solved by RoomShift on the GPU at 5&nbsp;cm resolution. Drag to compare.</p>
+            <div class="legend" aria-label="Airflow speed scale from 0 to about 2.3 metres per second">
+              <span class="legend-bar legend-air" aria-hidden="true"></span>
+              <span class="legend-labels"><span>0 m/s</span><span>2.3 m/s</span></span>
+            </div>
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="problem" aria-labelledby="problem-title">
+        <h2 id="problem-title" data-split>A layout can look right and still work badly.</h2>
+        <ul class="problem-list" data-reveal>
+          <li>
+            <h3>The fan in the corner</h3>
+            <p>It takes up almost no floor space, and it cools mostly the wall behind it.</p>
+          </li>
+          <li>
+            <h3>The heater behind the sofa</h3>
+            <p>It warms a pocket of air you never sit in, while the seat stays cool.</p>
+          </li>
+          <li>
+            <h3>The lamp across the room</h3>
+            <p>The desk ends up lit from the wrong side, so your own shadow falls across the page.</p>
+          </li>
+        </ul>
+        <p class="problem-close">Usually you find out after the furniture has moved. RoomShift lets you find out first.</p>
+      </section>
+
+      <section class="scrub" aria-labelledby="scrub-title" data-scrub>
+        <div class="scrub-stage">
+          <canvas class="scrub-canvas" width="1280" height="1008" aria-hidden="true"></canvas>
+          <img class="scrub-fallback" src="./media/seq/air/000.webp" width="1280" height="1008" alt="The rearranged room with its airflow solved: the fan beside the desk sends a jet of air across the work surface, which curls up the far wall." />
+          <div class="scrub-copy">
+            <h2 id="scrub-title" class="scrub-beat is-first">This is the air in your room.</h2>
+            <p class="scrub-beat">Every streak is real solver output: 5&nbsp;cm cells, solved on your own GPU.</p>
+            <p class="scrub-beat">It bends around the desk, climbs the far wall and rolls back across the ceiling.</p>
+            <p class="scrub-beat">Move the fan a metre and all of it changes. That’s the point.</p>
+          </div>
+          <div class="scrub-progress" aria-hidden="true"><span></span></div>
+        </div>
+      </section>
+
+      <section class="layers" id="layers" aria-labelledby="layers-title">
+        <div class="section-head">
+          <h2 id="layers-title" data-split>Three things a floor plan can’t show you</h2>
+          <p>Switch the room between its plain model and three simulated layers. These are the same buttons as in the editor, and every clip is a real render from it, orbiting a solved room.</p>
+        </div>
+
+        <div class="layer-viewer" data-tabs>
+          <div class="segmented" role="tablist" aria-label="Room layer">
+            <button role="tab" id="tab-room" aria-controls="panel-layer" aria-selected="false" tabindex="-1" data-layer="room">Room</button>
+            <button role="tab" id="tab-air" aria-controls="panel-layer" aria-selected="true" data-layer="air">Air</button>
+            <button role="tab" id="tab-heat" aria-controls="panel-layer" aria-selected="false" tabindex="-1" data-layer="heat">Heat</button>
+            <button role="tab" id="tab-light" aria-controls="panel-layer" aria-selected="false" tabindex="-1" data-layer="light">Light</button>
+          </div>
+
+          <div class="layer-stage" id="panel-layer" role="tabpanel" aria-labelledby="tab-air" tabindex="0">
+            <div class="layer-images">
+              <video data-layer-image="room" muted loop playsinline preload="none" poster="./media/orbit-room-a-poster.webp" aria-label="The default living room turning slowly: pedestal fan, panel heater, floor lamp, coffee table, sofa and desk inside a 5.2 by 4 metre room."><source src="./media/orbit-room-a.webm" type="video/webm" /><source src="./media/orbit-room-a.mp4" type="video/mp4" /></video>
+              <video data-layer-image="air" class="is-active" muted loop playsinline preload="metadata" poster="./media/orbit-air-b-poster.webp" aria-label="Airflow layer turning slowly: tracers stream from the fan across the desk and curl up the far wall."><source src="./media/orbit-air-b.webm" type="video/webm" /><source src="./media/orbit-air-b.mp4" type="video/mp4" /></video>
+              <video data-layer-image="heat" muted loop playsinline preload="none" poster="./media/orbit-heat-a-poster.webp" aria-label="Heat layer turning slowly: a warm plume surrounds the panel heater against the left wall."><source src="./media/orbit-heat-a.webm" type="video/webm" /><source src="./media/orbit-heat-a.mp4" type="video/mp4" /></video>
+              <video data-layer-image="light" muted loop playsinline preload="none" poster="./media/orbit-light-b-poster.webp" aria-label="Light layer turning slowly: the floor lamp beside the desk casts shadows of the furniture across the floor and walls."><source src="./media/orbit-light-b.webm" type="video/webm" /><source src="./media/orbit-light-b.mp4" type="video/mp4" /></video>
+            </div>
+
+            <div class="layer-notes">
+              <div class="layer-note" data-layer-note="room" hidden>
+                <h3>The room, at real size</h3>
+                <p>Width, depth and height in metres. Each piece is a box with a model on top (sofa, bed, desk, table, lamp, fan or heater), so its footprint is exactly the size you type in.</p>
+              </div>
+              <div class="layer-note" data-layer-note="air">
+                <h3>Air</h3>
+                <p>A 3D airflow estimate on a grid of up to 1.5 million cells, solved in a background worker with WebGPU. Streamlines and drifting tracers show where the fan’s air actually goes.</p>
+                <div class="legend"><span class="legend-bar legend-air" aria-hidden="true"></span><span class="legend-labels"><span>0 m/s</span><span>2.30 m/s</span></span></div>
+              </div>
+              <div class="layer-note" data-layer-note="heat" hidden>
+                <h3>Heat</h3>
+                <p>A temperature estimate that moves with the air, spreads and settles back toward a 20&nbsp;°C room. It shows where warmth collects and where it never reaches.</p>
+                <div class="legend"><span class="legend-bar legend-heat" aria-hidden="true"></span><span class="legend-labels"><span>20.0 °C</span><span>32.1 °C</span></span></div>
+              </div>
+              <div class="layer-note" data-layer-note="light" hidden>
+                <h3>Light</h3>
+                <p>A real-time shadow preview with a light at each lamp bulb. Move the lamp and the shadows on the desk and floor move with it, instantly.</p>
+                <div class="legend"><span class="legend-bar legend-light" aria-hidden="true"></span><span class="legend-labels"><span>Shadow</span><span>Lit</span></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="compare" id="compare" aria-labelledby="compare-title">
+        <div class="section-head">
+          <h2 id="compare-title" data-split>Same room. Four moves. Compare.</h2>
+          <p>The default room, rearranged by hand in the editor: fan beside the desk, heater beside the sofa, lamp at the end of the desk, coffee table in front of the sofa. Every layer was then solved for both versions.</p>
+        </div>
+
+        <div class="compare-controls" role="group" aria-label="Layer shown in both plans">
+          <div class="segmented">
+            <button type="button" aria-pressed="true" data-compare="top">Plan</button>
+            <button type="button" aria-pressed="false" data-compare="top-air">Air</button>
+            <button type="button" aria-pressed="false" data-compare="top-heat">Heat</button>
+            <button type="button" aria-pressed="false" data-compare="light">Light</button>
+          </div>
+        </div>
+
+        <div class="compare-grid">
+          <figure class="plan">
+            <img data-compare-image="a" data-view="top" src="./img/layout-a-top.webp" width="1900" height="1490" loading="lazy" alt="Layout A seen from above." />
+            <figcaption><strong>Layout A</strong> <span data-compare-caption="a">The default room</span></figcaption>
+          </figure>
+          <figure class="plan">
+            <img data-compare-image="b" data-view="top" src="./img/layout-b-top.webp" width="1900" height="1490" loading="lazy" alt="Layout B seen from above." />
+            <figcaption><strong>Layout B</strong> <span data-compare-caption="b">Four pieces moved</span></figcaption>
+          </figure>
+        </div>
+
+        <dl class="tradeoffs" data-reveal>
+          <div data-tradeoff="top-air">
+            <dt>Air</dt>
+            <dd>In A the fan’s jet runs up the left wall and turns along the back, mostly short of the desk. In B it starts beside the desk and crosses the whole work surface.</dd>
+          </div>
+          <div data-tradeoff="top-heat">
+            <dt>Heat</dt>
+            <dd>In A the warm zone hugs the left wall, between the fan and the lamp, away from any seat. In B it sits at the end of the sofa, where someone actually sits, and it peaks a degree higher (33.2 vs 32.1&nbsp;°C).</dd>
+          </div>
+          <div data-tradeoff="light">
+            <dt>Light</dt>
+            <dd>In A the desk is lit from across the room. In B the lamp stands at its end. The cost: the lamp now throws the sofa’s shadow across the front of the room.</dd>
+          </div>
+        </dl>
+        <p class="footnote">RoomShift doesn’t score or rank layouts yet. For now you read the comparison yourself, and automatic scoring is on the <a href="#roadmap">roadmap</a>.</p>
+      </section>
+
+      <section class="workflow" aria-labelledby="workflow-title">
+        <div class="section-head">
+          <h2 id="workflow-title" data-split>How it works today</h2>
+        </div>
+        <div class="workflow-body">
+          <ol class="steps" data-reveal>
+            <li>
+              <h3>Size the room</h3>
+              <p>Type the width, depth and height in metres. The walls follow.</p>
+            </li>
+            <li>
+              <h3>Place what’s in it</h3>
+              <p>Add a box, give it a model and a size, and drag it with the gizmo or type an exact position and rotation. Every move can be undone.</p>
+            </li>
+            <li>
+              <h3>Add windows</h3>
+              <p>Put them on any wall and open them to let air and heat out.</p>
+            </li>
+            <li>
+              <h3>Turn on a layer</h3>
+              <p>Air and Heat re-solve in the background as you edit. Light updates as you drag.</p>
+            </li>
+          </ol>
+          <figure class="app-shot">
+            <img src="./img/main-app.webp" width="2400" height="1500" loading="lazy" alt="The RoomShift editor: an add rail on the left, the 3D room in the centre with view and layer toolbars, and an inspector listing the room size and its six objects on the right." />
+          </figure>
+        </div>
+      </section>
+
+      <section class="try" id="try" aria-labelledby="try-title">
+        <div class="section-head">
+          <h2 id="try-title" data-split>Try it here</h2>
+          <p>This is the real editor, not a recording. Drag to orbit, click a piece to select it, then switch on Air. Chrome and Edge run the full GPU solver. Other browsers fall back to a coarser preview on the CPU.</p>
+        </div>
+        <div class="embed" data-embed>
+          <img class="embed-poster" src="./img/main-room.webp" width="1920" height="1460" loading="lazy" alt="" />
+          <div class="embed-cta">
+            <button class="button" type="button" data-embed-load>Load the live editor</button>
+            <a href="../">or open it full screen</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof" aria-labelledby="proof-title">
+        <div class="proof-inner">
+          <h2 id="proof-title" data-split>Same breeze. Three-quarters of the fan.</h2>
+          <div class="proof-body" data-reveal>
+            <p>We ran 30 versions of one home office through RoomShift’s solver, moving the fan and turning it up. Put it a metre back from the desk instead of right beside it, and setting 4.5 gives the breeze that setting 6 gives up close.</p>
+            <div class="proof-stats">
+              <p><span class="proof-number"><span data-count="30">30</span></span><span>solves of one room</span></p>
+              <p><span class="proof-number"><span data-count="1.24" data-decimals="2">1.24</span></span><span>m/s at the desk, both ways</span></p>
+              <p><span class="proof-number">−<span data-count="25">25</span>%</span><span>fan setting needed</span></p>
+            </div>
+            <a class="text-link" href="./evidence.html">See the whole experiment, and where the model falls short</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="pricing pricing-home" id="pricing" aria-labelledby="pricing-title">
+        <div class="section-head">
+          <h2 id="pricing-title" data-split>Pay once. Settle the room.</h2>
+          <p>You rearrange a room a few times a year, so RoomShift won’t charge you every month. This is the pricing we plan to launch with. Nothing is on sale yet.</p>
+        </div>
+        <div class="tiers" data-reveal>
+          <article class="tier">
+            <h3>Try</h3>
+            <p class="price"><span>Free</span></p>
+            <ul><li>The full editor, in your browser</li><li>Air, heat and light previews</li><li>One room, no account</li></ul>
+          </article>
+          <article class="tier tier-featured">
+            <p class="tier-flag">Most people</p>
+            <h3>Room Pass</h3>
+            <p class="price"><span>HK$78</span><small>once, 7 days</small></p>
+            <ul><li>Unlimited layouts for one room</li><li>Full-resolution GPU solves</li><li>Side-by-side comparisons</li><li>Nothing renews</li></ul>
+          </article>
+          <article class="tier">
+            <h3>Studio</h3>
+            <p class="price"><span>HK$198</span><small>per month</small></p>
+            <ul><li>For designers and planners</li><li>Unlimited rooms</li><li>Client-ready reports</li></ul>
+          </article>
+        </div>
+        <p class="footnote">Proposed launch pricing. Read the reasoning on the <a href="./business.html">business page</a>.</p>
+      </section>
+
+      <section class="roadmap" id="roadmap" aria-labelledby="roadmap-title">
+        <div class="section-head">
+          <h2 id="roadmap-title" data-split>Where RoomShift is headed</h2>
+          <p>The idea is bigger than an editor: tell RoomShift what matters to you, and it proposes arrangements and explains what each one gives up. Here’s what exists today, what’s being built, and what comes later.</p>
+        </div>
+
+        <ol class="timeline" data-reveal>
+          <li class="stage stage-now">
+            <h3><span class="stage-dot" aria-hidden="true"></span>Available now</h3>
+            <ul>
+              <li>3D room editor with seven furniture models, windows and undo</li>
+              <li>Airflow and heat estimates on the GPU, with a CPU fallback</li>
+              <li>Real-time light and shadow preview</li>
+              <li>3D, top-down and orthographic views</li>
+            </ul>
+          </li>
+          <li class="stage stage-building">
+            <h3><span class="stage-dot" aria-hidden="true"></span>In development</h3>
+            <ul>
+              <li><strong>Infrared view.</strong> Air temperature mapped onto the walls, floor and furniture.</li>
+              <li><strong>Adjustable sources.</strong> Fan, heater and lamp strength, a fan on/off switch, and windows that act as an inlet or an outlet.</li>
+              <li><strong>Room size from a photo.</strong> Click the four floor corners in a doorway photo, enter your camera height, and RoomShift estimates the width, depth and height.</li>
+            </ul>
+            <figure class="stage-figure">
+              <img src="./img/physics-heat.webp" width="1920" height="1460" loading="lazy" alt="Infrared preview: the room’s walls and ceiling are coloured by nearby air temperature, with a hot plume rising from the heater into the back corner." />
+              <figcaption><span>Infrared preview from the development build</span><span class="legend"><span class="legend-bar legend-ir" aria-hidden="true"></span><span class="legend-labels"><span>16 °C</span><span>28+ °C</span></span></span></figcaption>
+            </figure>
+          </li>
+          <li class="stage stage-planned">
+            <h3><span class="stage-dot" aria-hidden="true"></span>Planned</h3>
+            <ul>
+              <li><strong>Priorities.</strong> Choose what matters in this room: daylight at the desk, air where you sit, walking space, warmth.</li>
+              <li><strong>Layout generation.</strong> Alternatives that respect furniture sizes, doors and clearances, without dragging every piece yourself.</li>
+              <li><strong>Scores you can read.</strong> Each layout scored against your priorities, with the trade-offs spelled out instead of one “perfect” answer.</li>
+            </ul>
+          </li>
+        </ol>
+      </section>
+
+      <section class="candour" aria-labelledby="candour-title">
+        <h2 id="candour-title">What the colours mean, and what they don’t</h2>
+        <div class="candour-body">
+          <p>RoomShift’s layers are estimates for comparing one layout with another. They aren’t measurements, and they aren’t certified engineering.</p>
+          <ul>
+            <li>Airflow and heat come from a simplified 3D fluid model. It isn’t validated CFD, and it leaves out turbulence models, wall heat capacity and HVAC.</li>
+            <li>Heater strength is an estimated warming rate, not watts, and the temperatures shown are estimates, not readings.</li>
+            <li>Light is a shadow preview, not calibrated lux. It doesn’t model light bouncing between surfaces.</li>
+          </ul>
+          <p>So use it to ask “is B better than A?”, not “is this room safe?”.</p>
+        </div>
+      </section>
+
+      <section class="closing" aria-labelledby="closing-title">
+        <h2 id="closing-title">Your room, before the heavy lifting.</h2>
+        <div class="actions">
+          <a class="button" href="../">Open the editor</a>
+          <a class="button button-quiet" href="https://github.com/Kixenon/RoomShift">View the source on GitHub</a>
+        </div>
+        <div class="run-local">
+          <p>Or run it on your own machine:</p>
+          <pre translate="no"><code>git clone https://github.com/Kixenon/RoomShift
+cd RoomShift && npm install && npm run dev</code></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span translate="no">RoomShift</span>
+      <nav aria-label="Footer"><a href="./">Product</a><a href="./evidence.html">The experiment</a><a href="./business.html">Business</a><a href="./slides/">Deck</a></nav>
+      <span>Every room image and clip on this page is a render from the RoomShift editor, cropped but otherwise untouched.</span>
+      <p class="credits-line">Built at HacKU 2026. Open-source credits: <a href="https://threejs.org">Three.js</a> (MIT), <a href="https://gsap.com">GSAP</a>, <a href="https://vite.dev">Vite</a> (MIT), <a href="https://playwright.dev">Playwright</a> (Apache-2.0), and the <a href="https://fonts.google.com/specimen/Archivo">Archivo</a> typeface (OFL).</p>
+    </footer>
+
+    <script type="module" src="./site.js"></script>
+  </body>
+</html>

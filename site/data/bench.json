@@ -1,0 +1,10 @@
+{
+ "note": "Measured centreline air speed of a real fan, in m/s. Fill these in from an anemometer and commit; the evidence page and deck plot them against the model. Leave null until measured.",
+ "fan": "",
+ "points": [
+  { "distance": 0.5, "speed": null },
+  { "distance": 1.0, "speed": null },
+  { "distance": 2.0, "speed": null },
+  { "distance": 3.0, "speed": null }
+ ]
+}

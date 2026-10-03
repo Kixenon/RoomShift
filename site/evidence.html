@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f8f6" />
+    <title>RoomShift — The experiment</title>
+    <meta name="description" content="How RoomShift answers the Test the Change Before You Make It brief: a two-input fan experiment, a model check, two configurations compared, and what the model leaves out." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" />
+    <link rel="stylesheet" href="./site.css" />
+  </head>
+  <body class="page-evidence">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="RoomShift home">
+        <svg class="brand-mark" viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M4 8.5 14 3l10 5.5v11L14 25 4 19.5v-11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 15 3.2 3.2L19.5 11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span translate="no">roomshift</span>
+      </a>
+      <nav class="site-nav" aria-label="Pages">
+        <a href="./">Product</a>
+        <a href="./evidence.html" aria-current="page">The experiment</a>
+        <a href="./business.html">Business</a>
+        <a href="./slides/">Deck</a>
+      </nav>
+      <a class="button button-small" href="../">Open the editor</a>
+    </header>
+
+    <main id="main">
+      <section class="page-hero" aria-labelledby="page-title">
+        <p class="kicker">Deep Technology brief: Test the Change Before You Make It</p>
+        <h1 id="page-title" data-stretch>Where should the fan go?</h1>
+        <p class="lede">The brief asks for one small system, two inputs, one constraint, and a trade-off you can’t escape. Ours is a fan in a furnished home office, solved by RoomShift’s own airflow model. Every number on this page comes from that solver and can be rerun with one command.</p>
+      </section>
+
+      <section class="brief-map" aria-labelledby="map-title">
+        <h2 id="map-title" class="visually-hidden">How the brief maps to RoomShift</h2>
+        <dl class="spec" data-reveal>
+          <div><dt>System</dt><dd>Air in a 5.2 × 4.0 × 2.7&nbsp;m room with a desk, sofa, coffee table, lamp, heater and one pedestal fan. The furniture is solid to the air.</dd></div>
+          <div><dt>Input 1</dt><dd><strong>Fan distance</strong> back from the desk edge: 0.6, 1.0, 1.4, 1.8 or 2.2&nbsp;m, aimed along the desk.</dd></div>
+          <div><dt>Input 2</dt><dd><strong>Fan setting</strong>: the solver’s fan-strength term, from 1.5 to 7.5.</dd></div>
+          <div><dt>Constraint</dt><dd>The fan stands inside the room, which the editor enforces at the walls, and stays at or below <strong>setting 4.5</strong>, our stand-in for a quiet, low-power limit.</dd></div>
+          <div><dt>Outcome 1</dt><dd><strong>Breeze at the desk</strong>: mean air speed where a seated person’s head and chest are. <span class="tag tag-sim">Simulated</span></dd></div>
+          <div><dt>Outcome 2</dt><dd><strong>Fan cost</strong>: the setting itself. A real fan’s power draw rises steeply with speed (the fan affinity laws put it near the cube), and so does its noise. <span class="tag tag-calc">Not simulated</span></dd></div>
+          <div><dt>Trade-off</dt><dd>At every distance, each step up in setting bought more breeze, 25 times out of 25. You can’t get more breeze for free. Where the fan stands decides how much breeze each step buys.</dd></div>
+        </dl>
+      </section>
+
+      <section class="experiment" aria-labelledby="experiment-title">
+        <div class="section-head">
+          <h2 id="experiment-title" data-split>30 runs, one answer</h2>
+          <p>Each cell is a separate solve of the same room: five distances times six settings, including “off”, which gives zero everywhere and isn’t drawn. Hover or tab through the cells. Hatched cells break the setting budget.</p>
+        </div>
+        <figure class="chart chart-heatmap" data-heatmap>
+          <figcaption class="chart-caption">
+            <span>Breeze at the desk, m/s</span>
+            <span class="seq-legend" aria-hidden="true"><span>0</span><span class="seq-bar"></span><span>1.69</span></span>
+          </figcaption>
+        </figure>
+        <details class="table-view">
+          <summary>Show the data as a table</summary>
+          <div class="table-scroll" data-heatmap-table></div>
+        </details>
+        <p class="footnote">Solver: RoomShift’s CPU preview (0.15&nbsp;m grid, 2&nbsp;s simulated, 12 pressure iterations), the same model the editor falls back to without WebGPU. Rerun it with <code>node site/scripts/experiment.mjs</code>.</p>
+      </section>
+
+      <section class="configs" aria-labelledby="configs-title">
+        <div class="section-head">
+          <h2 id="configs-title" data-split>Two configurations, side by side</h2>
+          <p>Both give the desk the same breeze. Only one of them fits the budget.</p>
+        </div>
+        <div class="config-pair" data-reveal>
+          <article class="config">
+            <span class="config-badge">A</span>
+            <h3>Close and strong</h3>
+            <p class="config-setup">0.6&nbsp;m from the desk, setting 6.0</p>
+            <p class="config-number"><span data-count="1.24" data-decimals="2">1.24</span><small>m/s at the desk</small></p>
+            <p class="config-note">Over the 4.5 budget. It needs a third more setting to land where B lands.</p>
+          </article>
+          <article class="config config-chosen">
+            <span class="config-badge">B</span>
+            <h3>Set back, gentler</h3>
+            <p class="config-setup">1.0&nbsp;m from the desk, setting 4.5</p>
+            <p class="config-number"><span data-count="1.24" data-decimals="2">1.24</span><small>m/s at the desk</small></p>
+            <p class="config-note">Inside the budget, and the best breeze any in-budget run achieved.</p>
+          </article>
+        </div>
+        <div class="verdict" data-reveal="self">
+          <h3>We’d choose B.</h3>
+          <p>It delivers the same breeze (1.236 against 1.243&nbsp;m/s, half a percent apart) at three-quarters of the setting. Moved back a metre, the jet has room to spread across the whole desk instead of hitting its near edge. Up close, part of its push is spent before it reaches you. Going further back doesn’t keep helping: at 2.2&nbsp;m and setting 4.5 the desk gets only 0.73&nbsp;m/s.</p>
+        </div>
+      </section>
+
+      <section class="check" aria-labelledby="check-title">
+        <div class="section-head">
+          <h2 id="check-title" data-split>Checking the model against a known jet</h2>
+          <p>Far from the fan, a free round jet slows roughly as one over distance. We ran the fan alone in an empty 6 × 5&nbsp;m room and read the speed along its axis.</p>
+        </div>
+        <figure class="chart chart-jet" data-jet>
+          <figcaption class="chart-caption">
+            <span class="line-key"><span class="key-solid"></span>RoomShift, simulated</span>
+            <span class="line-key"><span class="key-dashed"></span>Free jet, 1/x from the peak</span>
+            <span class="line-key key-bench-wrap"><span class="key-bench"></span>Measured, real fan</span>
+          </figcaption>
+        </figure>
+        <div class="check-results" data-reveal>
+          <article class="result result-miss">
+            <h3>It doesn’t match, and here’s why</h3>
+            <p>The model pushes air along a 1.8&nbsp;m zone instead of at a blade, so the jet keeps speeding up to <strong data-jet-peak></strong>. Past that, it slows much faster than 1/x: at 3&nbsp;m it reads 0.39&nbsp;m/s, where a free jet would still carry about 1.2. Two seconds of simulated time isn’t long enough for the jet to reach that far and settle.</p>
+          </article>
+          <article class="result result-next">
+            <h3>What we do about it</h3>
+            <p>Run to steady state on the GPU solver, shrink the push zone to the fan’s own depth, then calibrate against the bench. A handheld anemometer reads one real fan at 0.5, 1, 2 and 3&nbsp;m, and we tune the fan term until the curve passes through those points.</p>
+          </article>
+          <article class="result result-pass">
+            <h3>What does hold</h3>
+            <ul>
+              <li>Air stays close to incompressible: residual divergence of 0.11&nbsp;s⁻¹ in configuration B, about 1.3% of its velocity gradients (around 8&nbsp;s⁻¹).</li>
+              <li>Closed walls carry zero flow through them, on every face.</li>
+              <li>An empty, unforced room stays still and at exactly 20&nbsp;°C.</li>
+              <li>A heater makes a bounded, local rise, and furniture blocks light behind it.</li>
+            </ul>
+            <p class="footnote">Each of these is an automated test in the repository, part of the 46 that pass.</p>
+          </article>
+        </div>
+        <form class="bench" data-bench aria-labelledby="bench-title">
+          <div class="bench-copy">
+            <h3 id="bench-title">The bench: measure a real fan</h3>
+            <p>Hold an anemometer (a handheld one, or a phone app with a clip-on sensor) on the fan’s axis at each distance. Type the readings and they plot against the model above. This is the measured case the brief asks the model to reproduce.</p>
+          </div>
+          <div class="bench-fields">
+            <label><span>0.5&nbsp;m</span><input type="number" inputmode="decimal" step="0.01" min="0" max="10" name="d0.5" autocomplete="off" placeholder="m/s…" /></label>
+            <label><span>1&nbsp;m</span><input type="number" inputmode="decimal" step="0.01" min="0" max="10" name="d1" autocomplete="off" placeholder="m/s…" /></label>
+            <label><span>2&nbsp;m</span><input type="number" inputmode="decimal" step="0.01" min="0" max="10" name="d2" autocomplete="off" placeholder="m/s…" /></label>
+            <label><span>3&nbsp;m</span><input type="number" inputmode="decimal" step="0.01" min="0" max="10" name="d3" autocomplete="off" placeholder="m/s…" /></label>
+          </div>
+          <div class="bench-actions">
+            <button type="button" class="button button-quiet button-small" data-bench-copy>Copy as JSON for site/data/bench.json</button>
+            <button type="button" class="button button-quiet button-small" data-bench-clear>Clear</button>
+            <span class="bench-status" data-bench-status aria-live="polite"></span>
+          </div>
+        </form>
+
+        <p class="conclusion">So read the experiment as a comparison, not a forecast. The ranking between distances is the useful output. The absolute speeds wait for calibration.</p>
+      </section>
+
+      <section class="labels" aria-labelledby="labels-title">
+        <div class="section-head">
+          <h2 id="labels-title" data-split>What’s simulated, and what’s left out</h2>
+        </div>
+        <div class="labels-grid" data-reveal>
+          <div>
+            <h3><span class="tag tag-sim">Simulated</span></h3>
+            <ul>
+              <li>3D incompressible airflow around solid furniture, with advection, viscosity and pressure projection</li>
+              <li>Heat carried by that air, spreading and relaxing to a 20&nbsp;°C room, with simple buoyancy</li>
+              <li>Fans as a directional push, heaters as a local warming rate, open windows as outlets</li>
+            </ul>
+          </div>
+          <div>
+            <h3><span class="tag tag-calc">Calculated or assumed</span></h3>
+            <ul>
+              <li>Fan cost: the setting, with power and noise rising steeply with speed. Not modelled.</li>
+              <li>Occupied zones: fixed boxes at seated head and chest height</li>
+              <li>Heater output: an estimated °C per second, not watts</li>
+            </ul>
+          </div>
+          <div>
+            <h3><span class="tag tag-out">Left out</span></h3>
+            <ul>
+              <li>Turbulence models and the fan’s real blade and swirl</li>
+              <li>Steady state: this run covers 2 simulated seconds</li>
+              <li>Heat stored in walls and furniture, radiation, sunlight, HVAC</li>
+              <li>Humidity, people’s body heat, and perceived comfort</li>
+              <li>Any calibration against a measured room, so far</li>
+            </ul>
+          </div>
+        </div>
+        <p class="footnote">We also tried a second outcome, warmth at the sofa with the heater beside it. Two simulated seconds weren’t enough for heat to reach the seat (under 0.03&nbsp;°C in every run), so we left it out of the trade-off rather than report a non-result as a finding.</p>
+      </section>
+
+      <section class="closing closing-compact" aria-labelledby="closing-title">
+        <h2 id="closing-title">Try the change yourself.</h2>
+        <div class="actions">
+          <a class="button" href="../">Open the editor</a>
+          <a class="button button-quiet" href="./slides/">Watch the deck</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span translate="no">RoomShift</span>
+      <nav aria-label="Footer"><a href="./">Product</a><a href="./evidence.html">The experiment</a><a href="./business.html">Business</a><a href="./slides/">Deck</a></nav>
+      <p class="credits-line">Built at HacKU 2026. Open-source credits: <a href="https://threejs.org">Three.js</a> (MIT), <a href="https://gsap.com">GSAP</a>, <a href="https://vite.dev">Vite</a> (MIT), <a href="https://playwright.dev">Playwright</a> (Apache-2.0), and the <a href="https://fonts.google.com/specimen/Archivo">Archivo</a> typeface (OFL).</p>
+    </footer>
+    <script type="module" src="./evidence.js"></script>
+  </body>
+</html>

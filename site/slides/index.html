@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10251f" />
+    <title>RoomShift — Deck</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" />
+    <link rel="stylesheet" href="../site.css" />
+    <link rel="stylesheet" href="./slides.css" />
+  </head>
+  <body class="deck-body">
+    <div class="deck" data-deck>
+      <div class="deck-stage" data-stage>
+
+        <!-- 1 · Title -->
+        <section class="slide slide-light slide-title" aria-label="RoomShift" data-notes="Hi, we’re team RoomShift. Our brief: test the change before you make it. Our change is the most common physical change people make at home: moving things around a room.">
+          <video class="title-video" data-in="video" muted loop playsinline preload="auto" poster="../media/orbit-air-b-poster.webp"><source src="../media/orbit-air-b.webm" type="video/webm" /><source src="../media/orbit-air-b.mp4" type="video/mp4" /></video>
+          <div class="title-copy">
+            <p class="eyebrow" data-in="up">Deep Technology. Test the Change Before You Make It.</p>
+            <h1 class="wordmark" data-in="stretch"><span>Room</span><span class="shift">Shift</span></h1>
+            <p class="title-line" data-in="up">Move it here first.</p>
+          </div>
+        </section>
+
+        <!-- 2 · Problem -->
+        <section class="slide slide-dark" aria-label="The problem" data-notes="Rearranging is trial and error. You move the fan, the desk, the heater, live with it for a week, and move it again. Each round costs an afternoon and a sore back, and you still can’t see the air or the heat.">
+          <p class="eyebrow eyebrow-dark" data-in="up">Especially in a few hundred square feet, through a long Hong Kong summer.</p>
+          <h2 class="giant" data-in="lines">Rearranging a room is cheap to get wrong on screen, and expensive to get wrong on the floor.</h2>
+          <ul class="pains" data-in="stagger">
+            <li><strong>The fan in the corner</strong> cools mostly the wall behind it.</li>
+            <li><strong>The heater behind the sofa</strong> warms air nobody sits in.</li>
+            <li><strong>The lamp across the room</strong> puts your shadow on the page.</li>
+          </ul>
+        </section>
+
+        <!-- Users -->
+        <section class="slide slide-light slide-users" aria-label="Who it is for" data-notes="Our first user is a student or renter in a small Hong Kong room: a hall room or a flat of a few hundred square feet. The fan, the AC, the desk and the bed all compete for the same metres, through a five-month summer. They don’t need this every week. They need it at move-in and when they buy a fan or an AC. That’s why we price it once, not monthly.">
+          <h2 class="statement statement-wide" data-in="lines">Built first for small rooms and long summers.</h2>
+          <div class="users-grid" data-in="stagger">
+            <article class="user-card user-primary">
+              <p class="brief-label">First user</p>
+              <h3>Students and renters in small Hong Kong rooms</h3>
+              <p>A hall room or a few hundred square feet. Fan, AC, desk and bed compete for the same metres.</p>
+            </article>
+            <article class="user-card">
+              <p class="brief-label">When they need it</p>
+              <h3>Move-in, and buying a fan or AC</h3>
+              <p>A few concentrated weekends a year, not every day. So the price is one-time, not monthly.</p>
+            </article>
+            <article class="user-card">
+              <p class="brief-label">What they ask</p>
+              <h3>“Where does it go?”</h3>
+              <p>Not “what’s the velocity field”. RoomShift answers with a comparison they can see.</p>
+            </article>
+          </div>
+        </section>
+
+        <!-- 3 · Insight -->
+        <section class="slide slide-light slide-insight" aria-label="The insight" data-notes="Floor planners answer “does it fit?”. They don’t answer “does it work?”. Air, heat and light are invisible, so we made them visible. These are the three layers in RoomShift, on a real solved room.">
+          <div class="insight-copy">
+            <h2 class="statement" data-in="lines">A floor plan shows fit.</h2>
+            <p class="cycle-words" data-in="up"><span data-cycle-word>Not air.</span></p>
+            <ol class="cycle-keys" data-in="stagger">
+              <li data-cycle-key="0">Room</li><li data-cycle-key="1">Air</li><li data-cycle-key="2">Heat</li><li data-cycle-key="3">Light</li>
+            </ol>
+          </div>
+          <div class="cycle-stage" data-in="scale" data-cycle>
+            <video muted loop playsinline preload="none" poster="../media/orbit-room-a-poster.webp"><source src="../media/orbit-room-a.webm" type="video/webm" /><source src="../media/orbit-room-a.mp4" type="video/mp4" /></video>
+            <video muted loop playsinline preload="none" poster="../media/orbit-air-b-poster.webp"><source src="../media/orbit-air-b.webm" type="video/webm" /><source src="../media/orbit-air-b.mp4" type="video/mp4" /></video>
+            <video muted loop playsinline preload="none" poster="../media/orbit-heat-a-poster.webp"><source src="../media/orbit-heat-a.webm" type="video/webm" /><source src="../media/orbit-heat-a.mp4" type="video/mp4" /></video>
+            <video muted loop playsinline preload="none" poster="../media/orbit-light-b-poster.webp"><source src="../media/orbit-light-b.webm" type="video/webm" /><source src="../media/orbit-light-b.mp4" type="video/mp4" /></video>
+          </div>
+        </section>
+
+        <!-- 4 · Product -->
+        <section class="slide slide-light slide-product" aria-label="The product" data-notes="RoomShift is a 3D room editor in the browser. Set the room size, drop in furniture as real-sized boxes with models, add windows, then switch on a layer. The solver runs on your own GPU through WebGPU.">
+          <div class="product-copy">
+            <h2 class="statement" data-in="lines">A furnished room, simulated in your browser.</h2>
+            <ol class="product-steps" data-in="stagger">
+              <li><strong>Size the room</strong> in metres</li>
+              <li><strong>Place what’s in it</strong>: sofa, bed, desk, lamp, fan, heater</li>
+              <li><strong>Add windows</strong> and open them</li>
+              <li><strong>Switch on Air, Heat or Light</strong></li>
+            </ol>
+          </div>
+          <figure class="product-shot" data-in="rise">
+            <img src="../img/main-app.webp" width="2400" height="1500" alt="The RoomShift editor with its add rail, 3D room and inspector." />
+            <span class="callout callout-rail" data-in="pop">Add furniture and windows</span>
+            <span class="callout callout-layers" data-in="pop">Air, Heat and Light layers</span>
+            <span class="callout callout-inspector" data-in="pop">Exact sizes in metres</span>
+          </figure>
+        </section>
+
+        <!-- 5 · Live demo -->
+        <section class="slide slide-dark slide-demo" aria-label="Live demo" data-notes="Live demo. Orbit the room, select the fan, switch on Air. Move the fan beside the desk and watch the field re-solve. Then try Heat and Light. If the venue machine has no WebGPU, it falls back to the CPU preview.">
+          <div class="demo-head">
+            <h2 class="statement" data-in="lines">Live. Not a recording.</h2>
+            <p data-in="up">Press <kbd>L</kbd> to load the editor here, or <kbd>E</kbd> to open it full screen.</p>
+          </div>
+          <div class="demo-frame" data-in="rise" data-demo>
+            <video muted loop playsinline preload="none" poster="../media/orbit-air-b-poster.webp"><source src="../media/orbit-air-b.webm" type="video/webm" /><source src="../media/orbit-air-b.mp4" type="video/mp4" /></video>
+            <button type="button" class="demo-load" data-demo-load>Load the live editor</button>
+          </div>
+        </section>
+
+        <!-- 6 · The brief -->
+        <section class="slide slide-light" aria-label="Our experiment" data-notes="For the brief we picked one small system: a fan in a furnished home office. Two inputs, fan distance and fan setting. One constraint, a setting budget, plus the walls. Two outcomes that fight: breeze at the desk against fan power and noise.">
+          <h2 class="statement statement-wide" data-in="lines">The experiment: where should the fan go?</h2>
+          <div class="brief-grid" data-in="stagger">
+            <article class="brief-card"><p class="brief-label">Input 1</p><h3>Fan distance</h3><p>0.6 to 2.2&nbsp;m back from the desk</p></article>
+            <article class="brief-card"><p class="brief-label">Input 2</p><h3>Fan setting</h3><p>1.5 to 7.5, the solver’s fan strength</p></article>
+            <article class="brief-card brief-constraint"><p class="brief-label">Constraint</p><h3>Setting ≤ 4.5</h3><p>A quiet, low-power budget, and the fan stays inside the room</p></article>
+            <article class="brief-card brief-out"><p class="brief-label">Outcome 1 <span class="tag tag-sim">Simulated</span></p><h3>Breeze at the desk</h3><p>Mean air speed at seated head height</p></article>
+            <article class="brief-card brief-out"><p class="brief-label">Outcome 2 <span class="tag tag-calc">Not simulated</span></p><h3>Fan cost</h3><p>Power and noise climb steeply with speed</p></article>
+            <article class="brief-card brief-trade"><p class="brief-label">Trade-off</p><h3>25 of 25</h3><p>Every step up in setting bought more breeze. There’s no free breeze.</p></article>
+          </div>
+        </section>
+
+        <!-- 7 · Results -->
+        <section class="slide slide-light slide-results" data-appendix aria-label="Results" data-notes="Thirty solves of the same room. Breeze goes up with every setting, that’s the trade-off. But distance matters too: at a given setting the desk gets the most air with the fan one to one and a half metres back. Too close and the jet hits the desk edge, too far and it spreads out.">
+          <div class="results-copy">
+            <h2 class="statement" data-in="lines">30 solves. One sweet spot.</h2>
+            <p data-in="up">At any setting, the desk gets the most breeze with the fan about a metre back, not right beside it.</p>
+            <p class="small" data-in="up">RoomShift CPU solver, 0.15&nbsp;m grid, 2&nbsp;s simulated. Hatched cells break the budget.</p>
+          </div>
+          <figure class="chart chart-heatmap deck-heatmap" data-in="fade" data-deck-heatmap></figure>
+        </section>
+
+        <!-- 8 · Two configurations -->
+        <section class="slide slide-dark slide-configs" aria-label="Two configurations" data-notes="Two configurations with the same breeze at the desk. A, close and strong, needs setting 6 and breaks the budget. B, a metre back, needs setting 4.5. Same 1.24 metres per second. We’d choose B: a quarter less fan, and on real fans power rises roughly with the cube of speed.">
+          <h2 class="statement" data-in="lines">Same breeze. We’d choose B.</h2>
+          <div class="duel">
+            <article class="duel-card" data-in="left">
+              <span class="duel-badge">A</span>
+              <h3>Close and strong</h3>
+              <p class="duel-setup">0.6&nbsp;m back, setting 6.0</p>
+              <p class="duel-number"><span data-deck-count="1.24" data-decimals="2">1.24</span><small>m/s</small></p>
+              <p class="duel-flag duel-flag-bad">Over budget</p>
+            </article>
+            <p class="duel-vs" data-in="pop">=</p>
+            <article class="duel-card duel-chosen" data-in="right">
+              <span class="duel-badge">B</span>
+              <h3>Set back, gentler</h3>
+              <p class="duel-setup">1.0&nbsp;m back, setting 4.5</p>
+              <p class="duel-number"><span data-deck-count="1.24" data-decimals="2">1.24</span><small>m/s</small></p>
+              <p class="duel-flag duel-flag-good">−<span data-deck-count="25">25</span>% fan setting</p>
+            </article>
+          </div>
+        </section>
+
+        <!-- 9 · Model check -->
+        <section class="slide slide-light slide-check" aria-label="Model check" data-notes="We checked the model against a known relationship: a free jet slows as one over distance. It doesn’t match. Our fan pushes over a 1.8-metre zone, and two simulated seconds isn’t steady state. So we read results as a ranking, not a forecast. Next: run to steady state on the GPU and calibrate against a handheld anemometer at 0.5, 1, 2 and 3 metres.">
+          <div class="check-copy">
+            <h2 class="statement" data-in="lines">We checked it against a free jet. It doesn’t match.</h2>
+            <ul class="check-points" data-in="stagger">
+              <li><strong>Why:</strong> the model pushes air over a 1.8&nbsp;m zone, and 2&nbsp;s isn’t steady state.</li>
+              <li><strong>So:</strong> trust the ranking between layouts, not the absolute speeds.</li>
+              <li><strong>Next:</strong> steady state on the GPU, then calibrate to an anemometer at 0.5, 1, 2 and 3&nbsp;m.</li>
+              <li><strong>What holds:</strong> near-zero divergence, no flow through walls, a still room stays at 20&nbsp;°C. All automated tests.</li>
+            </ul>
+          </div>
+          <figure class="chart chart-jet deck-jet" data-in="fade" data-deck-jet>
+            <figcaption class="chart-caption">
+              <span class="line-key"><span class="key-solid"></span>RoomShift, simulated</span>
+              <span class="line-key"><span class="key-dashed"></span>Free jet, 1/x</span>
+            </figcaption>
+          </figure>
+        </section>
+
+        <!-- 10 · Labels -->
+        <section class="slide slide-light" data-appendix aria-label="What is simulated" data-notes="Everything we show is labelled. Simulated: 3D incompressible airflow around furniture, heat carried by it, fans, heaters, windows. Assumed: fan cost, occupied zones, heater output. Left out: turbulence models, steady state, wall heat storage, radiation, sunlight, HVAC, humidity and people.">
+          <h2 class="statement statement-wide" data-in="lines">Every result is labelled.</h2>
+          <div class="label-cols" data-in="stagger">
+            <div><p class="tag tag-sim">Simulated</p><ul><li>3D incompressible airflow around solid furniture</li><li>Heat carried by the air, with buoyancy</li><li>Fans, heaters and open windows</li></ul></div>
+            <div><p class="tag tag-calc">Assumed</p><ul><li>Fan power and noise rise with speed</li><li>Seated head-and-chest zones</li><li>Heater output in °C per second, not watts</li></ul></div>
+            <div><p class="tag tag-out">Left out</p><ul><li>Turbulence models and blade swirl</li><li>Steady state (2&nbsp;s runs)</li><li>Wall heat storage, radiation, sun, HVAC</li><li>Humidity, body heat, perceived comfort</li></ul></div>
+          </div>
+        </section>
+
+        <!-- 11 · Tech -->
+        <section class="slide slide-dark slide-tech" aria-label="How it works" data-notes="Under the hood: the editor writes a solver-independent scene. A web worker voxelises it and runs a 3D fluid solver in WebGPU compute: up to 1.5 million cells at 5 centimetres, twenty pressure iterations per step. Three.js renders the result as volumes, streamlines and tracers. No server, no install.">
+          <h2 class="statement" data-in="lines">No server. The solver runs on your GPU.</h2>
+          <div class="pipeline" data-in="pipeline">
+            <div class="node"><h3>Editor</h3><p>Three.js room, gizmos, undo</p></div>
+            <div class="node"><h3>Scene model</h3><p>Real sizes in metres, solver-independent</p></div>
+            <div class="node node-hot"><h3>Web Worker + WebGPU</h3><p>Voxelise, advect, diffuse, project</p></div>
+            <div class="node"><h3>Renderer</h3><p>Volumes, streamlines, tracers</p></div>
+          </div>
+          <div class="tech-stats" data-in="stagger">
+            <p><span class="tech-number"><span data-deck-count="5">5</span>&thinsp;cm</span><span>grid cells</span></p>
+            <p><span class="tech-number"><span data-deck-count="1.5" data-decimals="1">1.5</span>M</span><span>cells at most</span></p>
+            <p><span class="tech-number"><span data-deck-count="20">20</span></span><span>pressure iterations per step</span></p>
+            <p><span class="tech-number"><span data-deck-count="46">46</span></span><span>automated tests passing</span></p>
+          </div>
+        </section>
+
+        <!-- 12 · Market -->
+        <section class="slide slide-light slide-market" aria-label="The market" data-notes="Room planners like magicplan make fitting furniture easy, but don’t do physics. Engineering tools like SimScale do deep physics, built for engineers. Consumer airflow apps like CrossBreeze and Sim your flow are closest, and we respect them. Our bet: a furnished 3D room, three layers, side-by-side comparison, in minutes.">
+          <div class="market-copy">
+            <h2 class="statement" data-in="lines">Planners do fit. Engineers do physics. We want both in ten minutes.</h2>
+            <p class="small" data-in="up">Our reading of the market from a team scan, October 2026. Not exhaustive.</p>
+          </div>
+          <svg class="deck-map" viewBox="0 0 640 520" data-in="map" role="img" aria-label="Schematic market map: room planners at low effort and no physics, engineering CFD at high effort and deep physics, consumer airflow apps between, RoomShift at low effort with furnished-room physics.">
+            <line x1="70" y1="460" x2="610" y2="460" class="map-axis" /><line x1="70" y1="460" x2="70" y2="30" class="map-axis" />
+            <text x="610" y="494" text-anchor="end" class="axis-title">More setup effort</text>
+            <text x="58" y="40" text-anchor="end" class="axis-title" transform="rotate(-90 58 40)">Deeper physics</text>
+            <g class="map-region" data-map-item><rect x="96" y="352" width="220" height="86" rx="43" /><text x="206" y="390" text-anchor="middle" class="map-name">Room planners</text><text x="206" y="412" text-anchor="middle" class="map-eg">magicplan, Layoutr</text></g>
+            <g class="map-region" data-map-item><rect x="380" y="56" width="214" height="96" rx="48" /><text x="487" y="98" text-anchor="middle" class="map-name">Engineering CFD</text><text x="487" y="120" text-anchor="middle" class="map-eg">SimScale, DesignBuilder</text></g>
+            <g class="map-region" data-map-item><rect x="250" y="206" width="236" height="86" rx="43" /><text x="368" y="244" text-anchor="middle" class="map-name">Consumer airflow</text><text x="368" y="266" text-anchor="middle" class="map-eg">CrossBreeze, Sim your flow</text></g>
+            <g class="map-gap" data-map-item><rect x="86" y="44" width="250" height="160" rx="26" /><text x="100" y="70" class="map-gap-label">The gap: real physics, minutes of setup</text></g>
+            <g class="map-us" data-map-item><circle cx="168" cy="150" r="14" /><text x="194" y="146" class="map-name">RoomShift</text><text x="194" y="168" class="map-eg">Furnished 3D, in a tab</text></g>
+          </svg>
+        </section>
+
+        <!-- 13 · Business model -->
+        <section class="slide slide-light slide-pricing" aria-label="Business model" data-notes="People rearrange a room a few times a year, so a subscription is the wrong shape. Free to try. A one-time Room Pass, 78 Hong Kong dollars for a week on one room. Studio at 198 a month for designers. The solver runs on the customer’s GPU, so serving a sale costs us almost nothing. These are proposed prices we’ll test, not validated ones.">
+          <h2 class="statement statement-wide" data-in="lines">A weekend problem. A weekend price.</h2>
+          <div class="tiers deck-tiers" data-in="stagger">
+            <article class="tier"><h3>Try</h3><p class="price"><span>Free</span></p><ul><li>Full editor in the browser</li><li>Air, heat and light previews</li></ul></article>
+            <article class="tier tier-featured"><p class="tier-flag">Start here</p><h3>Room Pass</h3><p class="price"><span>HK$78</span><small>once, 7 days</small></p><ul><li>Unlimited layouts, one room</li><li>Full GPU resolution</li><li>Nothing renews</li></ul></article>
+            <article class="tier"><h3>Studio</h3><p class="price"><span>HK$198</span><small>/ month</small></p><ul><li>Designers and planners</li><li>Client-ready reports</li></ul></article>
+          </div>
+          <p class="small pricing-note" data-in="up">Proposed pricing, to be tested. The compute runs on the customer’s GPU, so a sale costs almost nothing to serve.</p>
+        </section>
+
+        <!-- Risks -->
+        <section class="slide slide-light slide-risks" aria-label="Risks" data-notes="Four risks, and how we find out early. Accuracy: we already showed where the model diverges, and calibration comes before any accuracy claim. One-time use: that’s the premise, so we price for it. Setup time: room size from a photo is in development, scanning next, and our test is a furnished bedroom in under ten minutes. Willingness to pay: a priced checkout shown to people who just used the free editor.">
+          <h2 class="statement statement-wide" data-in="lines">What could go wrong, and how we’ll find out.</h2>
+          <dl class="risk-grid" data-in="stagger">
+            <div><dt>“Is it accurate?”</dt><dd>We already showed where it diverges. Calibrate against a measured fan before any accuracy claim.</dd></div>
+            <div><dt>People use it once</dt><dd>That’s the premise. Priced once, with repeat use from moving, buying and designers.</dd></div>
+            <div><dt>Setup takes too long</dt><dd>Room size from a photo is in development. Test: a furnished bedroom in under ten minutes.</dd></div>
+            <div><dt>Will people pay?</dt><dd>Unknown. Test: a priced checkout shown right after the free editor.</dd></div>
+          </dl>
+        </section>
+
+        <!-- 14 · Roadmap -->
+        <section class="slide slide-dark slide-roadmap" aria-label="Roadmap" data-notes="Today: the editor and three layers. In development on branches: an infrared view, adjustable sources and window inlets and outlets, and room size from one photo. Next: calibration against measurements, then priorities, generated layouts and scores that explain their trade-offs.">
+          <h2 class="statement" data-in="lines">From simulator to decision tool.</h2>
+          <div class="road" data-in="road">
+            <div class="road-line"><span></span></div>
+            <article class="road-stop"><p class="road-when">Now</p><h3>Editor + three layers</h3><p>Air, heat and light on a furnished 3D room</p></article>
+            <article class="road-stop"><p class="road-when">Building</p><h3>Infrared, sources, photo</h3><p>Surface heat view, adjustable fans and windows, room size from a photo</p></article>
+            <article class="road-stop"><p class="road-when">Next</p><h3>Calibrate</h3><p>Steady state, then a measured fan and room</p></article>
+            <article class="road-stop"><p class="road-when">Later</p><h3>Decide for you</h3><p>Priorities, generated layouts, scores that explain trade-offs</p></article>
+          </div>
+          <video class="road-video" data-in="rise" muted loop playsinline preload="none" poster="../media/orbit-ir-a-poster.webp"><source src="../media/orbit-ir-a.webm" type="video/webm" /><source src="../media/orbit-ir-a.mp4" type="video/mp4" /></video>
+        </section>
+
+        <!-- 15 · Close -->
+        <section class="slide slide-light slide-close" aria-label="Thank you" data-notes="Test the change before you make it. That’s RoomShift. Thank you, and we’d love your questions.">
+          <h2 class="close-line" data-in="stretch">Move it here first.</h2>
+          <p class="close-sub" data-in="up">RoomShift. Test the room before you change it.</p>
+          <p class="close-links" data-in="up"><span>github.com/Kixenon/RoomShift</span></p>
+          <p class="credits" data-in="up">Built at HacKU 2026 with open-source Three.js, GSAP and Vite, the Archivo typeface, and Playwright for testing.</p>
+        </section>
+
+      </div>
+
+      <div class="wipe" aria-hidden="true"><span></span><span></span></div>
+    </div>
+
+    <div class="deck-ui" data-ui>
+      <div class="deck-progress"><span data-progress></span></div>
+      <div class="deck-controls">
+        <button type="button" data-prev aria-label="Previous slide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <span class="deck-count" data-count-label aria-live="polite">1 / 15</span>
+        <button type="button" data-next aria-label="Next slide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button type="button" data-overview aria-label="Show all slides (O)">Overview</button>
+        <button type="button" data-notes-toggle aria-label="Show presenter notes (N)" aria-pressed="false">Notes</button>
+        <button type="button" data-fullscreen aria-label="Full screen (F)">Full screen</button>
+        <a href="../">Site</a>
+      </div>
+      <aside class="deck-notes" data-notes-panel hidden aria-label="Presenter notes"></aside>
+    </div>
+
+    <script type="module" src="./slides.js"></script>
+  </body>
+</html>

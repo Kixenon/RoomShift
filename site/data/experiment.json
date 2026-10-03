@@ -1,0 +1,253 @@
+{
+ "solver": "RoomShift CPU preview, 0.15 m grid, 2 s simulated",
+ "zones": {
+  "desk": {
+   "x": [
+    3.55,
+    4.8
+   ],
+   "y": [
+    0.85,
+    1.35
+   ],
+   "z": [
+    0.3,
+    1.5
+   ]
+  },
+  "sofa": {
+   "x": [
+    3.45,
+    4.9
+   ],
+   "y": [
+    0.85,
+    1.35
+   ],
+   "z": [
+    2.65,
+    3.45
+   ]
+  }
+ },
+ "inputs": {
+  "distance": "fan to desk edge (m)",
+  "strength": "fan acceleration (m/s² source term)"
+ },
+ "outputs": {
+  "deskAir": "mean air speed at desk seat height (m/s)",
+  "sofaWarmth": "mean rise above 20 °C at sofa seat height (°C)"
+ },
+ "runs": [
+  {
+   "distance": 0.6,
+   "strength": 0,
+   "deskAir": 0,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0065
+  },
+  {
+   "distance": 0.6,
+   "strength": 1.5,
+   "deskAir": 0.474,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0401
+  },
+  {
+   "distance": 0.6,
+   "strength": 3,
+   "deskAir": 0.821,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0818
+  },
+  {
+   "distance": 0.6,
+   "strength": 4.5,
+   "deskAir": 1.057,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.1207
+  },
+  {
+   "distance": 0.6,
+   "strength": 6,
+   "deskAir": 1.243,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.1552
+  },
+  {
+   "distance": 0.6,
+   "strength": 7.5,
+   "deskAir": 1.389,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.1831
+  },
+  {
+   "distance": 1,
+   "strength": 0,
+   "deskAir": 0,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0065
+  },
+  {
+   "distance": 1,
+   "strength": 1.5,
+   "deskAir": 0.472,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0343
+  },
+  {
+   "distance": 1,
+   "strength": 3,
+   "deskAir": 0.919,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0716
+  },
+  {
+   "distance": 1,
+   "strength": 4.5,
+   "deskAir": 1.236,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.1092
+  },
+  {
+   "distance": 1,
+   "strength": 6,
+   "deskAir": 1.455,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.1419
+  },
+  {
+   "distance": 1,
+   "strength": 7.5,
+   "deskAir": 1.61,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.1673
+  },
+  {
+   "distance": 1.4,
+   "strength": 0,
+   "deskAir": 0,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0065
+  },
+  {
+   "distance": 1.4,
+   "strength": 1.5,
+   "deskAir": 0.353,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0312
+  },
+  {
+   "distance": 1.4,
+   "strength": 3,
+   "deskAir": 0.81,
+   "sofaWarmth": 0.025,
+   "rmsDivergence": 0.0626
+  },
+  {
+   "distance": 1.4,
+   "strength": 4.5,
+   "deskAir": 1.224,
+   "sofaWarmth": 0.025,
+   "rmsDivergence": 0.0958
+  },
+  {
+   "distance": 1.4,
+   "strength": 6,
+   "deskAir": 1.512,
+   "sofaWarmth": 0.025,
+   "rmsDivergence": 0.1282
+  },
+  {
+   "distance": 1.4,
+   "strength": 7.5,
+   "deskAir": 1.685,
+   "sofaWarmth": 0.025,
+   "rmsDivergence": 0.1531
+  },
+  {
+   "distance": 1.8,
+   "strength": 0,
+   "deskAir": 0,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0065
+  },
+  {
+   "distance": 1.8,
+   "strength": 1.5,
+   "deskAir": 0.194,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0297
+  },
+  {
+   "distance": 1.8,
+   "strength": 3,
+   "deskAir": 0.54,
+   "sofaWarmth": 0.025,
+   "rmsDivergence": 0.0582
+  },
+  {
+   "distance": 1.8,
+   "strength": 4.5,
+   "deskAir": 0.971,
+   "sofaWarmth": 0.025,
+   "rmsDivergence": 0.0866
+  },
+  {
+   "distance": 1.8,
+   "strength": 6,
+   "deskAir": 1.351,
+   "sofaWarmth": 0.024,
+   "rmsDivergence": 0.1154
+  },
+  {
+   "distance": 1.8,
+   "strength": 7.5,
+   "deskAir": 1.583,
+   "sofaWarmth": 0.024,
+   "rmsDivergence": 0.1405
+  },
+  {
+   "distance": 2.2,
+   "strength": 0,
+   "deskAir": 0,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0065
+  },
+  {
+   "distance": 2.2,
+   "strength": 1.5,
+   "deskAir": 0.112,
+   "sofaWarmth": 0.026,
+   "rmsDivergence": 0.0312
+  },
+  {
+   "distance": 2.2,
+   "strength": 3,
+   "deskAir": 0.349,
+   "sofaWarmth": 0.025,
+   "rmsDivergence": 0.0613
+  },
+  {
+   "distance": 2.2,
+   "strength": 4.5,
+   "deskAir": 0.733,
+   "sofaWarmth": 0.025,
+   "rmsDivergence": 0.0899
+  },
+  {
+   "distance": 2.2,
+   "strength": 6,
+   "deskAir": 1.136,
+   "sofaWarmth": 0.024,
+   "rmsDivergence": 0.1171
+  },
+  {
+   "distance": 2.2,
+   "strength": 7.5,
+   "deskAir": 1.416,
+   "sofaWarmth": 0.024,
+   "rmsDivergence": 0.1416
+  }
+ ]
+}

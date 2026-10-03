@@ -1,0 +1,146 @@
+{
+ "solver": "RoomShift CPU preview",
+ "fanAcceleration": 4.5,
+ "samples": [
+  {
+   "distance": 0.225,
+   "speed": 1.1461
+  },
+  {
+   "distance": 0.375,
+   "speed": 1.3435
+  },
+  {
+   "distance": 0.525,
+   "speed": 1.5123
+  },
+  {
+   "distance": 0.675,
+   "speed": 1.6583
+  },
+  {
+   "distance": 0.825,
+   "speed": 1.7853
+  },
+  {
+   "distance": 0.975,
+   "speed": 1.8963
+  },
+  {
+   "distance": 1.125,
+   "speed": 1.9929
+  },
+  {
+   "distance": 1.275,
+   "speed": 2.0755
+  },
+  {
+   "distance": 1.425,
+   "speed": 2.1419
+  },
+  {
+   "distance": 1.575,
+   "speed": 2.1863
+  },
+  {
+   "distance": 1.725,
+   "speed": 2.2184
+  },
+  {
+   "distance": 1.875,
+   "speed": 2.1613
+  },
+  {
+   "distance": 2.025,
+   "speed": 2.0956
+  },
+  {
+   "distance": 2.175,
+   "speed": 1.9802
+  },
+  {
+   "distance": 2.325,
+   "speed": 1.7995
+  },
+  {
+   "distance": 2.475,
+   "speed": 1.5442
+  },
+  {
+   "distance": 2.625,
+   "speed": 1.215
+  },
+  {
+   "distance": 2.775,
+   "speed": 0.8654
+  },
+  {
+   "distance": 2.925,
+   "speed": 0.5801
+  },
+  {
+   "distance": 3.075,
+   "speed": 0.3851
+  },
+  {
+   "distance": 3.225,
+   "speed": 0.2599
+  },
+  {
+   "distance": 3.375,
+   "speed": 0.1798
+  },
+  {
+   "distance": 3.525,
+   "speed": 0.1272
+  },
+  {
+   "distance": 3.675,
+   "speed": 0.0918
+  },
+  {
+   "distance": 3.825,
+   "speed": 0.0673
+  },
+  {
+   "distance": 3.975,
+   "speed": 0.0498
+  },
+  {
+   "distance": 4.125,
+   "speed": 0.0372
+  },
+  {
+   "distance": 4.275,
+   "speed": 0.0279
+  },
+  {
+   "distance": 4.425,
+   "speed": 0.021
+  },
+  {
+   "distance": 4.575,
+   "speed": 0.0156
+  },
+  {
+   "distance": 4.725,
+   "speed": 0.0115
+  },
+  {
+   "distance": 4.875,
+   "speed": 0.0082
+  },
+  {
+   "distance": 5.025,
+   "speed": 0.0054
+  },
+  {
+   "distance": 5.175,
+   "speed": 0.0036
+  },
+  {
+   "distance": 5.325,
+   "speed": 0.0007
+  }
+ ]
+}
