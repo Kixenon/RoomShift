@@ -1,7 +1,10 @@
 import {
   MODEL_PRESETS,
+  DEVICE_MODELS,
   addObject,
+  addDevice,
   addWindow,
+  addDoor,
   moveObject,
   removeObject,
   renameObject,
@@ -10,20 +13,19 @@ import {
   rotateObject,
   setObjectModel,
   setObjectIntensity,
-  setFanEnabled,
+  setDeviceEnabled,
   setWindowFlow,
   setWindowOpen,
   setWindowWall,
 } from './model/room-scene.js';
+import { isOpeningObject } from './model/openings.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
 import { temperatureDisplayRange } from './simulation/room-field-display.js';
 import {
   createEditorState,
-  resetEditorState,
   selectObject as selectEditorObject,
   setTransformMode as setEditorTransformMode,
-  setView as setEditorView,
 } from './model/editor-state.js';
 import { RoomViewport } from './scene/room-viewport.js';
 
@@ -47,13 +49,16 @@ const fieldControls = {
   airflow: $('#show-airflow'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
-  display: $('#field-display-controls'),
-  displayButtons: [...document.querySelectorAll('[data-display-style]')],
+  display: $('#field-display-control'),
+  displayButton: $('#field-display-button'),
+  displayLabel: $('#field-display-label'),
+  displayMenu: $('#field-display-menu'),
   sliceControl: $('#slice-height-control'),
+  sliceSummary: $('#slice-height-summary'),
   sliceHeight: $('#slice-height'),
   sliceValue: $('#slice-height-value'),
   editorStatus: $('#editor-status'),
-  status: $('#field-status'),
+  loading: $('#field-loading'),
   legend: $('#field-legend'),
   legendTitle: $('#field-legend-title'),
   gradient: $('#field-gradient'),
@@ -61,10 +66,9 @@ const fieldControls = {
   legendMax: $('#field-legend-max'),
 };
 const timeControls = {
-  group: $('#time-controls'),
+  group: $('#room-daylight-control'),
   clock: $('#clock-label'),
   slider: $('#time-of-day'),
-  lamps: $('#lamps-toggle'),
 };
 
 let editorState = createEditorState();
@@ -105,34 +109,18 @@ function updateScene(scene, { record = !isDragging } = {}) {
 function renderTimeOfDay() {
   const state = viewport?.daylightState;
   if (!state) return;
+  timeControls.slider.value = String(viewport.timeMinutes);
   timeControls.clock.textContent = state.clock;
   timeControls.clock.title = state.sun.altitude > 0
     ? `Sun ${state.sun.altitude.toFixed(0)}° up, bearing ${Math.round(state.sun.azimuth)}°. ${state.site.name}.`
     : `Sun below the horizon. ${state.site.name}.`;
-  // The button is a lamp switch, so it reads as on whenever the lamps are lit,
-  // whether dusk turned them on or the user did. Only the explanation differs.
-  setPressed(timeControls.lamps, state.lampsOn);
-  timeControls.lamps.setAttribute('aria-label', state.lampsOn ? 'Switch the lamps off' : 'Switch the lamps on');
-  const manual = viewport.lampsOverride !== null;
-  timeControls.lamps.title = state.lampsOn
-    ? `Lamps on${manual ? ', set by hand' : ', following dusk'}. Click to switch them off.`
-    : `Lamps off${manual ? ', set by hand' : ''}. Click to switch them on.`;
 }
 
 timeControls.slider.addEventListener('input', () => {
   viewport.setTimeOfDay({ timeMinutes: Number(timeControls.slider.value) });
   renderTimeOfDay();
 });
-timeControls.lamps.addEventListener('click', () => {
-  // A plain on/off switch. It flips whatever the lamps are doing now, so it can
-  // switch them off at night as well as on during the day; the dusk threshold
-  // only decides the state until the first click.
-  const next = !(viewport?.daylightState?.lampsOn ?? false);
-  viewport.setTimeOfDay({ lampsOverride: next });
-  renderTimeOfDay();
-});
-
-function renderFieldState({ mode, loading, result, error, stale }) {
+function renderFieldState({ mode, loading, result, error }) {
   const viewportElement = $('#viewport');
   const displayStyle = fieldController?.displayStyle;
   for (const [name, button] of Object.entries({
@@ -140,40 +128,48 @@ function renderFieldState({ mode, loading, result, error, stale }) {
     temperature: fieldControls.temperature,
     light: fieldControls.light,
   })) setPressed(button, mode === name);
-  fieldControls.display.hidden = !mode;
   const availableStyles = {
     airflow: ['gas', 'volume', 'slice'],
     temperature: ['surfaces', 'volume', 'slice'],
     light: ['preview', 'map'],
   }[mode] ?? [];
   const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
-  for (const button of fieldControls.displayButtons) {
-    const style = button.dataset.displayStyle;
-    button.hidden = !availableStyles.includes(style);
-    button.textContent = styleLabels[style] ?? style;
-    button.setAttribute('aria-pressed', String(style === displayStyle));
-  }
+  fieldControls.display.hidden = !mode;
+  if (!mode) fieldControls.display.open = false;
+  fieldControls.displayButton.setAttribute('aria-label', `Choose ${mode ?? 'field'} view`);
+  fieldControls.displayButton.title = displayStyle ? `${styleLabels[displayStyle]} view` : 'Choose view';
+  fieldControls.displayButton.setAttribute('aria-expanded', String(fieldControls.display.open));
+  fieldControls.displayLabel.textContent = styleLabels[displayStyle] ?? 'View';
+  fieldControls.displayMenu.setAttribute('aria-label', `${mode ?? 'Field'} view options`);
+  fieldControls.displayMenu.replaceChildren(...availableStyles.map((style) => {
+    const option = document.createElement('button');
+    option.className = 'field-display-option';
+    option.type = 'button';
+    option.setAttribute('role', 'menuitemradio');
+    option.setAttribute('aria-checked', String(style === displayStyle));
+    option.dataset.displayStyle = style;
+    option.textContent = styleLabels[style];
+    return option;
+  }));
   const showSlice = (mode === 'airflow' || mode === 'temperature') && displayStyle === 'slice';
   fieldControls.sliceControl.hidden = !showSlice;
   if (fieldController?.scene) {
     fieldControls.sliceHeight.max = String(fieldController.scene.room.height);
     fieldControls.sliceHeight.value = String(fieldController.sliceHeight);
     fieldControls.sliceValue.textContent = `${fieldController.sliceHeight.toFixed(2)} m`;
+    fieldControls.sliceSummary.textContent = `Slice · ${fieldController.sliceHeight.toFixed(2)} m`;
   }
   viewportElement.classList.toggle('field-active', Boolean(mode));
   viewportElement.setAttribute('aria-busy', String(loading));
+  fieldControls.loading.hidden = !loading && !error;
+  fieldControls.loading.classList.toggle('has-error', Boolean(error));
+  fieldControls.loading.title = error?.message ?? '';
+  fieldControls.loading.setAttribute('aria-label', error ? `Simulation unavailable: ${error.message}` : 'Updating simulation');
   fieldControls.legend.hidden = !mode || (!result && !(mode === 'light' && displayStyle === 'preview'));
-  fieldControls.status.textContent = loading ? (mode === 'light' ? 'Estimating…' : 'Solving…') : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
-  fieldControls.status.title = error?.message ?? '';
   const showDaylightControls = mode === 'light' && displayStyle === 'preview';
   timeControls.group.hidden = !showDaylightControls;
   if (showDaylightControls) {
     renderTimeOfDay();
-    // The active mode is already named by the pressed button and the clock
-    // reports the time, so there is nothing worth saying here. Keep the
-    // transient states, which are the only part that carries new information.
-    fieldControls.status.textContent = loading ? 'Preparing…' : error ? 'Unavailable' : stale ? 'Out of date · updating' : '';
-    fieldControls.status.title = error?.message ?? '';
     fieldControls.gradient.dataset.mode = 'light';
     fieldControls.legendTitle.textContent = 'Lighting · shadow preview';
     fieldControls.legendMin.textContent = 'shadow';
@@ -235,6 +231,26 @@ function restoreSnapshot(snapshot) {
   viewport.setMode(transformMode);
 }
 
+function setProjection(projection) {
+  viewport.setProjection(projection);
+  const orthographic = viewport.projection === 'orthographic';
+  const button = $('#toggle-projection');
+  button.dataset.projection = viewport.projection;
+  button.setAttribute('aria-pressed', String(orthographic));
+}
+
+function setTransformMode(mode) {
+  transformMode = mode;
+  editorState = setEditorTransformMode(editorState, mode);
+  viewport.setMode(mode);
+  const rotating = mode === 'rotate';
+  const button = $('#transform-mode-toggle');
+  button.dataset.mode = mode;
+  button.setAttribute('aria-pressed', String(rotating));
+  button.setAttribute('aria-label', rotating ? 'Rotate mode' : 'Move mode');
+  button.title = `${rotating ? 'Rotate' : 'Move'} mode (${rotating ? 'R' : 'G'}); click to switch`;
+}
+
 function undo() {
   const snapshot = history.undo(currentSnapshot());
   if (snapshot) restoreSnapshot(snapshot);
@@ -245,21 +261,17 @@ function redo() {
   if (snapshot) restoreSnapshot(snapshot);
 }
 
-function updateRoomSummary() {
-  const { width, depth, height } = roomScene.room;
-  $('#room-summary').textContent = `${width.toFixed(1)} × ${depth.toFixed(1)} × ${height.toFixed(1)} m`;
+function syncRoomInputs() {
   for (const [dimension, input] of Object.entries(roomInputs)) input.value = roomScene.room[dimension];
   outdoorTemperatureInput.value = roomScene.room.outdoorTemperature ?? 10;
 }
 
 function renderObjectList() {
   objectList.innerHTML = roomScene.objects.map((object) => {
-    const model = MODEL_PRESETS[object.model] ?? MODEL_PRESETS.box;
     return `
       <button class="object-row ${object.id === selectedId ? 'selected' : ''}" type="button" data-select-object="${escapeHtml(object.id)}" aria-pressed="${object.id === selectedId}">
-        <span class="object-row-icon" aria-hidden="true">${escapeHtml(model.icon)}</span>
+        <span class="object-row-icon" aria-hidden="true">${escapeHtml((MODEL_PRESETS[object.model] ?? MODEL_PRESETS.box).icon)}</span>
         <span class="object-row-name">${escapeHtml(object.name)}</span>
-        <span class="object-type">${escapeHtml(model.label)}</span>
       </button>
     `;
   }).join('');
@@ -271,7 +283,9 @@ function propertyField(label, axis, value, kind, limits = {}) {
 
 function renderProperties() {
   const object = selectedObject();
-  const isWindow = object?.model === 'window';
+  const isOpening = isOpeningObject(object);
+  const isDevice = DEVICE_MODELS.includes(object?.model);
+  const openingLabel = object?.model === 'door' ? 'Door' : 'Window';
   const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative' };
   const sourceLabel = sourceLabels[object?.model];
   const intensity = object?.intensity ?? 1;
@@ -281,73 +295,72 @@ function renderProperties() {
     return;
   }
 
-  const maxWindowWidth = object.wall === 'back' || object.wall === 'front' ? roomScene.room.width - 0.2 : roomScene.room.depth - 0.2;
+  const maxOpeningWidth = object.wall === 'back' || object.wall === 'front' ? roomScene.room.width - 0.2 : roomScene.room.depth - 0.2;
   const dimensionLimits = {
     width: { min: 0.1, max: roomScene.room.width },
     height: { min: 0.1, max: roomScene.room.height },
     depth: { min: 0.1, max: roomScene.room.depth },
   };
-  const modelOptions = Object.entries(MODEL_PRESETS).filter(([key]) => key !== 'window').map(([key, model]) => (
+  const modelOptions = Object.entries(MODEL_PRESETS).filter(([key]) => !DEVICE_MODELS.includes(key) && !['window', 'door'].includes(key)).map(([key, model]) => (
     `<option value="${escapeHtml(key)}">${escapeHtml(model.label)}</option>`
   )).join('');
   properties.innerHTML = `
     <div class="properties-form">
       <label class="property-field property-name-field"><span>Name</span><input class="property-input" type="text" maxlength="80" data-object-name aria-label="Object name" /></label>
-      ${isWindow ? `
-        <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="Window wall">
+      ${isOpening ? `
+        <label class="property-field"><span>Wall</span><select class="property-input" data-window-wall aria-label="${openingLabel} wall">
           <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
         </select></label>
-        <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="Window open" ${object.open ? 'checked' : ''} /><span>${object.open ? 'Open · airflow active' : 'Closed'}</span></label>
-        <label class="property-field"><span>Window pressure</span><select class="property-input" data-window-flow-direction aria-label="Window exterior pressure direction">
+        <label class="window-open-toggle"><input type="checkbox" data-window-open aria-label="${openingLabel} open" ${object.open ? 'checked' : ''} /><span>Open</span></label>
+        <label class="property-field"><span>Exterior pressure</span><select class="property-input" data-window-flow-direction aria-label="Opening exterior pressure direction">
           <option value="exchange">Stack exchange · two-way</option><option value="inlet">Positive pressure · intake bias</option><option value="outlet">Negative pressure · exhaust bias</option>
         </select></label>
         <div class="property-group">
           <div class="range-heading"><span>Outside wind</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
           <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Exterior wind speed in meters per second" />
         </div>
-      ` : `<label class="property-field"><span>Model</span><select class="property-input" data-object-model aria-label="Box model">${modelOptions}</select></label>`}
+      ` : isDevice ? '' : `<label class="property-field"><span>Type</span><select class="property-input" data-object-model aria-label="Object type">${modelOptions}</select></label>`}
       <div class="property-group">
         <div class="property-label">Position · m</div>
         <div class="property-fields">
-          ${propertyField('X', 'x', object.position.x, 'position', { min: 0, max: roomScene.room.width })}
-          ${propertyField('Y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height })}
-          ${propertyField('Z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
+          ${propertyField('x', 'x', object.position.x, 'position', { min: 0, max: roomScene.room.width })}
+          ${propertyField('y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height })}
+          ${propertyField('z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
         </div>
       </div>
       ${sourceLabel ? `<div class="property-group">
-        ${object.model === 'fan' ? `<label class="window-open-toggle"><input type="checkbox" data-fan-enabled ${object.enabled !== false ? 'checked' : ''} /><span>${object.enabled !== false ? 'Fan running' : 'Fan off'}</span></label>` : ''}
+        <label class="window-open-toggle"><input type="checkbox" data-device-enabled aria-label="Device on" ${object.enabled !== false ? 'checked' : ''} /><span>On</span></label>
         <div class="range-heading"><span>${sourceLabel}</span><output data-range-output>${intensity.toFixed(2)}×</output></div>
         <input class="property-slider" type="range" min="0" max="2" step="0.05" value="${intensity}" data-source-intensity aria-label="${sourceLabel}" />
       </div>` : ''}
       <div class="property-group">
         <div class="property-label">Size · m</div>
         <div class="property-fields">
-          ${propertyField('W', 'width', object.dimensions.width, 'dimension', isWindow ? { min: 0.4, max: maxWindowWidth } : dimensionLimits.width)}
-          ${propertyField('H', 'height', object.dimensions.height, 'dimension', isWindow ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
-          ${isWindow ? '' : propertyField('D', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
+          ${propertyField('w', 'width', object.dimensions.width, 'dimension', isOpening ? { min: 0.4, max: maxOpeningWidth } : dimensionLimits.width)}
+          ${propertyField('h', 'height', object.dimensions.height, 'dimension', isOpening ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
+          ${isOpening ? '' : propertyField('d', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
         </div>
       </div>
-      ${isWindow ? '' : `<div class="property-group">
+      ${isOpening ? '' : `<div class="property-group">
         <div class="property-label">Rotation · °</div>
         <div class="property-fields rotation-fields">
-          ${propertyField('X', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
-          ${propertyField('Y', 'y', object.rotation.y, 'rotation', { min: -180, max: 180 })}
-          ${propertyField('Z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
+          ${propertyField('x', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
+          ${propertyField('y', 'y', object.rotation.y, 'rotation', { min: -180, max: 180 })}
+          ${propertyField('z', 'z', object.rotation.z, 'rotation', { min: -180, max: 180 })}
         </div>
       </div>`}
-      <div class="properties-note">${isWindow ? 'Drag the window toward a wall to snap it into place.' : 'Drag the gizmo to move or rotate.'}</div>
     </div>
   `;
   properties.querySelector('[data-object-name]').value = object.name;
-  if (isWindow) {
+  if (isOpening) {
     properties.querySelector('[data-window-wall]').value = object.wall ?? 'back';
     properties.querySelector('[data-window-flow-direction]').value = object.flowDirection ?? 'exchange';
   }
-  else properties.querySelector('[data-object-model]').value = object.model;
+  else if (!isDevice) properties.querySelector('[data-object-model]').value = object.model;
 }
 
 function renderInspector() {
-  updateRoomSummary();
+  syncRoomInputs();
   renderObjectList();
   renderProperties();
 }
@@ -357,7 +370,7 @@ function handleTransform(objectId, position, rotation) {
     ? rotateObject(roomScene, objectId, rotation)
     : moveObject(roomScene, objectId, position);
   updateScene(result.scene, { record: false });
-  updateRoomSummary();
+  syncRoomInputs();
   syncPropertyInputs(result.object);
   return result;
 }
@@ -376,9 +389,21 @@ function refreshScene() {
   renderInspector();
 }
 
-function addBox() {
+function addRoomObject() {
   try {
     const result = addObject(roomScene);
+    updateScene(result.scene);
+    updateSelection(result.object.id);
+    setEditorStatus('');
+    refreshScene();
+  } catch (error) {
+    setEditorStatus(error.message);
+  }
+}
+
+function addRoomDevice(model) {
+  try {
+    const result = addDevice(roomScene, model);
     updateScene(result.scene);
     updateSelection(result.object.id);
     setEditorStatus('');
@@ -400,22 +425,65 @@ function addRoomWindow() {
   }
 }
 
+function addRoomDoor() {
+  try {
+    const result = addDoor(roomScene);
+    updateScene(result.scene);
+    updateSelection(result.object.id);
+    setEditorStatus('');
+    refreshScene();
+  } catch (error) {
+    setEditorStatus(error.message);
+  }
+}
+
 function toggleFieldMode(mode) {
+  fieldControls.display.open = false;
   fieldController.setMode(fieldController.mode === mode ? null : mode);
 }
 
-$('#add-box').addEventListener('click', addBox);
+$('#add-object').addEventListener('click', addRoomObject);
+for (const model of DEVICE_MODELS) {
+  $(`#add-${model}`).addEventListener('click', () => addRoomDevice(model));
+}
 $('#add-window').addEventListener('click', addRoomWindow);
+$('#add-door').addEventListener('click', addRoomDoor);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
-fieldControls.display.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-display-style]');
-  if (button && !button.hidden) fieldController.setDisplayStyle(button.dataset.displayStyle);
+fieldControls.displayMenu.addEventListener('click', (event) => {
+  const option = event.target.closest('[data-display-style]');
+  if (!option) return;
+  fieldController.setDisplayStyle(option.dataset.displayStyle);
+  fieldControls.display.open = false;
+});
+fieldControls.display.addEventListener('toggle', () => {
+  fieldControls.displayButton.setAttribute('aria-expanded', String(fieldControls.display.open));
+});
+document.addEventListener('click', (event) => {
+  if (!fieldControls.display.contains(event.target)) fieldControls.display.open = false;
 });
 fieldControls.sliceHeight.addEventListener('input', () => fieldController.setSliceHeight(Number(fieldControls.sliceHeight.value)));
 
-objectList.addEventListener('click', (event) => {
+const editorLayout = $('#editor-layout');
+const assetRailToggle = $('#toggle-asset-rail');
+const inspectorToggle = $('#toggle-inspector');
+function togglePanel(button, className, label, collapsedClass) {
+  const collapsed = editorLayout.classList.toggle(className);
+  button.setAttribute('aria-expanded', String(!collapsed));
+  button.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${label} menu`);
+  button.title = `${collapsed ? 'Expand' : 'Collapse'} ${label} menu`;
+  button.dataset.collapsed = String(collapsed);
+  collapsedClass?.(collapsed);
+}
+assetRailToggle.addEventListener('click', () => togglePanel(assetRailToggle, 'asset-rail-collapsed', 'asset', (collapsed) => {
+  $('#asset-rail').classList.toggle('is-collapsed', collapsed);
+}));
+inspectorToggle.addEventListener('click', () => togglePanel(inspectorToggle, 'inspector-collapsed', 'properties', (collapsed) => {
+  $('.inspector').classList.toggle('is-collapsed', collapsed);
+}));
+
+$('.object-list-section').addEventListener('click', (event) => {
   const row = event.target.closest('[data-select-object]');
   if (!row) return;
   updateSelection(row.dataset.selectObject);
@@ -468,8 +536,8 @@ properties.addEventListener('change', (event) => {
       updateScene(setWindowOpen(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-wall]')) {
       updateScene(setWindowWall(roomScene, object.id, input.value).scene);
-    } else if (input.matches('[data-fan-enabled]')) {
-      updateScene(setFanEnabled(roomScene, object.id, input.checked).scene);
+    } else if (input.matches('[data-device-enabled]')) {
+      updateScene(setDeviceEnabled(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-flow-direction]')) {
       updateScene(setWindowFlow(roomScene, object.id, input.value, object.flowRate ?? 0.35).scene);
     } else if (input.matches('[data-window-flow-rate]')) {
@@ -518,66 +586,30 @@ $('#delete-object').addEventListener('click', () => {
   refreshScene();
 });
 
-$('#reset-scene').addEventListener('click', () => {
-  recordHistory();
-  fieldController.setMode(null);
-  editorState = resetEditorState();
-  roomScene = editorState.scene;
-  selectedId = editorState.selectedId;
-  transformMode = editorState.transformMode;
-  $('#mode-move').classList.add('active');
-  $('#mode-rotate').classList.remove('active');
-  viewport.fitRoom(true);
-  viewport.setProjection('perspective');
-  setCameraView('3d');
-  refreshScene();
-  viewport.setMode(transformMode);
+$('#transform-mode-toggle').addEventListener('click', () => {
+  setTransformMode(transformMode === 'translate' ? 'rotate' : 'translate');
 });
 
-$('#mode-move').addEventListener('click', () => {
-  transformMode = 'translate';
-  editorState = setEditorTransformMode(editorState, transformMode);
-  viewport.setMode(transformMode);
-  $('#mode-move').classList.add('active');
-  $('#mode-rotate').classList.remove('active');
+$('#toggle-projection').addEventListener('click', () => {
+  setProjection(viewport.projection === 'perspective' ? 'orthographic' : 'perspective');
 });
-
-$('#mode-rotate').addEventListener('click', () => {
-  transformMode = 'rotate';
-  editorState = setEditorTransformMode(editorState, transformMode);
-  viewport.setMode(transformMode);
-  $('#mode-rotate').classList.add('active');
-  $('#mode-move').classList.remove('active');
-});
-
-function setCameraView(view) {
-  editorState = setEditorView(editorState, view);
-  viewport.setView(view);
-  $('#view-3d').classList.toggle('active', view === '3d');
-  $('#view-top').classList.toggle('active', view === 'top');
-  $('#projection-perspective').classList.toggle('active', viewport.projection === 'perspective');
-  $('#projection-orthographic').classList.toggle('active', viewport.projection === 'orthographic');
-  $('#view-3d').setAttribute('aria-pressed', String(view === '3d'));
-  $('#view-top').setAttribute('aria-pressed', String(view === 'top'));
-  $('#projection-perspective').setAttribute('aria-pressed', String(viewport.projection === 'perspective'));
-  $('#projection-orthographic').setAttribute('aria-pressed', String(viewport.projection === 'orthographic'));
+const cameraViewPicker = $('#camera-view-picker');
+const cameraViewPickerButton = $('#camera-view-picker-button');
+function setCameraViewSelection(view) {
+  for (const item of cameraViewPicker.querySelectorAll('[data-camera-view]')) {
+    item.setAttribute('aria-checked', String(item.dataset.cameraView === view));
+  }
 }
-
-$('#view-3d').addEventListener('click', () => setCameraView('3d'));
-$('#view-top').addEventListener('click', () => setCameraView('top'));
-$('#projection-perspective').addEventListener('click', () => {
-  viewport.setProjection('perspective');
-  setCameraView(editorState.view);
+cameraViewPicker.addEventListener('toggle', () => {
+  cameraViewPickerButton.setAttribute('aria-expanded', String(cameraViewPicker.open));
 });
-$('#projection-orthographic').addEventListener('click', () => {
-  viewport.setProjection('orthographic');
-  setCameraView(editorState.view);
-});
-
-$('#view-home').addEventListener('click', () => {
-  viewport.setProjection('perspective');
-  viewport.fitRoom(true);
-  setCameraView('3d');
+cameraViewPicker.addEventListener('click', (event) => {
+  const option = event.target.closest('[data-camera-view]');
+  if (!option) return;
+  if (option.dataset.cameraView === 'top') viewport.snapToTop();
+  else viewport.fitRoom();
+  setCameraViewSelection(option.dataset.cameraView);
+  cameraViewPicker.open = false;
 });
 
 document.addEventListener('keydown', (event) => {
@@ -593,27 +625,35 @@ document.addEventListener('keydown', (event) => {
     redo();
     return;
   }
-  if (key === 'g') $('#mode-move').click();
-  if (key === 'r') $('#mode-rotate').click();
-  if (key === 'o') $('#projection-orthographic').click();
+  if (key === 'g') setTransformMode('translate');
+  if (key === 'r') setTransformMode('rotate');
+  if (key === 'o') $('#toggle-projection').click();
   if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) $('#delete-object').click();
 });
 
 const shortcutHelp = $('#shortcut-help');
-$('#show-shortcuts').addEventListener('click', () => {
-  shortcutHelp.hidden = !shortcutHelp.hidden;
-  $('#show-shortcuts').setAttribute('aria-expanded', String(!shortcutHelp.hidden));
+const shortcutButton = $('#show-shortcuts');
+const viewportInfo = $('.viewport-info');
+function setShortcutHelpOpen(open) {
+  shortcutHelp.hidden = !open;
+  shortcutButton.setAttribute('aria-expanded', String(open));
+}
+viewportInfo.addEventListener('pointerenter', () => setShortcutHelpOpen(true));
+viewportInfo.addEventListener('pointerleave', () => {
+  if (!viewportInfo.contains(document.activeElement)) setShortcutHelpOpen(false);
+});
+viewportInfo.addEventListener('focusin', () => setShortcutHelpOpen(true));
+viewportInfo.addEventListener('focusout', (event) => {
+  if (!viewportInfo.contains(event.relatedTarget) && !viewportInfo.matches(':hover')) setShortcutHelpOpen(false);
 });
 document.addEventListener('pointerdown', (event) => {
-  if (!event.target.closest('.viewport-info')) {
-    shortcutHelp.hidden = true;
-    $('#show-shortcuts').setAttribute('aria-expanded', 'false');
-  }
+  if (!cameraViewPicker.contains(event.target)) cameraViewPicker.open = false;
+  if (!viewportInfo.contains(event.target) && !viewportInfo.matches(':hover')) setShortcutHelpOpen(false);
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
-    shortcutHelp.hidden = true;
-    $('#show-shortcuts').setAttribute('aria-expanded', 'false');
+    cameraViewPicker.open = false;
+    setShortcutHelpOpen(false);
   }
 });
 
@@ -634,8 +674,11 @@ viewport = new RoomViewport($('#viewport'), {
       dragSnapshot = null;
     }
   },
+  onCameraViewChange: setCameraViewSelection,
 });
 viewport.setScene(roomScene, selectedId);
+setProjection('perspective');
+setTransformMode(transformMode);
 renderInspector();
 fieldController = new RoomFieldController({
   worker: new Worker(new URL('./simulation/room-field-worker.js', import.meta.url), { type: 'module' }),

@@ -4,95 +4,76 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f6f3" />
-    <title>RoomShift — Room editor</title>
+    <title>RoomShift</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <a class="brand" href="#" aria-label="RoomShift">
-        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><path d="M4 8.5 14 3l10 5.5v11L14 25 4 19.5v-11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 15 3.2 3.2L19.5 11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        <span>roomshift<span class="brand-period">.</span></span>
-      </a>
-      <div class="scene-title"><span class="scene-dot"></span><span>Living room</span><span class="title-divider">/</span><span id="room-summary">5.2 × 4.0 × 2.7 m</span></div>
-      <button class="quiet-button" id="reset-scene" type="button" title="Reset room">Reset</button>
-    </header>
-
-    <main class="editor-layout">
-      <aside class="asset-rail" aria-label="Add objects">
-        <div class="rail-title">ADD</div>
-        <button class="asset-button" id="add-box" data-add-box type="button" aria-label="Add box" title="Add box">
-          <span class="asset-glyph">□</span><span>Box</span>
+    <main class="editor-layout" id="editor-layout">
+      <aside class="asset-rail" id="asset-rail" aria-label="Asset tools">
+        <button id="toggle-asset-rail" class="panel-toggle" type="button" aria-controls="asset-items" aria-expanded="true" aria-label="Collapse asset menu" title="Collapse asset menu">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 4-6 6 6 6" /></svg>
         </button>
-        <button class="asset-button" id="add-window" type="button" aria-label="Add window" title="Add window">
-          <span class="asset-glyph">▣</span><span>Window</span>
-        </button>
+        <div class="asset-items" id="asset-items">
+          <button class="asset-button" id="add-object" type="button" aria-label="Add object" title="Add object">
+            <span class="asset-glyph">□</span><span>Object</span>
+          </button>
+          <button class="asset-button" id="add-fan" type="button" aria-label="Add fan" title="Add fan">
+            <span class="asset-glyph">✳</span><span>Fan</span>
+          </button>
+          <button class="asset-button" id="add-heater" type="button" aria-label="Add heater" title="Add heater">
+            <span class="asset-glyph">▥</span><span>Heater</span>
+          </button>
+          <button class="asset-button" id="add-lamp" type="button" aria-label="Add lamp" title="Add lamp">
+            <span class="asset-glyph">◉</span><span>Lamp</span>
+          </button>
+          <button class="asset-button" id="add-window" type="button" aria-label="Add window" title="Add window">
+            <span class="asset-glyph">▣</span><span>Window</span>
+          </button>
+          <button class="asset-button" id="add-door" type="button" aria-label="Add door" title="Add door">
+            <span class="asset-glyph">▯</span><span>Door</span>
+          </button>
+        </div>
       </aside>
 
       <section class="viewport-wrap" aria-label="3D room">
         <div class="viewport-topline">
-          <div class="camera-controls">
-            <div class="view-toggle" role="group" aria-label="Camera view">
-            <button id="view-3d" class="view-button active" type="button" aria-pressed="true">3D</button>
-            <button id="view-top" class="view-button" type="button" aria-pressed="false">Top</button>
-            </div>
-            <div class="view-toggle" role="group" aria-label="Projection">
-              <button id="projection-perspective" class="view-button active" type="button" aria-pressed="true">Persp</button>
-              <button id="projection-orthographic" class="view-button" type="button" aria-pressed="false" title="Orthographic projection (O)">Ortho</button>
-            </div>
-          </div>
           <div class="simulation-controls">
             <div class="field-controls" role="group" aria-label="Simulation and lighting views">
-              <button id="show-airflow" class="field-button" type="button" aria-label="Show airflow map" aria-pressed="false">Air</button>
-              <button id="show-temperature" class="field-button" type="button" aria-label="Show temperature map" aria-pressed="false">Heat</button>
-              <button id="show-light" class="field-button" type="button" aria-label="Show monochrome lighting preview" aria-pressed="false">Light</button>
-              <span class="time-controls" id="time-controls" hidden>
-                <span class="time-clock" id="clock-label">13:30</span>
-                <input id="time-of-day" type="range" min="0" max="1439" step="5" value="810" aria-label="Time of day" />
-                <button id="lamps-toggle" class="tool-button" type="button" aria-pressed="false" aria-label="Switch the lamps on">Lamps</button>
-              </span>
-              <span id="field-status" class="field-status" aria-live="polite"></span>
+              <button id="show-airflow" class="field-button" type="button" aria-label="Airflow mode" title="Airflow" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h11a2.5 2.5 0 1 0-2.3-3.5M2 12h17a2.5 2.5 0 1 1-2.3 3.5M4 17h9" /></svg>
+              </button>
+              <button id="show-temperature" class="field-button" type="button" aria-label="Heat mode" title="Heat" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14.7V5a3 3 0 1 1 6 0v9.7a5 5 0 1 1-6 0Z" /><path d="M12 17V7" /></svg>
+              </button>
+              <button id="show-light" class="field-button" type="button" aria-label="Light mode" title="Light" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5" /><path d="M12 2v3m0 14v3M4.9 4.9 7 7m10 10 2.1 2.1M2 12h3m14 0h3M4.9 19.1 7 17m10-10 2.1-2.1" /></svg>
+              </button>
+              <details id="field-display-control" class="field-display-control" hidden>
+                <summary id="field-display-button" aria-haspopup="menu" aria-expanded="false" title="Choose view"><span id="field-display-label">View</span></summary>
+                <div id="field-display-menu" class="field-display-menu" role="menu" aria-label="Mode view options"></div>
+              </details>
             </div>
-            <div id="field-display-controls" class="display-controls" role="group" aria-label="Field display" hidden>
-              <span class="display-label">DISPLAY</span>
-              <button class="display-button" data-display-style="gas" type="button" aria-pressed="false">Gas</button>
-              <button class="display-button" data-display-style="surfaces" type="button" aria-pressed="false">Surfaces</button>
-              <button class="display-button" data-display-style="volume" type="button" aria-pressed="false">Volume</button>
-              <button class="display-button" data-display-style="slice" type="button" aria-pressed="false">Slice</button>
-              <button class="display-button" data-display-style="preview" type="button" aria-pressed="false">Preview</button>
-              <button class="display-button" data-display-style="map" type="button" aria-pressed="false">Map</button>
-            </div>
-            <label id="slice-height-control" class="slice-height-control" hidden>
-              <span>Slice height</span>
-              <input id="slice-height" type="range" min="0" max="2.7" step="0.05" value="1.2" aria-label="Simulation slice height in meters" />
-              <output id="slice-height-value">1.20 m</output>
-            </label>
+            <details id="slice-height-control" class="slice-height-control" hidden>
+              <summary id="slice-height-summary">Slice · 1.20 m</summary>
+              <div class="parameter-menu slice-height-menu">
+                <input id="slice-height" type="range" min="0" max="2.7" step="0.05" value="1.2" aria-label="Simulation slice height in meters" />
+                <output id="slice-height-value">1.20 m</output>
+              </div>
+            </details>
             <span id="editor-status" class="editor-status" aria-live="polite"></span>
           </div>
-          <div class="viewport-actions" role="group" aria-label="Object transform mode">
-            <button id="mode-move" class="tool-button active" type="button" title="Move selected object (G)" aria-label="Move selected object">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M10 2 7.5 4.5M10 2l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <button id="mode-rotate" class="tool-button" type="button" title="Rotate selected object (R)" aria-label="Rotate selected object">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8.2A6.2 6.2 0 1 0 16.1 12M16 4.5v4h-4" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <span class="tool-separator"></span>
-            <button id="view-home" class="tool-button" type="button" title="Frame room" aria-label="Frame room">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M17 8V3h-5M3 12v5h5m9-5v5h-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <span class="tool-separator"></span>
-            <div class="viewport-info">
-              <button id="show-shortcuts" class="tool-button info-button" type="button" aria-label="Show keyboard shortcuts" aria-expanded="false" aria-controls="shortcut-help" title="Keyboard shortcuts">i</button>
-              <section id="shortcut-help" class="shortcut-help" aria-label="Keyboard shortcuts" hidden>
-                <div class="shortcut-heading">Shortcuts</div>
-                <div><span>Undo</span><kbd>⌘ Z / Ctrl Z</kbd></div>
-                <div><span>Redo</span><kbd>⌘ ⇧ Z / Ctrl Y</kbd></div>
-                <div><span>Move / rotate</span><kbd>G / R</kbd></div>
-                <div><span>Orthographic</span><kbd>O</kbd></div>
-                <div><span>Delete selection</span><kbd>⌫ / Delete</kbd></div>
-                <p>Drag to orbit · scroll to zoom</p>
-              </section>
-            </div>
+          <div class="viewport-info">
+            <button id="show-shortcuts" class="tool-button info-button" type="button" aria-label="Show keyboard shortcuts and help" aria-haspopup="true" aria-expanded="false" aria-controls="shortcut-help" title="Info">i</button>
+            <section id="shortcut-help" class="shortcut-help" aria-label="Keyboard shortcuts and help" hidden>
+              <div class="shortcut-heading">Shortcuts</div>
+              <div><span>Undo</span><kbd>⌘ Z / Ctrl Z</kbd></div>
+              <div><span>Redo</span><kbd>⌘ ⇧ Z / Ctrl Y</kbd></div>
+              <div><span>Move / rotate</span><kbd>G / R</kbd></div>
+              <div><span>Toggle projection</span><kbd>O</kbd></div>
+              <div><span>Delete selection</span><kbd>⌫ / Delete</kbd></div>
+              <p>Drag to orbit · scroll to zoom</p>
+            </section>
           </div>
         </div>
         <div id="viewport" class="viewport">
@@ -101,30 +82,77 @@
             <span id="field-gradient" class="field-gradient" aria-hidden="true"></span>
             <span class="field-gradient-labels"><span id="field-legend-min"></span><span id="field-legend-max"></span></span>
           </div>
+          <span id="field-loading" class="field-loading" role="status" hidden></span>
+          <div class="camera-controls" role="group" aria-label="Camera controls">
+            <button id="transform-mode-toggle" class="tool-button camera-button" type="button" data-mode="translate" aria-label="Move mode" aria-pressed="false" title="Move mode (G); click to rotate">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <g class="move-mode-icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2v20M2 12h20M9 5l3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3M19 9l3 3-3 3" />
+                </g>
+                <g class="rotate-mode-icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M19 8a7 7 0 1 0 1 4M19 4v5h-5" />
+                </g>
+              </svg>
+            </button>
+            <span class="tool-separator"></span>
+            <button id="toggle-projection" class="tool-button camera-button" type="button" data-projection="perspective" aria-label="Toggle projection" aria-pressed="false" title="Toggle projection (O)">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <g class="projection-perspective-icon" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3.5 4.5h13v11h-13zM10 10 4.2 5m5.8 5 5.8-5M10 10v5.5" />
+                  <circle cx="10" cy="10" r="1" fill="currentColor" stroke="none" />
+                </g>
+                <g class="projection-orthographic-icon" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m10 2.7 6.1 3.5v7.6L10 17.3l-6.1-3.5V6.2L10 2.7zM3.9 6.2 10 9.7l6.1-3.5M10 9.7v7.6" />
+                </g>
+              </svg>
+            </button>
+            <span class="tool-separator"></span>
+            <details id="camera-view-picker" class="camera-view-picker">
+              <summary id="camera-view-picker-button" class="tool-button camera-button" aria-label="Choose camera view" aria-haspopup="menu" aria-expanded="false" title="Choose camera view">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 3 6 3.4v7.2L10 17l-6-3.4V6.4L10 3zM4 6.4l6 3.4 6-3.4M10 9.8V17m-3-11.8h6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="m7.2 11.8 2.8 2.6 2.8-2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div id="camera-view-menu" class="camera-view-menu" role="menu" aria-label="Camera view">
+                <button id="camera-view-3d" class="camera-view-option" type="button" role="menuitemradio" data-camera-view="3d" aria-checked="true">3D view</button>
+                <button id="camera-view-top" class="camera-view-option" type="button" role="menuitemradio" data-camera-view="top" aria-checked="false">Top view</button>
+              </div>
+            </details>
+          </div>
         </div>
       </section>
 
       <aside class="inspector" aria-label="Room and object properties">
-        <section class="inspector-section room-section">
-          <div class="section-heading"><span>Room</span></div>
-          <div class="dimension-fields">
-            <label class="field"><span>W</span><input id="room-width" aria-label="Room width in meters" type="number" min="2" max="20" step="0.1" value="5.2" /></label>
-            <label class="field"><span>D</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
-            <label class="field"><span>H</span><input id="room-height" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" value="2.7" /></label>
-          </div>
-          <label class="field outdoor-temperature-field"><span>Outside</span><input id="outdoor-temperature" aria-label="Outdoor temperature in degrees Celsius" type="number" min="-20" max="50" step="1" value="10" required /><span>°C</span></label>
-          <div class="unit-note">Room dimensions · m</div>
-        </section>
+        <div class="inspector-control-row">
+          <button id="toggle-inspector" class="panel-toggle" type="button" aria-controls="inspector-content" aria-expanded="true" aria-label="Collapse properties menu" title="Collapse properties menu">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 4 6 6-6 6" /></svg>
+          </button>
+        </div>
+        <div class="inspector-content" id="inspector-content">
+          <section class="inspector-section room-section">
+            <div class="section-heading"><span>Room</span></div>
+            <div class="dimension-fields">
+              <label class="field"><span>Width</span><input id="room-width" aria-label="Room width in meters" type="number" min="2" max="20" step="0.1" value="5.2" /></label>
+              <label class="field"><span>Depth</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
+              <label class="field"><span>Height</span><input id="room-height" aria-label="Room height in meters" type="number" min="2" max="6" step="0.1" value="2.7" /></label>
+            </div>
+            <label class="field outdoor-temperature-field"><span>Outside</span><input id="outdoor-temperature" aria-label="Outdoor temperature in degrees Celsius" type="number" min="-20" max="50" step="1" value="10" required /><span>°C</span></label>
+            <details id="room-daylight-control" class="room-daylight-control" hidden>
+              <summary><span>Time of day</span><output id="clock-label">13:30</output></summary>
+              <div class="parameter-menu room-daylight-menu">
+                <input id="time-of-day" type="range" min="0" max="1439" step="5" value="810" aria-label="Time of day" />
+              </div>
+            </details>
+          </section>
 
-        <section class="inspector-section object-list-section">
-          <div class="section-heading"><span>Objects</span></div>
-          <div id="object-list" class="object-list"></div>
-        </section>
+          <section class="inspector-section object-list-section">
+            <div class="section-heading"><span>Objects</span></div>
+            <div id="object-list" class="object-list"></div>
+          </section>
 
-        <section class="inspector-section properties-section" id="properties-section">
-          <div class="section-heading"><span>Selection</span><button id="delete-object" class="delete-button" type="button" aria-label="Delete selected object" title="Delete selected object" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11m-9.5 0 .6 10h7.8l.6-10M8 6V4h4v2m-3 3v4m2-4v4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
-          <div id="object-properties" class="empty-properties">Select an object</div>
-        </section>
+          <section class="inspector-section properties-section" id="properties-section">
+            <div class="section-heading"><span>Selection</span><button id="delete-object" class="delete-button" type="button" aria-label="Delete selected object" title="Delete selected object" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11m-9.5 0 .6 10h7.8l.6-10M8 6V4h4v2m-3 3v4m2-4v4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+            <div id="object-properties" class="empty-properties">Select an object</div>
+          </section>
+        </div>
       </aside>
     </main>
 

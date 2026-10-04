@@ -1,12 +1,13 @@
 import { assertPlacementClear, findObjectCollision } from './room-collision.js';
 import { rotationMatrixXYZ } from './room-transform.js';
+import { isOpeningObject } from './openings.js';
 
 export { rotationMatrixXYZ } from './room-transform.js';
 
 export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
 
 export const DEFAULT_BOX_DIMENSIONS = Object.freeze({ width: 1, height: 1, depth: 1 });
-export const SOURCE_MODELS = Object.freeze(['fan', 'heater', 'lamp']);
+export const DEVICE_MODELS = Object.freeze(['fan', 'heater', 'lamp']);
 export const SOURCE_INTENSITY_LIMITS = Object.freeze({ min: 0, max: 2 });
 
 const preset = (label, icon, dimensions) => Object.freeze({
@@ -16,7 +17,7 @@ const preset = (label, icon, dimensions) => Object.freeze({
 });
 
 export const MODEL_PRESETS = Object.freeze({
-  box: preset('Box', '□', DEFAULT_BOX_DIMENSIONS),
+  box: preset('Object', '□', DEFAULT_BOX_DIMENSIONS),
   fan: preset('Fan', '✳', { width: 0.42, height: 1.35, depth: 0.42 }),
   sofa: preset('Sofa', '▰', { width: 1.55, height: 0.78, depth: 0.84 }),
   bed: preset('Bed', '▰', { width: 1.6, height: 0.55, depth: 2 }),
@@ -25,15 +26,16 @@ export const MODEL_PRESETS = Object.freeze({
   lamp: preset('Lamp', '◉', { width: 0.32, height: 1.55, depth: 0.32 }),
   heater: preset('Heater', '▥', { width: 0.9, height: 0.56, depth: 0.18 }),
   window: preset('Window', '▣', { width: 1.4, height: 1, depth: 0.06 }),
+  door: preset('Door', '▯', { width: 0.9, height: 2.1, depth: 0.06 }),
 });
 
 const INITIAL_OBJECTS = Object.freeze([
-  { id: 'fan-1', primitive: 'box', model: 'fan', name: 'Pedestal fan', enabled: true, intensity: 1, position: { x: 0.82, y: 0, z: 3.15 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
+  { id: 'fan-1', primitive: 'device', model: 'fan', name: 'Pedestal fan', enabled: true, intensity: 1, position: { x: 0.82, y: 0, z: 3.15 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
   { id: 'sofa-2', primitive: 'box', model: 'sofa', name: 'Sofa', position: { x: 4.18, y: 0, z: 3.04 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.55, height: 0.78, depth: 0.84 } },
   { id: 'desk-3', primitive: 'box', model: 'desk', name: 'Desk', position: { x: 4.18, y: 0, z: 0.86 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.18, height: 0.74, depth: 0.62 } },
   { id: 'table-4', primitive: 'box', model: 'table', name: 'Coffee table', position: { x: 2.62, y: 0, z: 2.12 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.92, height: 0.38, depth: 0.62 } },
-  { id: 'lamp-1', primitive: 'box', model: 'lamp', name: 'Floor lamp', intensity: 1, position: { x: 1.2, y: 0, z: 0.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
-  { id: 'heater-1', primitive: 'box', model: 'heater', name: 'Panel heater', intensity: 1, position: { x: 0.55, y: 0, z: 1.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
+  { id: 'lamp-1', primitive: 'device', model: 'lamp', name: 'Floor lamp', enabled: true, intensity: 1, position: { x: 1.2, y: 0, z: 0.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
+  { id: 'heater-1', primitive: 'device', model: 'heater', name: 'Panel heater', enabled: true, intensity: 1, position: { x: 0.55, y: 0, z: 1.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
 ]);
 
 export function createRoomScene() {
@@ -42,17 +44,19 @@ export function createRoomScene() {
     objects: INITIAL_OBJECTS.map((object) => structuredClone(object)),
     nextObjectId: 5,
     nextWindowId: 1,
+    nextDoorId: 1,
   };
 }
 
-function anchoredWindowPosition(object, position, room) {
+function anchoredOpeningPosition(object, position, room) {
   const wall = object.wall ?? 'back';
+  const isDoor = object.model === 'door';
   const alongX = wall === 'back' || wall === 'front';
   const span = alongX ? room.width : room.depth;
   const dimensions = {
     ...object.dimensions,
     width: Math.min(object.dimensions.width, span - 0.2),
-    height: Math.min(object.dimensions.height, room.height - 0.2),
+    height: Math.min(object.dimensions.height, room.height - (isDoor ? 0 : 0.2)),
   };
   const halfWidth = dimensions.width / 2;
   const depthOffset = dimensions.depth / 2;
@@ -66,7 +70,7 @@ function anchoredWindowPosition(object, position, room) {
       x: alongX
         ? alongWall
         : wall === 'left' ? depthOffset : room.width - depthOffset,
-      y: clampAndRound(position.y ?? object.position.y, 0.1, room.height - dimensions.height - 0.1),
+      y: isDoor ? 0 : clampAndRound(position.y ?? object.position.y, 0.1, room.height - dimensions.height - 0.1),
       z: alongX
         ? wall === 'front' ? depthOffset : room.depth - depthOffset
         : alongWall,
@@ -75,21 +79,23 @@ function anchoredWindowPosition(object, position, room) {
   };
 }
 
-export function addWindow(scene, wall = 'back') {
-  if (!['back', 'front', 'left', 'right'].includes(wall)) throw new RangeError(`Unsupported window wall: ${wall}`);
-  const idNumber = scene.nextWindowId ?? 1;
-  const dimensions = { ...MODEL_PRESETS.window.dimensions };
+function addOpening(scene, model, wall) {
+  if (!['back', 'front', 'left', 'right'].includes(wall)) throw new RangeError(`Unsupported opening wall: ${wall}`);
+  const idKey = model === 'door' ? 'nextDoorId' : 'nextWindowId';
+  const idNumber = scene[idKey] ?? 1;
+  const dimensions = { ...MODEL_PRESETS[model].dimensions };
+  const label = MODEL_PRESETS[model].label;
   const template = {
-    id: `window-${idNumber}`,
-    primitive: 'box',
-    model: 'window',
-    name: `Window ${idNumber}`,
+    id: `${model}-${idNumber}`,
+    primitive: 'opening',
+    model,
+    name: `${label} ${idNumber}`,
     wall,
-    open: false,
+    open: true,
     flowDirection: 'exchange',
     flowRate: 0.35,
     dimensions,
-    position: { x: scene.room.width / 2, y: 0.9, z: scene.room.depth / 2 },
+    position: { x: scene.room.width / 2, y: model === 'door' ? 0 : 0.9, z: scene.room.depth / 2 },
     rotation: { x: 0, y: 0, z: 0 },
   };
   const alongX = wall === 'back' || wall === 'front';
@@ -99,7 +105,7 @@ export function addWindow(scene, wall = 'back') {
   let object;
   for (let step = 0; step <= Math.ceil(span / 0.1); step += 1) {
     for (const sign of step === 0 ? [0] : [-1, 1]) {
-      const position = anchoredWindowPosition(template, { [alongAxis]: center + step * 0.1 * sign }, scene.room);
+      const position = anchoredOpeningPosition(template, { [alongAxis]: center + step * 0.1 * sign }, scene.room);
       if (!findObjectCollision(scene.objects, position)) {
         object = position;
         break;
@@ -107,16 +113,24 @@ export function addWindow(scene, wall = 'back') {
     }
     if (object) break;
   }
-  if (!object) throw new RangeError(`No clear space remains for a window on the ${wall} wall.`);
+  if (!object) throw new RangeError(`No clear space remains for a ${label.toLowerCase()} on the ${wall} wall.`);
   return {
     object,
-    scene: { ...scene, nextWindowId: idNumber + 1, objects: [...scene.objects, object] },
+    scene: { ...scene, [idKey]: idNumber + 1, objects: [...scene.objects, object] },
   };
+}
+
+export function addWindow(scene, wall = 'back') {
+  return addOpening(scene, 'window', wall);
+}
+
+export function addDoor(scene, wall = 'back') {
+  return addOpening(scene, 'door', wall);
 }
 
 export function setWindowOpen(scene, objectId, open) {
   const existing = scene.objects.find((object) => object.id === objectId);
-  if (!existing || existing.model !== 'window') throw new RangeError(`Unknown window: ${objectId}`);
+  if (!isOpeningObject(existing)) throw new RangeError(`Unknown opening: ${objectId}`);
   const updated = { ...existing, open: Boolean(open) };
   return {
     object: updated,
@@ -126,8 +140,8 @@ export function setWindowOpen(scene, objectId, open) {
 
 export function setWindowFlow(scene, objectId, flowDirection, flowRate) {
   const existing = scene.objects.find((object) => object.id === objectId);
-  if (!existing || existing.model !== 'window') throw new RangeError(`Unknown window: ${objectId}`);
-  if (!['exchange', 'inlet', 'outlet'].includes(flowDirection)) throw new RangeError(`Unsupported window flow direction: ${flowDirection}`);
+  if (!isOpeningObject(existing)) throw new RangeError(`Unknown opening: ${objectId}`);
+  if (!['exchange', 'inlet', 'outlet'].includes(flowDirection)) throw new RangeError(`Unsupported opening flow direction: ${flowDirection}`);
   if (!Number.isFinite(flowRate) || flowRate < 0 || flowRate > 1.5) {
     throw new RangeError('Exterior wind speed must be between 0 and 1.5 m/s.');
   }
@@ -140,8 +154,8 @@ export function setWindowFlow(scene, objectId, flowDirection, flowRate) {
 
 export function setWindowWall(scene, objectId, wall) {
   const existing = scene.objects.find((object) => object.id === objectId);
-  if (!existing || existing.model !== 'window') throw new RangeError(`Unknown window: ${objectId}`);
-  if (!['back', 'front', 'left', 'right'].includes(wall)) throw new RangeError(`Unsupported window wall: ${wall}`);
+  if (!isOpeningObject(existing)) throw new RangeError(`Unknown opening: ${objectId}`);
+  if (!['back', 'front', 'left', 'right'].includes(wall)) throw new RangeError(`Unsupported opening wall: ${wall}`);
   const wasAlongX = existing.wall === 'back' || existing.wall === 'front';
   const isAlongX = wall === 'back' || wall === 'front';
   const position = wasAlongX === isAlongX ? existing.position : {
@@ -149,7 +163,7 @@ export function setWindowWall(scene, objectId, wall) {
     x: scene.room.width / 2,
     z: scene.room.depth / 2,
   };
-  const updated = anchoredWindowPosition({ ...existing, wall }, position, scene.room);
+  const updated = anchoredOpeningPosition({ ...existing, wall }, position, scene.room);
   assertPlacementClear(scene.objects, updated, objectId);
   return {
     object: updated,
@@ -158,12 +172,13 @@ export function setWindowWall(scene, objectId, wall) {
 }
 
 export function addObject(scene, options = {}) {
-  const { model = 'box', name, dimensions = DEFAULT_BOX_DIMENSIONS } = options;
+  const { model = 'box', name } = options;
   if (!MODEL_PRESETS[model]) throw new RangeError(`Unsupported object model: ${model}`);
-  if (model === 'window') throw new RangeError('Use addWindow to place a window on a room wall.');
+  if (isOpeningObject({ model })) throw new RangeError('Use the opening tools to place a window or door on a room wall.');
 
   const idNumber = scene.nextObjectId;
-  const boxDimensions = { ...dimensions };
+  const isDevice = DEVICE_MODELS.includes(model);
+  const boxDimensions = { ...(options.dimensions ?? (isDevice ? MODEL_PRESETS[model].dimensions : DEFAULT_BOX_DIMENSIONS)) };
   if (!['width', 'height', 'depth'].every((axis) => Number.isFinite(boxDimensions[axis]) && boxDimensions[axis] > 0)) {
     throw new RangeError('Object dimensions must be positive finite values.');
   }
@@ -172,11 +187,11 @@ export function addObject(scene, options = {}) {
     throw new RangeError('Object does not fit inside the room.');
   }
   const template = {
-    id: `box-${idNumber}`,
-    primitive: 'box',
+    id: `${isDevice ? model : 'object'}-${idNumber}`,
+    primitive: isDevice ? 'device' : 'box',
     model,
-    name: normalizeObjectName(name ?? `Box ${idNumber}`),
-    ...(SOURCE_MODELS.includes(model) ? { intensity: 1 } : {}),
+    name: normalizeObjectName(name ?? `${isDevice ? MODEL_PRESETS[model].label : 'Object'} ${idNumber}`),
+    ...(isDevice ? { enabled: true, intensity: 1 } : {}),
     dimensions: boxDimensions,
     position: { x: scene.room.width / 2, y: 0, z: scene.room.depth / 2 },
     rotation: { x: 0, y: 0, z: 0 },
@@ -205,23 +220,29 @@ export function addObject(scene, options = {}) {
   return { object, scene: { ...scene, nextObjectId: idNumber + 1, objects: [...scene.objects, object] } };
 }
 
+export function addDevice(scene, model) {
+  if (!DEVICE_MODELS.includes(model)) throw new RangeError(`Unsupported device type: ${model}`);
+  return addObject(scene, { model });
+}
+
 export function setObjectModel(scene, objectId, model) {
   const existing = scene.objects.find((object) => object.id === objectId);
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
   if (!MODEL_PRESETS[model]) throw new RangeError(`Unsupported object model: ${model}`);
-  if (model === 'window') throw new RangeError('Use addWindow to place a window on a room wall.');
-  const updated = { ...existing, primitive: 'box', model };
-  if (SOURCE_MODELS.includes(model)) updated.intensity = existing.intensity ?? 1;
+  if (isOpeningObject({ model })) throw new RangeError('Use the opening tools to place a window or door on a room wall.');
+  const isDevice = DEVICE_MODELS.includes(model);
+  const updated = { ...existing, primitive: isDevice ? 'device' : 'box', model };
+  if (isDevice) updated.intensity = existing.intensity ?? 1;
   else delete updated.intensity;
-  if (model === 'fan') updated.enabled = existing.model === 'fan' ? existing.enabled !== false : true;
+  if (isDevice) updated.enabled = DEVICE_MODELS.includes(existing.model) ? existing.enabled !== false : true;
   else delete updated.enabled;
   const objects = scene.objects.map((object) => object.id === objectId ? updated : object);
   return { scene: { ...scene, objects }, object: updated };
 }
 
-export function setFanEnabled(scene, objectId, enabled) {
+export function setDeviceEnabled(scene, objectId, enabled) {
   const existing = scene.objects.find((object) => object.id === objectId);
-  if (!existing || existing.model !== 'fan') throw new RangeError(`Unknown fan: ${objectId}`);
+  if (!existing || !DEVICE_MODELS.includes(existing.model)) throw new RangeError(`Unknown device: ${objectId}`);
   const updated = { ...existing, enabled: Boolean(enabled) };
   return {
     object: updated,
@@ -232,7 +253,7 @@ export function setFanEnabled(scene, objectId, enabled) {
 export function setObjectIntensity(scene, objectId, intensity) {
   const existing = scene.objects.find((object) => object.id === objectId);
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
-  if (!SOURCE_MODELS.includes(existing.model)) throw new RangeError(`${existing.model} has no adjustable source strength.`);
+  if (!DEVICE_MODELS.includes(existing.model)) throw new RangeError(`${existing.model} has no adjustable source strength.`);
   if (!Number.isFinite(intensity) || intensity < SOURCE_INTENSITY_LIMITS.min || intensity > SOURCE_INTENSITY_LIMITS.max) {
     throw new RangeError(`Source strength must be between ${SOURCE_INTENSITY_LIMITS.min} and ${SOURCE_INTENSITY_LIMITS.max}.`);
   }
@@ -288,7 +309,7 @@ export function moveObject(scene, objectId, position) {
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
   const moved = { ...existing, position: boundedPosition(existing, position, scene.room) };
   let anchored = moved;
-  if (existing.model === 'window') {
+  if (isOpeningObject(existing)) {
     const candidate = {
       x: position.x ?? existing.position.x,
       y: position.y ?? existing.position.y,
@@ -303,7 +324,7 @@ export function moveObject(scene, objectId, position) {
     };
     const closestWall = Object.keys(distances).sort((a, b) => distances[a] - distances[b])[0];
     const wall = distances[closestWall] + 0.12 < distances[existing.wall ?? 'back'] ? closestWall : existing.wall ?? 'back';
-    anchored = anchoredWindowPosition({ ...existing, wall }, candidate, scene.room);
+    anchored = anchoredOpeningPosition({ ...existing, wall }, candidate, scene.room);
   }
   const objects = scene.objects.map((object) => object.id === objectId ? anchored : object);
   assertPlacementClear(scene.objects, anchored, objectId);
@@ -323,8 +344,8 @@ export function resizeRoom(scene, dimensions) {
       throw new RangeError(`${axis} must be between ${limits.min} and ${limits.max} meters.`);
     }
   }
-  const objects = scene.objects.map((object) => object.model === 'window'
-    ? anchoredWindowPosition(object, object.position, room)
+  const objects = scene.objects.map((object) => isOpeningObject(object)
+    ? anchoredOpeningPosition(object, object.position, room)
     : { ...object, position: boundedPosition(object, object.position, room) });
   for (let index = 0; index < objects.length; index += 1) {
     assertPlacementClear(objects.slice(0, index), objects[index]);
@@ -335,15 +356,15 @@ export function resizeRoom(scene, dimensions) {
 export function resizeObject(scene, objectId, dimensions) {
   const existing = scene.objects.find((object) => object.id === objectId);
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
-  if (existing.model === 'window') {
+  if (isOpeningObject(existing)) {
     const alongX = existing.wall === 'back' || existing.wall === 'front';
     const maxWidth = (alongX ? scene.room.width : scene.room.depth) - 0.2;
     const nextDimensions = { ...existing.dimensions, ...dimensions, depth: existing.dimensions.depth };
     if (nextDimensions.width < 0.4 || nextDimensions.width > maxWidth
       || nextDimensions.height < 0.4 || nextDimensions.height > scene.room.height - 0.2) {
-      throw new RangeError('Window dimensions do not fit on this wall.');
+      throw new RangeError(`${MODEL_PRESETS[existing.model].label} dimensions do not fit on this wall.`);
     }
-    const resized = anchoredWindowPosition({ ...existing, dimensions: nextDimensions }, existing.position, scene.room);
+    const resized = anchoredOpeningPosition({ ...existing, dimensions: nextDimensions }, existing.position, scene.room);
     assertPlacementClear(scene.objects, resized, objectId);
     const objects = scene.objects.map((object) => object.id === objectId ? resized : object);
     return { scene: { ...scene, objects }, object: resized };
@@ -368,7 +389,7 @@ export function resizeObject(scene, objectId, dimensions) {
 export function rotateObject(scene, objectId, rotation) {
   const existing = scene.objects.find((object) => object.id === objectId);
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
-  if (existing.model === 'window') return { scene, object: existing };
+  if (isOpeningObject(existing)) return { scene, object: existing };
   const nextRotation = {};
   for (const axis of ['x', 'y', 'z']) {
     const degrees = rotation?.[axis] ?? existing.rotation[axis];

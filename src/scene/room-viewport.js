@@ -4,6 +4,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
+import { isOpeningObject } from '../model/openings.js';
 
 // Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
 // light preview used before there was a time of day, so an unchanged scene looks
@@ -149,22 +150,31 @@ function createHeater(group, dimensions) {
   }
 }
 
-function createWindow(group, dimensions, open) {
+function createOpening(group, dimensions, open, model) {
   const { width, height, depth } = dimensions;
   const frame = 0.045;
   const rail = (size, position) => box(group, size, position, COLORS.windowFrame);
   rail({ width: frame, height, depth }, { x: -width / 2 + frame / 2, y: 0, z: 0 });
   rail({ width: frame, height, depth }, { x: width / 2 - frame / 2, y: 0, z: 0 });
-  rail({ width, height: frame, depth }, { x: 0, y: -height / 2 + frame / 2, z: 0 });
   rail({ width, height: frame, depth }, { x: 0, y: height / 2 - frame / 2, z: 0 });
-  rail({ width: frame * 0.55, height: height - frame * 2, depth }, { x: 0, y: 0, z: 0 });
+  if (model === 'window') {
+    rail({ width, height: frame, depth }, { x: 0, y: -height / 2 + frame / 2, z: 0 });
+    rail({ width: frame * 0.55, height: height - frame * 2, depth }, { x: 0, y: 0, z: 0 });
+  }
   if (!open) {
-    box(group, { width: width - frame * 2, height: height - frame * 2, depth: 0.012 }, { x: 0, y: 0, z: 0 }, COLORS.windowGlass, {
-      transparent: true,
-      opacity: 0.34,
-      roughness: 0.18,
-      depthWrite: false,
-    }).castShadow = false;
+    if (model === 'door') {
+      box(group, { width: width - frame * 2, height: height - frame, depth: depth * 0.65 }, { x: 0, y: -frame / 2, z: 0 }, 0x9a795c);
+      const handle = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), material(0xc5a86e, { metalness: 0.55, roughness: 0.34 }));
+      handle.position.set(width * 0.34, -0.02, depth * 0.4);
+      group.add(handle);
+    } else {
+      box(group, { width: width - frame * 2, height: height - frame * 2, depth: 0.012 }, { x: 0, y: 0, z: 0 }, COLORS.windowGlass, {
+        transparent: true,
+        opacity: 0.34,
+        roughness: 0.18,
+        depthWrite: false,
+      }).castShadow = false;
+    }
   }
 }
 
@@ -190,7 +200,7 @@ function createWallGeometry(width, height, windows, wall, room) {
   shape.lineTo(width / 2, height);
   shape.lineTo(-width / 2, height);
   shape.closePath();
-  for (const window of windows.filter((item) => item.wall === wall)) {
+  for (const window of windows.filter((item) => item.wall === wall && item.open)) {
     const center = wall === 'front'
       ? window.position.x - room.width / 2
       : wall === 'back'
@@ -220,11 +230,18 @@ const wallLayouts = (room) => [
 ];
 
 export class RoomViewport {
-  constructor(container, { onSelect = () => {}, onTransform = () => {}, onDragChange = () => {}, onPlacementError = () => {} } = {}) {
+  constructor(container, {
+    onSelect = () => {},
+    onTransform = () => {},
+    onDragChange = () => {},
+    onPlacementError = () => {},
+    onCameraViewChange = () => {},
+  } = {}) {
     this.container = container;
     this.onSelect = onSelect;
     this.onTransform = onTransform;
     this.onDragChange = onDragChange;
+    this.onCameraViewChange = onCameraViewChange;
     this.onPlacementError = onPlacementError;
     this.roomScene = null;
     this.selectedId = null;
@@ -234,11 +251,9 @@ export class RoomViewport {
     this.lightingPreview = false;
     this.lightingLights = [];
     this.timeMinutes = DEFAULT_TIME_MINUTES;
-    this.lampsOverride = null;
     this.daylightState = null;
     this.sunPatchMeshes = [];
     this.pointerStart = null;
-    this.isTopView = false;
     this.projection = 'perspective';
     this.orthoFrustumHeight = 8;
     this.transformMode = 'translate';
@@ -267,6 +282,10 @@ export class RoomViewport {
 
     this.hemisphereLight = new THREE.HemisphereLight(0xeaf3ed, 0x97a38f, 2.1);
     this.keyLight = new THREE.DirectionalLight(0xfff7e9, 2.6);
+    this.keyLight.shadow.mapSize.set(2048, 2048);
+    this.keyLight.shadow.camera.near = 0.1;
+    this.keyLight.shadow.camera.far = 50;
+    this.keyLight.shadow.bias = -0.0002;
     this.keyLight.position.set(-4, 8, 6);
     this.scene.add(this.hemisphereLight, this.keyLight);
     this.setupControls(this.camera, new THREE.Vector3(0, 1.1, 0));
@@ -320,8 +339,12 @@ export class RoomViewport {
     this.orbit.minDistance = 2.5;
     this.orbit.maxDistance = 40;
     this.orbit.maxPolarAngle = Math.PI * 0.48;
-    this.orbit.enableRotate = !this.isTopView;
-    this.orbit.enablePan = !this.isTopView;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    this.orbit.addEventListener('change', () => {
+      const direction = this.camera.position.clone().sub(this.orbit.target).normalize();
+      this.onCameraViewChange(direction.y > 0.98 ? 'top' : '3d');
+    });
     this.orbit.update();
 
     this.transform = new TransformControls(this.camera, this.renderer.domElement);
@@ -344,10 +367,11 @@ export class RoomViewport {
     const up = this.camera.up.clone();
     if (projection === 'orthographic') {
       const distance = position.distanceTo(target);
-      this.orthoFrustumHeight = this.isTopView
-        ? Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.3
-        : Math.max(2, 2 * distance * Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2)));
+      const direction = position.clone().sub(target).normalize();
       const aspect = Math.max(1, this.container.clientWidth) / Math.max(1, this.container.clientHeight);
+      this.orthoFrustumHeight = direction.y > 0.98
+        ? Math.max(this.roomScene.room.depth, this.roomScene.room.width / aspect) * 1.12
+        : Math.max(2, 2 * distance * Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2)));
       this.orthographicCamera.left = -this.orthoFrustumHeight * aspect / 2;
       this.orthographicCamera.right = this.orthoFrustumHeight * aspect / 2;
       this.orthographicCamera.top = this.orthoFrustumHeight / 2;
@@ -392,6 +416,16 @@ export class RoomViewport {
     this.sceneRoot.add(grid);
 
     for (const wall of wallLayouts(this.roomScene.room)) this.createWall(wall);
+    const ceiling = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, colorWrite: false, depthWrite: false }),
+    );
+    ceiling.name = 'daylight-ceiling-occluder';
+    ceiling.rotation.x = -Math.PI / 2;
+    ceiling.position.y = height;
+    ceiling.castShadow = true;
+    ceiling.raycast = () => {};
+    this.sceneRoot.add(ceiling);
     const outline = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(width, height, depth)),
       new THREE.LineBasicMaterial({ color: 0x8fa198, transparent: true, opacity: 0.75 }),
@@ -403,15 +437,15 @@ export class RoomViewport {
   createWall(wall) {
     const { width, height, depth } = this.roomScene.room;
     const span = wall.side === 'left' || wall.side === 'right' ? depth : width;
-    const windows = this.roomScene.objects.filter((object) => object.model === 'window');
+    const openings = this.roomScene.objects.filter(isOpeningObject);
     const mesh = new THREE.Mesh(
-      createWallGeometry(span, height, windows, wall.side, this.roomScene.room),
+      createWallGeometry(span, height, openings, wall.side, this.roomScene.room),
       material(0xf9fbf6, { transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false }),
     );
     mesh.name = `room-wall-${wall.side}`;
     mesh.position.set(...wall.position);
     mesh.rotation.set(...wall.rotation);
-    mesh.castShadow = false;
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.sceneRoot.add(mesh);
     if (this.lightingPreview) {
@@ -438,7 +472,7 @@ export class RoomViewport {
     group.userData.primitive = object.primitive;
     group.userData.model = object.model;
     const builder = BUILDERS[object.model];
-    if (object.model === 'window') createWindow(group, object.dimensions, object.open);
+    if (isOpeningObject(object)) createOpening(group, object.dimensions, object.open, object.model);
     else if (builder) builder(group, object.dimensions);
     else box(group, object.dimensions, { x: 0, y: 0, z: 0 }, COLORS.metal);
     group.userData.open = object.open;
@@ -492,7 +526,7 @@ export class RoomViewport {
     this.buildRoom();
     for (const object of roomScene.objects) this.createObjectGroup(object);
     this.select(selectedId);
-    if (initialScene) this.fitRoom(false);
+    if (initialScene) this.fitRoom();
     if (showLighting) this.setLightingPreview(true);
   }
 
@@ -583,7 +617,7 @@ export class RoomViewport {
     });
 
     if (enabled) {
-      for (const object of this.roomScene.objects.filter((item) => item.model === 'lamp')) {
+      for (const object of this.roomScene.objects.filter((item) => item.model === 'lamp' && item.enabled !== false)) {
         const group = this.groups.get(object.id);
         if (!group) continue;
         const source = new THREE.PointLight(0xffffff, 1, LAMP_LIGHT_DISTANCE, 2);
@@ -619,14 +653,12 @@ export class RoomViewport {
    * time; it is a no-op for rendering while the light preview is off, but the
    * state is kept so the inspector can show it.
    */
-  setTimeOfDay({ timeMinutes, lampsOverride } = {}) {
+  setTimeOfDay({ timeMinutes } = {}) {
     if (timeMinutes !== undefined) this.timeMinutes = timeMinutes;
-    if (lampsOverride !== undefined) this.lampsOverride = lampsOverride;
     if (!this.roomScene) return null;
     this.daylightState = describeDaylight({
       scene: this.roomScene,
       timeMinutes: this.timeMinutes,
-      lampsOverride: this.lampsOverride,
     });
     if (this.lightingPreview) this.applyDaylight();
     return this.daylightState;
@@ -642,6 +674,14 @@ export class RoomViewport {
     // Park the sun far enough out that its shadow camera covers the room.
     const reach = Math.max(this.roomScene?.room.width ?? 5, this.roomScene?.room.depth ?? 4) + 6;
     this.keyLight.position.set(direction.x * reach, Math.max(direction.y, 0.05) * reach, direction.z * reach);
+    const shadowRadius = Math.max(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
+    Object.assign(this.keyLight.shadow.camera, {
+      left: -shadowRadius,
+      right: shadowRadius,
+      top: shadowRadius,
+      bottom: -shadowRadius,
+    });
+    this.keyLight.shadow.camera.updateProjectionMatrix();
     this.keyLight.target.position.set(
       (this.roomScene?.room.width ?? 5) / 2,
       0,
@@ -651,15 +691,17 @@ export class RoomViewport {
     this.keyLight.castShadow = state.sun.daylight > 0.02;
     this.keyLight.visible = state.sun.daylight > 0;
 
-    this.hemisphereLight.color.setRGB(state.sky.colour.r, state.sky.colour.g, state.sky.colour.b);
-    this.hemisphereLight.intensity = state.sky.intensity;
+    // Keep only a small neutral fill for readability. Exterior light comes from
+    // the shadow-casting sun, which the room shell blocks except at open apertures.
+    this.hemisphereLight.color.setHex(0xeaf3ed);
+    this.hemisphereLight.intensity = 0.06;
 
     this.scene.background.setRGB(state.background.r, state.background.g, state.background.b);
     this.renderer.toneMappingExposure = state.exposure;
 
     for (const light of this.lightingLights) {
       const lamp = this.roomScene.objects.find((object) => object.id === light.userData.objectId);
-      light.power = (state.lampsOn ? DEFAULT_LAMP_POWER : 0) * (lamp?.intensity ?? 1);
+      light.power = (lamp?.enabled !== false ? DEFAULT_LAMP_POWER : 0) * (lamp?.intensity ?? 1);
     }
     this.rebuildSunPatches();
     this.updateDaylightDataset();
@@ -673,7 +715,7 @@ export class RoomViewport {
     data.sunAltitude = String(Number(state.sun.altitude.toFixed(1)));
     data.sunAzimuth = String(Number(state.sun.azimuth.toFixed(1)));
     data.clockTime = state.clock;
-    data.lampsOn = String(state.lampsOn);
+    data.lampsOn = String(this.roomScene.objects.some((object) => object.model === 'lamp' && object.enabled !== false));
     data.sunPatches = String(this.sunPatchMeshes.length);
   }
 
@@ -788,31 +830,46 @@ export class RoomViewport {
     }
   }
 
-  setView(view) {
-    this.isTopView = view === 'top';
-    this.orbit.enableRotate = !this.isTopView;
-    this.orbit.enablePan = !this.isTopView;
-    this.renderer.domElement.dataset.cameraView = this.isTopView ? 'top' : '3d';
-    this.orbit.target.set(0, this.roomScene.room.height / 2, 0);
+  snapToTop() {
+    const { width, depth, height } = this.roomScene.room;
+    this.orbit.target.set(0, height / 2, 0);
+    this.orbit.enabled = true;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    const aspect = Math.max(1, this.container.clientWidth) / Math.max(1, this.container.clientHeight);
+    const viewHeight = Math.max(depth, width / aspect) * 1.2;
+    const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2));
+    const perspectiveDistance = Math.max(
+      Math.max(width, depth) * 1.6,
+      viewHeight / (2 * tanHalfFov),
+    );
     if (this.camera.isOrthographicCamera) {
-      this.orthoFrustumHeight = Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.45;
+      this.orthoFrustumHeight = 2 * perspectiveDistance * tanHalfFov;
       this.resize();
     }
-    const distance = Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.35;
-    if (this.isTopView) {
-      this.camera.up.set(0, 0, -1);
-      this.camera.position.set(0, this.roomScene.room.height + distance, 0.001);
-    } else {
-      this.camera.up.set(0, 1, 0);
-      this.camera.position.set(distance * 0.88, distance * 0.7, distance * 0.96);
-    }
+    const distance = this.camera.isPerspectiveCamera ? perspectiveDistance : Math.max(width, depth) * 1.35;
+    const tilt = 0.04;
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.set(0, height / 2 + distance * Math.cos(tilt), distance * Math.sin(tilt));
     this.camera.lookAt(this.orbit.target);
     this.orbit.update();
   }
 
-  fitRoom(resetView = true) {
-    if (resetView) this.isTopView = false;
-    this.setView(this.isTopView ? 'top' : '3d');
+  fitRoom() {
+    const { width, depth, height } = this.roomScene.room;
+    this.orbit.target.set(0, height / 2, 0);
+    this.orbit.enabled = true;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    const distance = Math.max(width, depth) * 1.35;
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.set(distance * 0.88, distance * 0.7, distance * 0.96);
+    if (this.camera.isOrthographicCamera) {
+      this.orthoFrustumHeight = Math.max(width, depth) * 1.45;
+      this.resize();
+    }
+    this.camera.lookAt(this.orbit.target);
+    this.orbit.update();
   }
 
   handlePointerUp(event) {
@@ -909,7 +966,7 @@ export class RoomViewport {
       return;
     }
     this.roomScene = updated.scene;
-    if (source.model === 'window') this.rebuildWalls([source.wall, updated.object.wall]);
+    if (isOpeningObject(source)) this.rebuildWalls([source.wall, updated.object.wall]);
     this.onPlacementError('');
     if (this.selectionBox) this.selectionBox.material.color.set(0x23836c);
     this.applyObjectTransform(group, updated.object);

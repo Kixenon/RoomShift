@@ -7,7 +7,7 @@ test('a new scene starts with real room dimensions in meters', () => {
 
   assert.deepEqual(scene.room, { width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
   assert.ok(Array.isArray(scene.objects));
-  assert.ok(scene.objects.every((object) => object.primitive === 'box'));
+  assert.deepEqual(scene.objects.map((object) => object.primitive), ['device', 'box', 'box', 'box', 'device', 'device']);
   assert.deepEqual(scene.objects.map((object) => object.model), ['fan', 'sofa', 'desk', 'table', 'lamp', 'heater']);
   assert.equal(scene.objects.find((object) => object.model === 'lamp')?.id, 'lamp-1');
   assert.equal(scene.objects.find((object) => object.model === 'heater')?.id, 'heater-1');
@@ -18,10 +18,10 @@ test('adding an object creates a named box primitive with a unique stable id', (
   const second = addObject(first.scene);
   const box = first.object;
 
-  assert.equal(box.id, 'box-5');
+  assert.equal(box.id, 'object-5');
   assert.equal(box.primitive, 'box');
   assert.equal(box.model, 'box');
-  assert.equal(box.name, 'Box 5');
+  assert.equal(box.name, 'Object 5');
   assert.deepEqual(box.dimensions, { width: 1, height: 1, depth: 1 });
   assert.notEqual(box.id, second.object.id);
   assert.deepEqual(first.scene.room, { width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
@@ -33,7 +33,7 @@ test('changing the model preset does not change the editable box geometry', () =
 
   assert.equal(result.object.primitive, 'box');
   assert.equal(result.object.model, 'bed');
-  assert.equal(result.object.name, 'Box 5');
+  assert.equal(result.object.name, 'Object 5');
   assert.deepEqual(result.object.dimensions, added.object.dimensions);
   assert.deepEqual(result.object.position, added.object.position);
   assert.equal(added.object.model, 'box');

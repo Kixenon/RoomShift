@@ -127,7 +127,7 @@ test('dragging the vertical rotation ring changes object rotation', async () => 
   const bounds = await canvas.boundingBox();
   const center = fanScreenPoint(bounds);
   await page.mouse.click(center.x, center.y);
-  await page.locator('#mode-rotate').click();
+  await page.locator('#transform-mode-toggle').click();
   await page.waitForFunction(() => document.querySelector('[data-rotation="y"]') !== null);
 
   const start = roomScreenPoint(bounds, [fanCenterWorld[0] + 0.8, fanCenterWorld[1], fanCenterWorld[2]]);
@@ -160,9 +160,9 @@ test('dragging empty canvas orbits the room', async () => {
   assert.equal(before.equals(after), false, 'camera orbit should change the rendered room view');
 });
 
-test('a box can be named and assigned a model without changing its geometry', async () => {
-  await page.locator('[data-add-box]').click();
-  const row = page.locator('[data-select-object="box-5"]');
+test('an object can be named and assigned a furniture model without changing its geometry', async () => {
+  await page.locator('#add-object').click();
+  const row = page.locator('[data-select-object="object-5"]');
   await row.waitFor();
   assert.equal(await row.getAttribute('aria-pressed'), 'true');
 
@@ -173,12 +173,12 @@ test('a box can be named and assigned a model without changing its geometry', as
   await nameInput.blur();
   await page.locator('[data-object-model]').selectOption('bed');
 
-  await page.waitForFunction(() => document.querySelector('[data-select-object="box-5"]')?.textContent.includes('Reading bed'));
+  await page.waitForFunction(() => document.querySelector('[data-select-object="object-5"]')?.textContent.includes('Reading bed'));
   assert.match(await row.textContent(), /Reading bed/);
   assert.equal(await page.locator('[data-object-name]').inputValue(), 'Reading bed');
   assert.deepEqual(await sizeInputs.evaluateAll((inputs) => inputs.map((input) => input.value)), initialSizes);
 
-  for (const model of ['box', 'fan', 'sofa', 'bed', 'desk', 'table', 'lamp', 'heater']) {
+  for (const model of ['box', 'sofa', 'bed', 'desk', 'table']) {
     await page.locator('[data-object-model]').selectOption(model);
     assert.equal(await page.locator('[data-object-model]').inputValue(), model);
     assert.match(await row.textContent(), /Reading bed/);
@@ -221,6 +221,7 @@ test('air, heat, and light fields update automatically and after scene edits', a
   assert.ok(Number(await canvas.getAttribute('data-gas-density-max')) > 0);
   assert.ok(Number(await canvas.getAttribute('data-gas-occupied-voxels')) > 0);
 
+  await page.locator('#field-display-button').click();
   await page.locator('[data-display-style="volume"]').click();
   assert.ok(Number(await canvas.getAttribute('data-field-volume-voxels')) > 0);
 
@@ -245,7 +246,7 @@ test('air, heat, and light fields update automatically and after scene edits', a
   const roomWidth = page.locator('#room-width');
   await roomWidth.fill('5.5');
   await roomWidth.blur();
-  await page.waitForFunction(() => document.querySelector('#room-summary')?.textContent === '5.5 × 4.0 × 2.7 m');
+  await page.waitForFunction(() => document.querySelector('#room-width')?.value === '5.5');
   assert.equal(await canvas.getAttribute('data-field-mode'), 'light');
   assert.equal(await canvas.getAttribute('data-lighting-preview'), 'true');
   assert.equal(await page.locator('#show-light').getAttribute('aria-pressed'), 'true');
@@ -270,7 +271,7 @@ test('a fan close to a wall keeps a visible resolved airflow field', async () =>
   assert.ok(Number(await page.locator('#room-canvas').getAttribute('data-field-cells')) > 0);
 });
 
-test('room edits, object properties, delete, view, mode, and reset work end to end', async () => {
+test('room edits, object properties, camera controls, and delete work end to end', async () => {
   const initialObjectCount = await page.locator('[data-select-object]').count();
   const width = page.locator('#room-width');
   const depth = page.locator('#room-depth');
@@ -278,7 +279,8 @@ test('room edits, object properties, delete, view, mode, and reset work end to e
   await width.blur();
   await depth.fill('4.6');
   await depth.blur();
-  assert.equal(await page.locator('#room-summary').textContent(), '6.4 × 4.6 × 2.7 m');
+  assert.equal(await width.inputValue(), '6.4');
+  assert.equal(await depth.inputValue(), '4.6');
 
   await width.fill('1');
   await width.blur();
@@ -294,22 +296,35 @@ test('room edits, object properties, delete, view, mode, and reset work end to e
   await rotation.blur();
   assert.equal(await page.locator('[data-rotation="y"]').inputValue(), '45.00');
 
-  await page.locator('#view-top').click();
-  assert.equal(await page.locator('#view-top').getAttribute('class'), 'view-button active');
-  await page.locator('#mode-rotate').click();
-  assert.equal(await page.locator('#mode-rotate').getAttribute('class'), 'tool-button active');
-  await page.locator('#view-home').click();
-  assert.equal(await page.locator('#view-3d').getAttribute('class'), 'view-button active');
+  await page.locator('#camera-view-picker-button').click();
+  await page.locator('#camera-view-top').click();
+  await page.locator('#toggle-projection').click();
+  assert.equal(await page.locator('#room-canvas').getAttribute('data-projection'), 'orthographic');
+  await page.locator('#toggle-projection').click();
+  assert.equal(await page.locator('#room-canvas').getAttribute('data-projection'), 'perspective');
+  await page.locator('#transform-mode-toggle').click();
+  assert.equal(await page.locator('#transform-mode-toggle').getAttribute('aria-pressed'), 'true');
+  await page.locator('#camera-view-picker-button').click();
+  await page.locator('#camera-view-3d').click();
 
   await page.locator('#delete-object').click();
   assert.equal(await page.locator('[data-select-object]').count(), initialObjectCount - 1);
   assert.equal(await page.locator('#delete-object').isDisabled(), true);
 
-  await page.locator('#reset-scene').click();
-  assert.equal(await page.locator('#room-summary').textContent(), '5.2 × 4.0 × 2.7 m');
-  assert.equal(await page.locator('[data-select-object]').count(), initialObjectCount);
-  assert.equal(await page.locator('#view-3d').getAttribute('class'), 'view-button active');
-  assert.equal(await page.locator('#mode-move').getAttribute('class'), 'tool-button active');
+});
+
+test('asset and properties menus can be collapsed and expanded', async () => {
+  const assetToggle = page.locator('#toggle-asset-rail');
+  await assetToggle.click();
+  assert.equal(await assetToggle.getAttribute('aria-expanded'), 'false');
+  await assetToggle.click();
+  assert.equal(await assetToggle.getAttribute('aria-expanded'), 'true');
+
+  const inspectorToggle = page.locator('#toggle-inspector');
+  await inspectorToggle.click();
+  assert.equal(await inspectorToggle.getAttribute('aria-expanded'), 'false');
+  await inspectorToggle.click();
+  assert.equal(await inspectorToggle.getAttribute('aria-expanded'), 'true');
 });
 
 test('narrow screens keep the canvas and field controls usable', async () => {
@@ -352,12 +367,13 @@ test('hovering over a scene object highlights it without selecting it', async ()
   await page.waitForFunction(() => !document.querySelector('#room-canvas')?.dataset.hoveredObject);
 });
 
-test('top view locks camera rotation and keeps a vertical view while dragging', async () => {
+test('top view can be orbited after selecting it from the camera menu', async () => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#viewport canvas').first().waitFor();
   await page.waitForTimeout(250);
-  await page.locator('#view-top').click();
+  await page.locator('#camera-view-picker-button').click();
+  await page.locator('#camera-view-top').click();
   const canvas = page.locator('#room-canvas');
   const bounds = await canvas.boundingBox();
   const before = await canvas.screenshot();
@@ -369,7 +385,7 @@ test('top view locks camera rotation and keeps a vertical view while dragging', 
   await page.mouse.up();
   await page.waitForTimeout(120);
 
-  assert.equal((await canvas.screenshot()).equals(before), true, 'top view should not orbit or pan from a drag');
+  assert.equal((await canvas.screenshot()).equals(before), false, 'top view should orbit from a drag');
 });
 
 test('rotation inspector edits all three Euler axes independently', async () => {
@@ -392,7 +408,7 @@ test('rotate gizmo exposes X and Z axes as well as Y', async () => {
   const ringRadius = cameraDistance * 1.9 * Math.tan(42 * Math.PI / 360) * 0.8 * 0.5 / 4;
   await page.mouse.click(center.x, center.y);
   await page.keyboard.press('r');
-  assert.equal(await page.locator('#mode-rotate').getAttribute('class'), 'tool-button active');
+  assert.equal(await page.locator('#transform-mode-toggle').getAttribute('aria-pressed'), 'true');
 
   for (const [axis, startPoint, endPoint] of [
     ['x', rotationRingPoint('x', Math.PI / 4, ringRadius), rotationRingPoint('x', Math.PI * 4 / 9, ringRadius)],

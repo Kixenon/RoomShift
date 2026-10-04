@@ -1,5 +1,6 @@
-import { rotatedHalfExtents, rotationMatrixXYZ } from '../model/room-scene.js';
+import { rotatedHalfExtents, rotationMatrixXYZ, DEVICE_MODELS } from '../model/room-scene.js';
 import { findObjectCollision } from '../model/room-collision.js';
+import { isOpeningObject } from '../model/openings.js';
 
 const LIMITS = Object.freeze({
   roomMin: 2,
@@ -86,10 +87,10 @@ export function validateScene(scene) {
       && (!Number.isFinite(object.intensity) || object.intensity < 0 || object.intensity > 2)) {
       throw new RangeError(`Object ${object.id ?? '(unknown)'} source strength must be between 0 and 2.`);
     }
-    if (object.model === 'fan' && object.enabled !== undefined && typeof object.enabled !== 'boolean') {
-      throw new TypeError(`Fan ${object.id ?? '(unknown)'} enabled state must be boolean.`);
+    if (DEVICE_MODELS.includes(object.model) && object.enabled !== undefined && typeof object.enabled !== 'boolean') {
+      throw new TypeError(`Device ${object.id ?? '(unknown)'} enabled state must be boolean.`);
     }
-    if (object.model === 'window'
+    if (isOpeningObject(object)
       && ((object.flowDirection !== undefined && !['exchange', 'inlet', 'outlet'].includes(object.flowDirection))
         || (object.flowRate !== undefined && (!Number.isFinite(object.flowRate) || object.flowRate < 0 || object.flowRate > 1.5)))) {
       throw new RangeError(`Window ${object.id ?? '(unknown)'} has invalid airflow settings.`);
@@ -191,7 +192,7 @@ function inverseRotate(x, y, z, matrix) {
 export function buildSolidMask(scene, grid) {
   const solid = new Uint8Array(grid.nx * grid.ny * grid.nz);
   for (const object of scene.objects) {
-    if (object.model === 'fan' || object.model === 'window') continue;
+    if (object.model === 'fan' || isOpeningObject(object)) continue;
     const [halfWidth, halfHeight, halfDepth] = rotatedHalfExtents(object.dimensions, object.rotation);
     const centerY = object.position.y + object.dimensions.height / 2;
     const minI = clamp(Math.floor((object.position.x - halfWidth) / grid.dx), 0, grid.nx - 1);
@@ -233,7 +234,7 @@ export function buildWindowBoundary(scene, grid, settings = {}) {
   const outlets = new Uint8Array(count);
   const pressure = new Float32Array(count);
   for (const window of scene.objects) {
-    if (window.model !== 'window' || !window.open) continue;
+    if (!isOpeningObject(window) || !window.open) continue;
     const alongX = window.wall === 'back' || window.wall === 'front';
     const sideBit = window.wall === 'left' ? 1
       : window.wall === 'right' ? 2
@@ -563,7 +564,7 @@ function rayIsClear(start, endX, endY, endZ, blockers) {
 export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULTS) {
   const acceleration = new Float32Array(grid.nx * grid.ny * grid.nz * 4);
   const fans = scene.objects.filter((object) => object.model === 'fan' && object.enabled !== false);
-  const blockers = scene.objects.filter((object) => object.model !== 'fan' && object.model !== 'window').map((object) => ({
+  const blockers = scene.objects.filter((object) => object.model !== 'fan' && !isOpeningObject(object)).map((object) => ({
     center: { x: object.position.x, y: object.position.y + object.dimensions.height / 2, z: object.position.z },
     halfWidth: object.dimensions.width / 2,
     halfHeight: object.dimensions.height / 2,

@@ -1,4 +1,5 @@
 import { rotationMatrixXYZ } from './room-transform.js';
+import { isOpeningObject } from './openings.js';
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [
@@ -36,7 +37,7 @@ function overlapsBoxes(a, b) {
   return true;
 }
 
-function overlapsWindows(a, b) {
+function overlapsOpenings(a, b) {
   if (a.wall !== b.wall) return false;
   const along = a.wall === 'left' || a.wall === 'right' ? 'z' : 'x';
   const alongOverlap = Math.abs(a.position[along] - b.position[along])
@@ -49,8 +50,8 @@ function overlapsWindows(a, b) {
 export function findObjectCollision(objects, candidate, ignoreId = candidate.id) {
   for (const other of objects) {
     if (other.id === ignoreId) continue;
-    if (candidate.model === 'window' || other.model === 'window') {
-      if (candidate.model === 'window' && other.model === 'window' && overlapsWindows(candidate, other)) return other;
+    if (isOpeningObject(candidate) || isOpeningObject(other)) {
+      if (isOpeningObject(candidate) && isOpeningObject(other) && overlapsOpenings(candidate, other)) return other;
       continue;
     }
     if (overlapsBoxes(candidate, other)) return other;
