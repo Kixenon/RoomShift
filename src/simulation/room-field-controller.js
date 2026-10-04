@@ -1,6 +1,7 @@
+import { cacheSnapshot, fieldSceneKey } from './room-field-analysis.js';
 const MODES = new Set(['airflow', 'temperature', 'light']);
 const DISPLAY_STYLES = Object.freeze({
-  airflow: new Set(['gas', 'volume', 'slice']),
+  airflow: new Set(['volume', 'slice']),
   temperature: new Set(['surfaces', 'volume', 'slice']),
   light: new Set(['preview', 'map']),
 });
@@ -14,8 +15,14 @@ export class RoomFieldController {
     this.debounceMs = debounceMs;
     this.scene = null;
     this.mode = null;
-    this.displayStyles = { airflow: 'gas', temperature: 'surfaces', light: 'preview' };
+    this.displayStyles = { airflow: 'slice', temperature: 'surfaces', light: 'preview' };
     this.sliceHeight = 1.2;
+    this.durationSeconds = 3;
+    this.cellSize = 0.15;
+    this.cache = new Map();
+    this.baseline = null;
+    this.probe = { x: 2.6, y: 1.2, z: 2 };
+    this.displayRanges = { temperature: { minimum: 10, maximum: 30 }, speedMaximum: 2.5 };
     this.result = null;
     this.latestRequestId = 0;
     this.inFlight = null;
@@ -31,6 +38,7 @@ export class RoomFieldController {
 
   setScene(scene) {
     this.scene = scene;
+    this.probe = { x: Math.min(this.probe.x, scene.room.width), y: Math.min(this.probe.y, scene.room.height), z: Math.min(this.probe.z, scene.room.depth) };
     this.sliceHeight = Math.min(this.sliceHeight, scene.room.height);
     if (!this.mode || (this.mode === 'light' && this.displayStyles.light === 'preview')) return;
     if (this.interactionActive) {
@@ -101,6 +109,12 @@ export class RoomFieldController {
     if (!this.mode || !DISPLAY_STYLES[this.mode]?.has(style)) return;
     if (this.displayStyles[this.mode] === style) return;
     this.displayStyles[this.mode] = style;
+    if (this.mode !== 'light') {
+      const loading = Boolean(this.pendingRequest || this.inFlight);
+      if (this.result) this.viewport.setFields(this.result, this.mode, { displayStyle: style, sliceHeight: this.sliceHeight, objectGroups: this.viewport.groups });
+      this.onState({ mode: this.mode, loading, result: this.result, stale: loading, displayStyle: style });
+      return;
+    }
     this.cancelInFlight();
     this.latestRequestId += 1;
     this.pendingRequest = null;
@@ -136,19 +150,65 @@ export class RoomFieldController {
         objectGroups: this.viewport.groups,
       });
     }
-    this.onState({ mode: this.mode, loading: Boolean(this.pendingRequest || this.inFlight), result: this.result, error: null, displayStyle: this.displayStyle });
+    this.onState({ mode: this.mode, loading: Boolean(this.pendingRequest || this.inFlight), result: this.result, stale: Boolean(this.pendingRequest || this.inFlight), error: null, displayStyle: this.displayStyle });
+  }
+
+  setComparison(baseline, probe = this.probe) {
+    this.baseline = baseline;
+    this.probe = probe;
+    if (this.mode && this.mode !== 'light') this.scheduleUpdate({ preserveResult: true });
+  }
+
+  setDisplayRanges(ranges) {
+    this.displayRanges = ranges;
+    if (this.result) {
+      this.result.displayRanges = ranges;
+      this.viewport.setFields(this.result, this.mode, { displayStyle: this.displayStyle, sliceHeight: this.sliceHeight, objectGroups: this.viewport.groups });
+      this.onState({ mode: this.mode, loading: Boolean(this.inFlight || this.pendingRequest), result: this.result, stale: Boolean(this.inFlight || this.pendingRequest) });
+    }
+  }
+
+  setSimulationTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 120 || seconds === this.durationSeconds) return;
+    this.durationSeconds = seconds;
+    if (this.mode && this.mode !== 'light') this.scheduleUpdate({ preserveResult: true });
+  }
+
+  setResolution(cellSize) {
+    if (![0.075, 0.15, 0.25].includes(cellSize) || cellSize === this.cellSize) return;
+    this.cellSize = cellSize;
+    if (this.mode && this.mode !== 'light') this.scheduleUpdate({ preserveResult: true });
+  }
+
+  cacheKey() {
+    return JSON.stringify([this.mode === 'light' ? this.scene : fieldSceneKey(this.scene, this.cellSize), this.mode === 'light' ? 'light' : 'fields', this.durationSeconds, this.cellSize, this.baseline && fieldSceneKey(this.baseline, this.cellSize), this.probe]);
   }
 
   scheduleUpdate({ preserveResult = false } = {}) {
     if (!this.scene || !this.mode) return;
     this.cancelInFlight();
     this.latestRequestId += 1;
+    const cached = this.cache.get(this.cacheKey());
+    if (cached) {
+      clearTimeout(this.timer);
+      this.timer = null;
+      this.pendingRequest = null;
+      cached.displayRanges = this.displayRanges;
+      this.result = cached;
+      this.viewport.setFields(cached, this.mode, { displayStyle: this.displayStyle, sliceHeight: this.sliceHeight, objectGroups: this.viewport.groups });
+      this.onState({ mode: this.mode, loading: false, result: cached, displayStyle: this.displayStyle });
+      return;
+    }
     if (!preserveResult) this.result = null;
     this.pendingRequest = {
       requestId: this.latestRequestId,
       mode: this.mode,
       scene: this.scene,
       displayStyle: this.displayStyle,
+      durationSeconds: this.durationSeconds,
+      cellSize: this.cellSize,
+      baseline: this.baseline,
+      probe: this.probe,
     };
     if (!preserveResult) this.viewport.clearFields();
     this.onState({ mode: this.mode, loading: true, result: this.result, error: null, stale: preserveResult, displayStyle: this.displayStyle });
@@ -176,7 +236,7 @@ export class RoomFieldController {
     const response = event.data;
     if (!this.inFlight || response.requestId !== this.inFlight.requestId) return;
     const request = this.inFlight;
-    this.inFlight = null;
+    if (!response.progress) this.inFlight = null;
     const isCurrent = request.requestId === this.latestRequestId && request.mode === this.mode;
     if (isCurrent) {
       if (response.error) {
@@ -184,16 +244,20 @@ export class RoomFieldController {
         this.viewport.clearFields();
         this.onState({ mode: this.mode, loading: false, result: null, error: response.error, displayStyle: this.displayStyle });
       } else {
+        response.result.displayRanges = this.displayRanges;
         this.result = response.result;
+        if (!response.progress) {
+          cacheSnapshot(this.cache, this.cacheKey(), response.result);
+        }
         this.viewport.setFields(response.result, this.mode, {
           displayStyle: this.displayStyle,
           sliceHeight: this.sliceHeight,
           objectGroups: this.viewport.groups,
         });
-        this.onState({ mode: this.mode, loading: false, result: response.result, error: null, stale: false, displayStyle: this.displayStyle });
+        this.onState({ mode: this.mode, loading: Boolean(response.progress), result: response.result, error: null, stale: false, displayStyle: this.displayStyle });
       }
     }
-    if (this.pendingRequest) this.pump();
+    if (!response.progress && this.pendingRequest) this.pump();
   }
 
   handleWorkerError(event) {

@@ -51,7 +51,7 @@ test('a fan with zero output does not animate its rotor', () => {
   assert.equal(viewport.fanRotors.get(fan.id).userData.enabled, false);
 });
 
-test('viewport frames advance field animation while reduced motion stops decorative rotors', () => {
+test('viewport frames leave solved time points fixed and reduced motion stops decorative rotors', () => {
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
   let animationTime = null;
   globalThis.requestAnimationFrame = () => 1;
@@ -77,6 +77,6 @@ test('viewport frames advance field animation while reduced motion stops decorat
     else delete globalThis.requestAnimationFrame;
   }
 
-  assert.equal(animationTime, 2.5);
+  assert.equal(animationTime, null);
   assert.equal(rotor.rotation.z, 0);
 });

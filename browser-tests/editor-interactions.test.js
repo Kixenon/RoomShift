@@ -25,7 +25,7 @@ test.before(async () => {
   baseUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
 
   browser = await chromium.launch({
-    args: ['--no-sandbox'],
+    args: ['--no-sandbox', '--enable-unsafe-webgpu', ...(process.platform === 'darwin' ? ['--use-angle=metal'] : [])],
     executablePath: browserExecutable,
     headless: true,
   });
@@ -41,6 +41,7 @@ test.before(async () => {
 
 test.beforeEach(async () => {
   browserErrors = [];
+  await page.addInitScript(() => localStorage.clear());
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 577 });
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
@@ -217,9 +218,8 @@ test('air, heat, and light fields update automatically and after scene edits', a
   assert.ok(Number.isFinite(Number(await canvas.getAttribute('data-field-rms-divergence'))));
   assert.match(await page.locator('#field-legend-title').textContent(), /Airflow/);
   assert.equal(await page.locator('#show-airflow').getAttribute('aria-pressed'), 'true');
-  assert.ok(Number(await canvas.getAttribute('data-field-volume-voxels')) > 0, 'animated gas should use a 3D density volume');
-  assert.ok(Number(await canvas.getAttribute('data-gas-density-max')) > 0);
-  assert.ok(Number(await canvas.getAttribute('data-gas-occupied-voxels')) > 0);
+  assert.equal(await page.locator('#field-display-label').textContent(), 'Slice');
+  assert.equal(await canvas.getAttribute('data-gas-density-max'), null);
 
   await page.locator('#field-display-button').click();
   await page.locator('[data-display-style="volume"]').click();
@@ -265,8 +265,7 @@ test('a fan close to a wall keeps a visible resolved airflow field', async () =>
     const canvas = document.querySelector('#room-canvas');
     return canvas?.dataset.fieldMode === 'airflow'
       && Number(canvas.dataset.fieldMaxSpeed) > 0.05
-      && Number(canvas.dataset.gasDensityMax) > 0
-      && Number(canvas.dataset.gasOccupiedVoxels) > 0;
+      && Number(canvas.dataset.fieldDuration) === 3;
   });
   assert.ok(Number(await page.locator('#room-canvas').getAttribute('data-field-cells')) > 0);
 });

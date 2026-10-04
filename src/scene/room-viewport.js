@@ -4,6 +4,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
+import { objectParts } from '../model/object-parts.js';
 import { isOpeningObject } from '../model/openings.js';
 
 // Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
@@ -76,65 +77,8 @@ function createFan(group, dimensions) {
   group.add(rotor);
 }
 
-function createSofa(group, dimensions) {
-  const { width: w, height: h, depth: d } = dimensions;
-  box(group, { width: w * 0.92, height: h * 0.53, depth: d * 0.87 }, { x: 0, y: -h * 0.13, z: 0 }, 0x718f79);
-  box(group, { width: w * 0.82, height: h * 0.18, depth: d * 0.77 }, { x: 0, y: -h * 0.04, z: d * 0.02 }, 0x9aaf91);
-  box(group, { width: w * 0.88, height: h * 0.34, depth: d * 0.2 }, { x: 0, y: h * 0.16, z: -d * 0.34 }, 0x799681);
-  for (const side of [-1, 1]) {
-    box(group, { width: w * 0.09, height: h * 0.52, depth: d * 0.85 }, { x: side * w * 0.43, y: -h * 0.1, z: 0 }, 0x688570);
-    box(group, { width: w * 0.19, height: h * 0.11, depth: d * 0.22 }, { x: side * w * 0.21, y: h * 0.1, z: -d * 0.2 }, 0xb7c5a8);
-    cylinder(group, 0.025, 0.025, h * 0.14, { x: side * w * 0.38, y: -h * 0.43, z: d * 0.31 }, 0x786b56, 8);
-  }
-}
-
-function createBed(group, dimensions) {
-  const { width, height, depth } = dimensions;
-  const frameHeight = height * 0.16;
-  const mattressHeight = height * 0.42;
-  const mattressY = -height / 2 + frameHeight + mattressHeight / 2;
-  box(group, { width: width * 0.94, height: frameHeight, depth: depth * 0.94 }, { x: 0, y: -height / 2 + frameHeight / 2, z: 0 }, 0x786b5c);
-  box(group, { width: width * 0.9, height: mattressHeight, depth: depth * 0.9 }, { x: 0, y: mattressY, z: 0 }, 0xe1dfd5);
-  box(group, { width: width * 0.94, height, depth: depth * 0.09 }, { x: 0, y: 0, z: -depth * 0.43 }, 0x8b7e70);
-  for (const side of [-1, 1]) {
-    box(group, { width: width * 0.36, height: mattressHeight * 0.28, depth: depth * 0.14 }, { x: side * width * 0.22, y: mattressY + mattressHeight * 0.38, z: -depth * 0.3 }, 0xf4f2ea);
-  }
-}
-
-function createDesk(group, dimensions) {
-  const { width: w, height: h, depth: d } = dimensions;
-  const topH = Math.min(0.08, h * 0.12);
-  box(group, { width: w, height: topH, depth: d }, { x: 0, y: h / 2 - topH / 2, z: 0 }, COLORS.desk);
-  const legH = h - topH;
-  for (const x of [-1, 1]) {
-    for (const z of [-1, 1]) {
-      box(group, { width: Math.min(0.055, w * 0.07), height: legH, depth: Math.min(0.055, d * 0.1) }, { x: x * (w / 2 - 0.05), y: -topH / 2, z: z * (d / 2 - 0.05) }, 0x8f8069);
-    }
-  }
-  box(group, { width: w * 0.28, height: h * 0.06, depth: d * 0.22 }, { x: -w * 0.08, y: h * 0.17, z: -d * 0.12 }, 0x8a9c91);
-}
-
-function createTable(group, dimensions) {
-  const { width: w, height: h, depth: d } = dimensions;
-  const topH = Math.min(0.075, h * 0.22);
-  box(group, { width: w, height: topH, depth: d }, { x: 0, y: h / 2 - topH / 2, z: 0 }, COLORS.table);
-  const legH = Math.max(0.08, h - topH);
-  for (const x of [-1, 1]) {
-    for (const z of [-1, 1]) {
-      cylinder(group, 0.023, 0.03, legH, { x: x * w * 0.4, y: -topH / 2, z: z * d * 0.37 }, 0x8d7a61, 8);
-    }
-  }
-}
-
-function createLamp(group, dimensions) {
-  const { width, height, depth } = dimensions;
-  const radius = Math.min(width, depth) * 0.45;
-  cylinder(group, radius * 0.78, radius, 0.06, { x: 0, y: -height / 2 + 0.03, z: 0 }, COLORS.metal);
-  cylinder(group, 0.018, 0.023, height * 0.79, { x: 0, y: -height * 0.12, z: 0 }, COLORS.metal, 10);
-  const shade = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.12, width * 0.24, height * 0.17, 20, 1, true), material(COLORS.shade, { side: THREE.DoubleSide }));
-  shade.position.set(0, height * 0.31, 0);
-  group.add(shade);
-  cylinder(group, width * 0.1, width * 0.1, 0.035, { x: 0, y: height * 0.22, z: 0 }, 0xe8d89d, 16);
+function createFurniture(group, dimensions, model) {
+  for (const part of objectParts(model, dimensions)) box(group, part.dimensions, part.position, part.color);
 }
 
 function createHeater(group, dimensions) {
@@ -178,7 +122,7 @@ function createOpening(group, dimensions, open, model) {
   }
 }
 
-const BUILDERS = Object.freeze({ fan: createFan, sofa: createSofa, bed: createBed, desk: createDesk, table: createTable, lamp: createLamp, heater: createHeater });
+const BUILDERS = Object.freeze({ fan: createFan, heater: createHeater, ...Object.fromEntries(['sofa', 'bed', 'desk', 'table', 'lamp'].map((model) => [model, (group, dimensions) => createFurniture(group, dimensions, model)])) });
 
 function disposeTree(root) {
   root.traverse((child) => {
@@ -200,7 +144,7 @@ function createWallGeometry(width, height, windows, wall, room) {
   shape.lineTo(width / 2, height);
   shape.lineTo(-width / 2, height);
   shape.closePath();
-  for (const window of windows.filter((item) => item.wall === wall && item.open)) {
+  for (const window of windows.filter((item) => item.wall === wall && (item.open || item.model === 'window'))) {
     const center = wall === 'front'
       ? window.position.x - room.width / 2
       : wall === 'back'
@@ -252,7 +196,6 @@ export class RoomViewport {
     this.lightingLights = [];
     this.timeMinutes = DEFAULT_TIME_MINUTES;
     this.daylightState = null;
-    this.sunPatchMeshes = [];
     this.pointerStart = null;
     this.projection = 'perspective';
     this.orthoFrustumHeight = 8;
@@ -287,7 +230,7 @@ export class RoomViewport {
     this.keyLight.shadow.camera.far = 50;
     this.keyLight.shadow.bias = -0.0002;
     this.keyLight.position.set(-4, 8, 6);
-    this.scene.add(this.hemisphereLight, this.keyLight);
+    this.scene.add(this.hemisphereLight, this.keyLight, this.keyLight.target);
     this.setupControls(this.camera, new THREE.Vector3(0, 1.1, 0));
 
     this.selectionBox = null;
@@ -530,6 +473,20 @@ export class RoomViewport {
     if (showLighting) this.setLightingPreview(true);
   }
 
+  setProbe(point) {
+    if (!point) {
+      if (this.probeMarker) this.probeMarker.visible = false;
+      return;
+    }
+    if (!this.probeMarker) {
+      this.probeMarker = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), new THREE.MeshBasicMaterial({ color: 0x9b35d0, depthTest: false }));
+      this.probeMarker.renderOrder = 10;
+      this.scene.add(this.probeMarker);
+    }
+    this.probeMarker.visible = true;
+    this.probeMarker.position.set(point.x - this.roomScene.room.width / 2, point.y, point.z - this.roomScene.room.depth / 2);
+  }
+
   setFields(result, mode, options = {}) {
     this.clearFields();
     if (mode === 'light' && options.displayStyle !== 'map') {
@@ -545,6 +502,7 @@ export class RoomViewport {
     this.renderer.domElement.dataset.fieldBackend = result.backend ?? 'cpu-preview';
     this.renderer.domElement.dataset.fieldGpuFallbackReason = result.gpuFallbackReason ?? '';
     this.renderer.domElement.dataset.fieldCellSize = String(result.grid.cellSize ?? Math.max(result.grid.dx, result.grid.dy, result.grid.dz));
+    this.renderer.domElement.dataset.fieldDuration = String(result.durationSeconds ?? 0);
     this.renderer.domElement.dataset.fieldMaxSpeed = String(result.stats.maxSpeed ?? 0);
     this.renderer.domElement.dataset.fieldRmsDivergence = String(result.stats.rmsDivergence ?? 0);
     this.renderer.domElement.dataset.fieldBoundaryFlowImbalance = String(result.stats.boundaryFlowImbalancePercent ?? 0);
@@ -553,10 +511,6 @@ export class RoomViewport {
     this.renderer.domElement.dataset.fieldMeanTemperature = String(result.stats.meanTemperature ?? result.ambientTemperature ?? 0);
     this.renderer.domElement.dataset.fieldMaxTemperature = String(result.stats.maxTemperature ?? result.stats.maxLevel ?? 0);
     this.renderer.domElement.dataset.fieldVolumeVoxels = String(this.fieldLayer?.userData.volumeVoxelCount ?? 0);
-    if (mode === 'airflow' && this.fieldLayer) {
-      this.renderer.domElement.dataset.gasVoxels = String(this.fieldLayer.userData.gasVoxelCount);
-      this.renderer.domElement.dataset.gasSourceCounts = JSON.stringify(this.fieldLayer.userData.gasSourceCounts);
-    }
     this.renderer.domElement.dataset.fieldRevision = String(Number(this.renderer.domElement.dataset.fieldRevision ?? 0) + 1);
   }
 
@@ -567,6 +521,7 @@ export class RoomViewport {
       this.fieldLayer = null;
     }
     this.setLightingPreview(false);
+    delete this.renderer.domElement.dataset.fieldDuration;
     delete this.renderer.domElement.dataset.fieldMode;
     delete this.renderer.domElement.dataset.fieldCells;
     delete this.renderer.domElement.dataset.fieldBackend;
@@ -591,7 +546,6 @@ export class RoomViewport {
   setLightingPreview(enabled) {
     if (enabled === this.lightingPreview) return;
     this.lightingPreview = enabled;
-    this.clearSunPatches();
     for (const light of this.lightingLights) {
       this.scene.remove(light);
       light.dispose?.();
@@ -606,6 +560,7 @@ export class RoomViewport {
       this.keyLight.castShadow = false;
       this.keyLight.visible = true;
       this.keyLight.position.set(-4, 8, 6);
+      this.keyLight.target.position.set(0, 0, 0);
       this.hemisphereLight.color.setHex(0xeaf3ed);
       this.renderer.toneMappingExposure = 1.04;
       this.scene.background.set(0xf6f8f6);
@@ -659,6 +614,7 @@ export class RoomViewport {
     this.daylightState = describeDaylight({
       scene: this.roomScene,
       timeMinutes: this.timeMinutes,
+      ...(this.roomScene.room.daylightDate ? { date: Object.fromEntries(['year', 'month', 'day'].map((key, index) => [key, Number(this.roomScene.room.daylightDate.split('-')[index])])) } : {}),
     });
     if (this.lightingPreview) this.applyDaylight();
     return this.daylightState;
@@ -673,7 +629,7 @@ export class RoomViewport {
     this.keyLight.intensity = intensity;
     // Park the sun far enough out that its shadow camera covers the room.
     const reach = Math.max(this.roomScene?.room.width ?? 5, this.roomScene?.room.depth ?? 4) + 6;
-    this.keyLight.position.set(direction.x * reach, Math.max(direction.y, 0.05) * reach, direction.z * reach);
+    this.keyLight.position.set(direction.x * reach, direction.y * reach, direction.z * reach);
     const shadowRadius = Math.max(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
     Object.assign(this.keyLight.shadow.camera, {
       left: -shadowRadius,
@@ -682,14 +638,10 @@ export class RoomViewport {
       bottom: -shadowRadius,
     });
     this.keyLight.shadow.camera.updateProjectionMatrix();
-    this.keyLight.target.position.set(
-      (this.roomScene?.room.width ?? 5) / 2,
-      0,
-      (this.roomScene?.room.depth ?? 4) / 2,
-    );
+    this.keyLight.target.position.set(0, 0, 0);
     this.keyLight.target.updateMatrixWorld();
-    this.keyLight.castShadow = state.sun.daylight > 0.02;
-    this.keyLight.visible = state.sun.daylight > 0;
+    this.keyLight.castShadow = direction.y > 0 && state.sun.daylight > 0.02;
+    this.keyLight.visible = direction.y > 0 && state.sun.daylight > 0;
 
     // Keep only a small neutral fill for readability. Exterior light comes from
     // the shadow-casting sun, which the room shell blocks except at open apertures.
@@ -703,7 +655,6 @@ export class RoomViewport {
       const lamp = this.roomScene.objects.find((object) => object.id === light.userData.objectId);
       light.power = (lamp?.enabled !== false ? DEFAULT_LAMP_POWER : 0) * (lamp?.intensity ?? 1);
     }
-    this.rebuildSunPatches();
     this.updateDaylightDataset();
   }
 
@@ -716,7 +667,7 @@ export class RoomViewport {
     data.sunAzimuth = String(Number(state.sun.azimuth.toFixed(1)));
     data.clockTime = state.clock;
     data.lampsOn = String(this.roomScene.objects.some((object) => object.model === 'lamp' && object.enabled !== false));
-    data.sunPatches = String(this.sunPatchMeshes.length);
+    data.sunPatches = String(state.patches.length);
   }
 
   clearDaylightDataset() {
@@ -726,54 +677,6 @@ export class RoomViewport {
     delete data.clockTime;
     delete data.lampsOn;
     delete data.sunPatches;
-  }
-
-  clearSunPatches() {
-    for (const mesh of this.sunPatchMeshes) {
-      this.sceneRoot.remove(mesh);
-      disposeTree(mesh);
-    }
-    this.sunPatchMeshes = [];
-  }
-
-  /** Sunlit floor patches, drawn as translucent polygons just above the floor. */
-  rebuildSunPatches() {
-    this.clearSunPatches();
-    const state = this.daylightState;
-    if (!state || !state.patches.length) return;
-    const floorY = 0.012;
-
-    for (const patch of state.patches) {
-      const points = patch.polygon;
-      if (points.length < 3) continue;
-      const positions = [];
-      for (let index = 1; index < points.length - 1; index += 1) {
-        for (const point of [points[0], points[index], points[index + 1]]) {
-          positions.push(point.x, floorY, point.z);
-        }
-      }
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-      geometry.computeVertexNormals();
-      const colour = state.sun.colour;
-      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-        color: new THREE.Color(colour.r, colour.g, colour.b),
-        transparent: true,
-        // The directional light already washes the whole floor, so the patch is
-        // what makes direct sun legible. Grazing light spreads the same energy
-        // over more floor and reads as a softer wash rather than a hard shape.
-        opacity: Math.min(0.9, 0.34 + 0.62 * patch.intensity),
-        depthWrite: false,
-        toneMapped: false,
-      }));
-      mesh.renderOrder = 2;
-      mesh.name = `sun-patch-${patch.windowId}`;
-      mesh.userData.windowId = patch.windowId;
-      mesh.userData.area = patch.area;
-      mesh.userData.intensity = patch.intensity;
-      this.sceneRoot.add(mesh);
-      this.sunPatchMeshes.push(mesh);
-    }
   }
 
   applyLightingToMaterial(item, enabled = this.lightingPreview) {
@@ -997,15 +900,6 @@ export class RoomViewport {
     const seconds = time / 1000;
     const delta = this.lastAnimationTime === undefined ? 0 : THREE.MathUtils.clamp(seconds - this.lastAnimationTime, 0, 0.05);
     this.lastAnimationTime = seconds;
-    // Selecting a simulated field is an explicit request to see it evolve.
-    // Reduced motion still stops decorative object animation such as fan rotors.
-    this.fieldLayer?.userData.animate?.(seconds);
-    if (this.fieldLayer?.userData.gasVoxelCount) {
-      this.renderer.domElement.dataset.gasDensityMax = String(this.fieldLayer.userData.maxDensity ?? 0);
-      this.renderer.domElement.dataset.gasOccupiedVoxels = String(this.fieldLayer.userData.occupiedVoxels ?? 0);
-      this.renderer.domElement.dataset.tracerVolumeM3 = String(this.fieldLayer.userData.tracerVolumeM3 ?? 0);
-      this.renderer.domElement.dataset.exteriorTracerVolumeM3 = String(this.fieldLayer.userData.exteriorTracerVolumeM3 ?? 0);
-    }
     if (!this.prefersReducedMotion) {
       for (const rotor of this.fanRotors.values()) {
         if (rotor.userData.enabled) rotor.rotation.z += delta * 19;
@@ -1025,6 +919,7 @@ export class RoomViewport {
     this.orbit.dispose();
     this.transform.dispose();
     disposeTree(this.sceneRoot);
+    if (this.probeMarker) disposeTree(this.probeMarker);
     this.renderer.dispose();
   }
 }

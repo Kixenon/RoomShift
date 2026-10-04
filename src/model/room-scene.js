@@ -414,3 +414,11 @@ export function removeObject(scene, objectId) {
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const round = (value) => Number(value.toFixed(2));
 const clampAndRound = (value, min, max) => clamp(round(clamp(value, min, max)), min, max);
+
+export function setHeaterPower(scene, objectId, powerWatts) {
+  if (!Number.isFinite(powerWatts) || powerWatts < 0 || powerWatts > 3000) throw new RangeError('Heater power must be between 0 and 3000 watts.');
+  const existing = scene.objects.find((object) => object.id === objectId && object.model === 'heater');
+  if (!existing) throw new RangeError(`Unknown heater: ${objectId}`);
+  const object = { ...existing, powerWatts };
+  return { object, scene: { ...scene, objects: scene.objects.map((item) => item.id === objectId ? object : item) } };
+}

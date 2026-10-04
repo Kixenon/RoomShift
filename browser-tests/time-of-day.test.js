@@ -25,7 +25,7 @@ test.before(async () => {
   });
   await server.listen();
   baseUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
-  browser = await chromium.launch({ args: ['--no-sandbox'], executablePath: browserExecutable, headless: true });
+  browser = await chromium.launch({ args: ['--no-sandbox', '--enable-unsafe-webgpu', ...(process.platform === 'darwin' ? ['--use-angle=metal'] : [])], executablePath: browserExecutable, headless: true });
   page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on('pageerror', (error) => browserErrors.push(error.message));
   page.on('console', (message) => {
@@ -37,6 +37,7 @@ test.before(async () => {
 
 test.beforeEach(async () => {
   browserErrors = [];
+  await page.addInitScript(() => localStorage.clear());
   await page.goto(baseUrl, { waitUntil: 'load' });
   await page.waitForSelector('#room-canvas');
 });
@@ -158,7 +159,7 @@ test('device power is controlled in its properties and stays independent of time
   assert.equal((await canvasState()).lampsOn, 'true', 'day does not switch devices off');
 });
 
-test('a closed window casts no sun patch but an open sunward one does', async () => {
+test('a closed glass window still admits sunlight', async () => {
   await page.locator('#show-light').click();
   await setClock(10 * 60);
   assert.equal((await canvasState()).patches, 0, 'the default scene has no windows');
@@ -171,7 +172,7 @@ test('a closed window casts no sun patch but an open sunward one does', async ()
 
   await page.locator('[data-window-open]').uncheck();
   await page.waitForTimeout(500);
-  assert.equal((await canvasState()).patches, 0, 'a closed window should not');
+  assert.equal((await canvasState()).patches, 1, 'closed glass still admits direct sunlight');
 });
 
 test('a shaded wall casts no patch at the same moment', async () => {

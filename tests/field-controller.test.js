@@ -35,7 +35,7 @@ function createHarness(t, debounceMs = 0) {
 
 const flushTimers = () => new Promise((resolve) => setTimeout(resolve, 5));
 
-const scene = (id) => ({ room: { width: 5.2, depth: 4, height: 2.7 }, objects: [{ id }] });
+const scene = (id) => ({ room: { width: 5.2, depth: 4, height: 2.7 }, objects: [{ id, position: { x: { one: 1, two: 2, three: 3 }[id] ?? 0 } }] });
 
 test('selecting a field mode sends the current scene and renders its worker result', async (t) => {
   const harness = createHarness(t);
@@ -51,7 +51,7 @@ test('selecting a field mode sends the current scene and renders its worker resu
   harness.worker.respond({ requestId: request.requestId, result });
 
   assert.deepEqual(harness.rendered[0].slice(0, 2), [result, 'airflow']);
-  assert.deepEqual(harness.rendered[0][2], { displayStyle: 'gas', sliceHeight: 1.2, objectGroups: undefined });
+  assert.deepEqual(harness.rendered[0][2], { displayStyle: 'slice', sliceHeight: 1.2, objectGroups: undefined });
   assert.equal(harness.states.at(-1).loading, false);
   assert.equal(harness.states.at(-1).result, result);
 });
@@ -130,4 +130,53 @@ test('a worker crash clears the current field result', async (t) => {
   assert.equal(harness.controller.result, null);
   assert.ok(harness.cleared.length >= 2);
   assert.equal(harness.states.at(-1).error, 'worker crashed');
+});
+
+test('progress renders the solved time point without releasing the active request', async (t) => {
+  const harness = createHarness(t);
+  harness.controller.setScene(scene('one'));
+  harness.controller.setMode('airflow');
+  await flushTimers();
+  const request = harness.worker.requests[0];
+  const result = { grid: {}, fields: {}, stats: {}, durationSeconds: 0.5 };
+  harness.worker.respond({ requestId: request.requestId, result, progress: true });
+  assert.equal(harness.controller.inFlight.requestId, request.requestId);
+  assert.equal(harness.states.at(-1).loading, true);
+  harness.worker.respond({ requestId: request.requestId, result: { ...result, durationSeconds: 3 } });
+  assert.equal(harness.controller.inFlight, null);
+  assert.equal(harness.states.at(-1).loading, false);
+});
+
+test('mode switching reuses air/heat results and time changes carry the requested elapsed time', async (t) => {
+  const harness = createHarness(t);
+  harness.controller.setScene(scene('one'));
+  harness.controller.setMode('airflow');
+  await flushTimers();
+  const request = harness.worker.requests[0];
+  harness.worker.respond({ requestId: request.requestId, result: { grid: {}, fields: {}, stats: {}, durationSeconds: 3 } });
+  harness.controller.setMode('temperature');
+  await flushTimers();
+  assert.equal(harness.worker.requests.length, 1);
+  assert.equal(harness.rendered.at(-1)[1], 'temperature');
+  harness.controller.setSimulationTime(10);
+  await flushTimers();
+  assert.equal(harness.worker.requests.at(-1).durationSeconds, 10);
+});
+
+test('changing the display while an edited scene solves does not cancel that solve', async (t) => {
+  const harness = createHarness(t);
+  harness.controller.setScene(scene('one'));
+  harness.controller.setMode('airflow');
+  await flushTimers();
+  let request = harness.worker.requests.at(-1);
+  harness.worker.respond({ requestId: request.requestId, result: { grid: {}, fields: {}, stats: {} } });
+  harness.controller.setScene(scene('two'));
+  await flushTimers();
+  request = harness.worker.requests.at(-1);
+  harness.controller.setDisplayStyle('volume');
+  assert.equal(harness.controller.inFlight.requestId, request.requestId);
+  assert.equal(harness.controller.inFlight.cancelRequested, undefined);
+  harness.worker.respond({ requestId: request.requestId, result: { grid: {}, fields: {}, stats: {} } });
+  assert.equal(harness.rendered.at(-1)[2].displayStyle, 'volume');
+  assert.equal(harness.states.at(-1).loading, false);
 });

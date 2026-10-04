@@ -5,7 +5,7 @@ import { prepareWebGpuInputs, simulateRoomFieldsWebGpu } from '../src/simulation
 
 test('WebGPU reports an unavailable adapter so the worker can use its CPU preview', async () => {
   assert.equal(await simulateRoomFieldsWebGpu(createRoomScene(), {}, null), null);
-  await assert.rejects(simulateRoomFieldsWebGpu(createRoomScene(), { vorticityConfinement: 5 }, null), /vorticity confinement/i);
+  await assert.rejects(simulateRoomFieldsWebGpu(createRoomScene(), { vorticityConfinement: 5 }, null), /vorticityConfinement/i);
 });
 
 test('GPU inputs preserve rotated fan direction and voxelize room obstacles', () => {
@@ -36,10 +36,9 @@ test('GPU inputs preserve rotated fan direction and voxelize room obstacles', ()
   assert.ok(Math.abs(inputs.fanForces[grilleCell + 2]) < 1e-6);
   assert.deepEqual(Array.from(inputs.fanForces.slice(((8 * grid.nz + 20) * grid.nx + 26) * 4,
     ((8 * grid.nz + 20) * grid.nx + 26) * 4 + 3)), [0, 0, 0]);
-  assert.equal(inputs.heaters.length, 8);
-  assert.equal(inputs.heaters[0], 1);
-  assert.ok(Math.abs(inputs.heaters[1] - 0.2) < 1e-6);
-  assert.equal(inputs.heaters[2], 1);
+  const watts = inputs.sources.filter((_, index) => index % 2 === 0).reduce((sum, rate) => sum + rate * grid.dx * grid.dy * grid.dz * 1.204 * 1006, 0);
+  assert.ok(Math.abs(watts - 750) < 0.01);
+
 });
 
 test('disabled heaters are omitted from GPU source inputs', () => {
@@ -50,5 +49,5 @@ test('disabled heaters are omitted from GPU source inputs', () => {
     nx: 52, ny: 27, nz: 40, dx: 0.1, dy: 0.1, dz: 0.1,
   });
 
-  assert.equal(inputs.heaterCount, 0);
+  assert.ok(inputs.sources.every((value, index) => index % 2 === 1 || value === 0));
 });

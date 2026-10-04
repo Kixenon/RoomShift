@@ -1,75 +1,75 @@
 # RoomShift
 
-A browser-based 3D room editor for trying out layout changes before moving furniture or devices.
+A browser-based room editor for comparing layout changes before moving furniture or devices.
 
 ## Run
 
 ```sh
 npm install
 npm run dev
-```
-
-Open the local URL printed by Vite (normally <http://127.0.0.1:4173>).
-
-```sh
 npm test
 npm run build
 ```
 
-`npm test` runs the headless-safe unit and model tests. The Playwright browser tests live in `browser-tests/` and are excluded from it, because they need a real GPU: two of them assert a WebGPU backend that headless Chromium does not expose (`navigator.gpu` is undefined), and the whole file renders through WebGL. Run them separately:
+Open the local URL printed by Vite. Browser checks require Chromium:
 
 ```sh
 npx playwright install chromium
-npm run test:browser     # or: npm run test:all to run everything
+npm run test:browser
+npm run validate:simulation
 ```
 
-They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a browser executable path to use a different one.
+`ROOMSHIFT_BROWSER` selects an existing browser executable. The browser tests request WebGPU; numerical parity is explicitly skipped if no adapter is available. The app automatically falls back to CPU.
 
-## Editor
+## Compare a change
 
-- Edit room width, depth, and height in meters.
-- Add objects, devices, windows, or doors from the asset rail. Devices have their own type and an on/off control; furniture models can be changed in the inspector.
-- Hover near an object to highlight it; click the object or its list item to select it. Drag the gizmo or edit position, size, and X/Y/Z rotation in the inspector.
-- Add a window or door opening, then drag it toward a wall; it snaps to the nearest wall. Openings can exchange air, act as an inlet, or act as an outlet. Open apertures cut through the wall and admit direct sunlight; closed windows and doors block it. Device and opening strengths are adjustable, and devices can be switched off in their properties. Drag the canvas to orbit the 3D room; use the bottom-right camera controls to toggle projection or choose a top-down or angled view. Orbiting remains enabled after choosing the top-down view.
-- Undo with **⌘Z / Ctrl+Z**; redo with **⌘⇧Z / Ctrl+Y**. Use the **i** button in the viewport toolbar for the full shortcut list. A gizmo drag is one undo step.
-- **Air** and **Heat** update continuously in the background while selected. Geometry or model edits trigger a fresh estimate; **Light** switches immediately to a real-time shadow preview.
+1. Set the room dimensions, initial air temperature, outdoor temperature, and envelope heat-transfer coefficient (W/m² K).
+2. Place furniture and devices. Heaters have a power setting in watts; device strength and on/off controls remain independent.
+3. Press **Set baseline**, then change the layout. The baseline remains a separate snapshot.
+4. Select **Air** or **Heat**. Set an **elapsed time** from 0 to 120 seconds, a slice height, and a measurement point. The purple marker identifies the point; its speed, air temperature, and changes from baseline are reported numerically.
+5. Repeat at **Fine** detail. A result that changes substantially with resolution is unsuitable for deciding between layouts.
+6. Save named scenarios to revisit them. The current scene, baseline, and up to twenty named scenarios persist in this browser. Saving the same name replaces that scenario. Unsupported or invalid saved data is ignored.
 
-## Time of day in Light mode
+Time is elapsed since the initial uniformly tempered, stationary air state with the current device/opening configuration. Every geometry, source, or room-physics change starts a fresh experiment. Scrubbing forward continues resident solver state; already computed points are cached. An earlier uncached point starts again from the same initial state. Air and Heat share the same solve. Display scales stay fixed across time and layouts; the temperature scale is adjustable.
 
-The light preview is driven by the real solar position for a fixed site: **Hong Kong**, 22.32° N, 114.17° E, UTC+8, using the NOAA solar position algorithm. The compass is pinned so the scene's -z is north and +x is east, because nothing in the scene model implied an orientation.
+The first partial result appears before a long solve finishes. The inspector explicitly shows the time represented by the visible result, its actual cell size, and whether a requested point is still being calculated. Baseline comparisons use the same time and resolution; comparisons across different room/grid dimensions are refused. A point inside an obstacle is reported as obstructed rather than as still air.
 
-- Drag the clock (or press the time control) and the sun's altitude and azimuth change. Colour and intensity follow: warm and low at dawn and dusk, near-neutral and high at midday, nothing below the horizon.
-- **Sun patches.** Each open window or door projects a parallelogram of direct sun onto the floor, clipped to the room. A patch is dropped when the sun is below the horizon, is on the wrong side of the wall, or the opening is closed. Patches pull away from their wall as the sun climbs, and graze it dimly when the light is oblique.
-- Fans, heaters, and lamps have an **On** setting in their device properties. They start on and are controlled independently of time of day.
-- The site being inside the tropics is not incidental: between the solstices the sun passes north of the zenith, so its azimuth sweeps through the whole compass and a room's aspect changes through the day. In June it stays in the northern half of the sky all day.
+**Air** defaults to a static speed slice with direction arrows; a speed volume is also available. The animated Gas view was removed: its dye playback did not evolve the airflow solution or measure ventilation, and consumed substantial rendering work.
 
-This is still a **visual preview, not lux-calibrated photometry**. The solar position is geometric and meaningful; the light intensities are hand-tuned curves chosen to read well, not measured irradiance. The room is a rectangular box with flat walls, and the sun patches are parallel projections with no occlusion by furniture. A near-overhead sun barely reaches any vertical wall, so patches shrink to slivers around local noon.
+Use **⌘Z / Ctrl+Z** to undo and **⌘⇧Z / Ctrl+Y** to redo. Drag the canvas to orbit, or use the camera controls for projection and top/angled views.
 
-## Simulation scope and limits
+## Daylight and lamps
 
-The editor uses Three.js for the room and visualizations, a Web Worker for field solves, WebGPU when available, and a bounded CPU fallback. These are **planning estimates**, not validated computational fluid dynamics (CFD), an engineering-grade thermal model, calibrated photometry, or a safety tool.
+Light preview uses NOAA solar geometry for Hong Kong (22.32° N, 114.17° E, UTC+8). Set the date, local clock, and room heading clockwise from north. At heading zero, -z is north and +x is east.
 
-- WebGPU uses a 0.05 m grid by default and coarsens only as needed to fit 1.5 million cells and device limits. It advances twelve simulated seconds with twenty pressure iterations. The CPU fallback uses a 0.15 m grid, is capped at 38,400 cells, and also advances twelve simulated seconds.
-- Air's **Gas** view renders a continuously advected 3D passive-tracer volume over the final solved velocity field. The dye moves, but airflow velocity is not currently advanced during playback; it can settle into a stable plume. **Speed volume** and **Slice** show the solved speed field directly.
-- Heat advects and diffuses air temperature, relaxes it toward a 20 °C ambient default, applies heater sources, and couples temperature to buoyancy. Outdoor temperature enters only through open-window inflow. The infrared view maps nearby air temperature onto room and object surfaces; it does not calculate material-surface temperature. Heater intensity is an estimated temperature source, **not watts**.
-- **Light** is a real-time monochrome render with point lights at lamp bulbs and cast shadows. It is not lux-calibrated and does not model indirect light bounce, glass transmission, or measured lamp output.
-- An open window can bias flow toward intake or exhaust, or permit vertically balanced exchange. Fan speeds, thermal sources, and opening flow rates are adjustable estimates rather than calibrated device or opening models. The solver omits a calibrated turbulence closure, no-slip wall treatment, wall/material heat capacity, radiation, HVAC, and reference-case calibration. Do not use its output to claim real-world comfort, temperature, ventilation, lighting, or safety performance.
+Direct sunlight is rendered through wall apertures with furniture shadows. Closed glass windows admit light while blocking airflow; closed doors block both. There are no extra floor-patch overlays that bypass furniture occlusion. The **Lamp map** is a separate relative lamp-only estimator; it does not include daylight. Neither view predicts lux, glass transmission, glare, indirect bounce, or measured lamp output.
 
-The scene model is solver-independent (`src/model/room-scene.js`); rendering and field solving consume the same scene without mixing simulation state into object geometry. Scene persistence and schema migration are not implemented.
+## Physics and numerical limits
+
+This is an **uncalibrated planning model**. It has numerical regression tests, not real-room validation. Its output cannot yet establish real-world comfort, ventilation performance, or reliable placement rankings.
+
+- Both backends use the same grid, sources, integration order, and twenty warm-started pressure sweeps. The requested cell sizes are 0.075 m (Fine), 0.15 m (Standard), and 0.25 m (Quick). Dimensions are bounded at 80 × 48 × 80 cells; the actual spacing is shown because large rooms coarsen. Standard/Quick step by 0.05 s; Fine steps by 0.02 s. Unsafe explicit-diffusion settings are rejected.
+- Velocity advection shares interpolation work across all components and temperature. Pressure applies a velocity correction without repeatedly averaging away the input jet. CPU/GPU parity checks cover a driven room and subzero window inflow, with a 0.001 maximum field-difference tolerance at one second. These are numerical checks, not accuracy claims.
+- Furniture rendering, airflow obstacles, fan blockage, and lamp-map shadows share component geometry. Thin pieces conservatively occupy intersected voxels. This can overstate blockage on coarse grids; placement collision checks still use conservative whole-object bounding boxes.
+- Fans are a prescribed force distribution with fixed physical extent and voxel-averaged sampling. Their strength is not a measured fan curve. Numerical diffusion, coarse-grid vorticity confinement, slip walls, and incomplete pressure convergence can affect results. Significant boundary-flow imbalance is displayed.
+- Heater watts are distributed over surrounding fluid cells and normalized to total power using air density 1.204 kg/m³ and heat capacity 1006 J/(kg K). Heat-source rates are precomputed once per scene. Envelope conduction uses a uniform U-value and outdoor temperature; it omits wall/furniture heat storage, radiation, solar gains, people, humidity, and HVAC. A zero U-value represents an insulated envelope. Surface colors represent nearby air temperature, not material temperature.
+- Exchange openings use an approximate hydrostatic pressure head based on the initial indoor/outdoor temperature difference and aperture height; it vanishes when temperatures match. It is not an exterior wind/stack-network model and does not update that head as the room warms. Intake/exhaust modes use prescribed exterior pressure from the wind setting.
+- Two resident simulations support current/baseline layouts. Snapshot caches are bounded by count and memory. Cached arrays are copied before transfer to the main thread. Canceled work never replaces a newer result.
+
+## Validation and next evidence
+
+`npm run validate:simulation` prints fan-probe values across grids and times, plus time-step sensitivity. Resolution dependence remains material: changing cell size can substantially change point speed. Fine detail is a check, not proof of convergence.
+
+A three-run alternating test of fused versus separate advection reduced CPU time from 1.38–1.55 s to 0.77–0.88 s for sixty steps, with identical arrays in the tested fan-only case. Those timings isolate the advection optimization at that stage; later physics changes mean they are not an end-to-end prediction for every room. Grid/time settings and GPU availability also affect latency.
+
+Before claiming predictive usefulness, measure one specific decision: for example, fan orientation at a seated position. Record fan dimensions/settings, room and furniture geometry, opening conditions, and repeated air-speed measurements at several points. Compare predicted **changes and rankings**, reserve some layouts for validation, and repeat at finer grids and smaller time steps. Thermal validation additionally needs measured power, starting temperatures, envelope properties, and a time series. Those measurement datasets are not included in this repository.
 
 ## Structure
 
-- `src/model/room-scene.js` — room objects and windows, naming, transformations, and geometry bounds.
-- `src/model/undo-history.js` — bounded undo/redo history.
-- `src/model/editor-state.js` — editor selection, view, transform mode, and reset state.
-- `src/simulation/room-fields-webgpu.js` — WebGPU 3D airflow and temperature estimates.
-- `src/simulation/room-fields-3d.js` — bounded CPU preview and shared room geometry checks.
-- `src/simulation/sun-position.js` — solar altitude, azimuth, sunrise and sunset for the site.
-- `src/simulation/daylight.js` — maps a clock time and the scene to sun, sky, lamp, exposure and sun-patch state. Pure, with no three.js.
-- `src/simulation/room-light.js` — retained scalar light estimator; the editor's Light mode uses rendered shadows instead.
-- `src/simulation/room-field-worker.js` and `src/simulation/room-field-controller.js` — background solving and coalesced live updates.
-- `src/scene/room-field-layer-3d.js` and `src/scene/room-field-renderer.js` — 3D tracer advection, infrared surface mapping, and volumetric field rendering.
-- `src/scene/room-viewport.js` — Three.js room, model meshes, camera, selection, and transform controls.
-- `src/app.js` — editor and simulation controls.
-- `tests/` — headless-safe model, solver, and scene-graph tests, run by `npm test`.
-- `browser-tests/` — Playwright browser interaction tests, run separately by `npm run test:browser`.
+- `src/model/` — scene edits, shared furniture parts, collision bounds, undo, and saved-workspace validation.
+- `src/simulation/room-fields-3d.js` and `room-fields-webgpu.js` — reusable numerical sessions.
+- `src/simulation/room-field-backend.js`, `room-field-worker.js`, and `room-field-controller.js` — bounded caches, progress, cancellation, and display requests.
+- `src/simulation/room-field-analysis.js` — measurement-point sampling and matched comparisons.
+- `src/simulation/daylight.js`, `sun-position.js`, and `room-light.js` — solar geometry and relative lamp estimates.
+- `src/scene/` — viewport, slices, volumes, and air-temperature surface mapping.
+- `tests/` and `browser-tests/` — numerical/model regressions and browser workflows.
