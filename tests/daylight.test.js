@@ -22,9 +22,11 @@ const near = (actual, expected, tolerance, label) => {
     `${label}: expected about ${expected}, got ${actual}`);
 };
 
+const emptyScene = () => ({ ...createRoomScene(), objects: [], nextWindowId: 1, nextDoorId: 1 });
+
 const sceneWithWindow = (wall = 'back', open = true) => {
-  const withWindow = addWindow(createRoomScene(), wall);
-  return setWindowOpen(withWindow.scene, 'window-1', open).scene;
+  const withWindow = addWindow(emptyScene(), wall);
+  return setWindowOpen(withWindow.scene, withWindow.object.id, open).scene;
 };
 
 test('sun direction is a unit vector pointing up and toward the azimuth', () => {
@@ -110,9 +112,9 @@ test('at midday the sun is up and the sky is bright', () => {
   assert.ok(state.sun.warmth < 0.2, 'a high sun should be close to neutral');
 });
 
-test('a closed window casts no patch', () => {
+test('a closed glass window still transmits direct sunlight', () => {
   const state = describeDaylight({ scene: sceneWithWindow('back', false), timeMinutes: minutes('12:30') });
-  assert.deepEqual(state.patches, []);
+  assert.equal(state.patches.length, 1);
 });
 
 test('a window only receives sun on the walls facing it', () => {

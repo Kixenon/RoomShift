@@ -4,14 +4,19 @@ import {
   buildSolidMask,
   buildFanAccelerationField,
   FIELD_PHYSICS_DEFAULTS,
+  FIELD_ASSUMPTIONS,
+  buildGrid,
+  buildHeatRate,
+  buildEnvelopeLoss,
+  validateOptions,
 } from './room-fields-3d.js';
-import { createSimulationGrid, DEFAULT_CELL_SIZE } from './room-grid.js';
+
 
 const SETTINGS = Object.freeze({
   ...FIELD_PHYSICS_DEFAULTS,
-  cellSize: DEFAULT_CELL_SIZE,
-  steps: 1200,
-  timeStep: 0.01,
+  cellSize: 0.15,
+  steps: 240,
+  timeStep: 0.05,
   pressureIterations: 20,
   maximumSpeed: 2.5,
 });
@@ -31,22 +36,13 @@ export function prepareWebGpuInputs(scene, grid, settings = {}) {
   const solid = Uint32Array.from(mask);
   const boundary = buildWindowBoundary(scene, grid, physics);
   const outlets = Uint32Array.from(boundary.outlets);
-  const heaters = scene.objects.filter((object) => object.model === 'heater' && object.enabled !== false);
-  const heaterData = new Float32Array(Math.max(1, heaters.length) * 8);
   const fanForces = buildFanAccelerationField(scene, grid, solid, physics);
+  const rates = buildHeatRate(scene, grid, solid, physics);
+  const losses = buildEnvelopeLoss(grid, physics.envelopeUValue);
+  const sources = new Float32Array(solid.length * 2);
+  for (let id = 0; id < solid.length; id += 1) { sources[id * 2] = rates[id]; sources[id * 2 + 1] = losses[id]; }
 
-  heaters.forEach((heater, index) => {
-    const offset = index * 8;
-    heaterData.set([
-      heater.position.x,
-      heater.position.y + heater.dimensions.height / 2,
-      heater.position.z,
-      physics.heaterRadius,
-      physics.heaterRate * (heater.intensity ?? 1), 0, 0, 0,
-    ], offset);
-  });
-
-  return { solid, outlets, windowPressure: boundary.pressure, fanForces, heaters: heaterData, heaterCount: heaters.length };
+  return { sources, solid, outlets, windowPressure: boundary.pressure, fanForces };
 }
 
 const COMMON_CONFIG = `
@@ -70,11 +66,11 @@ fn inside(i: i32, j: i32, k: i32) -> bool {
 `;
 
 const PHYSICS_SHADER = `${COMMON_CONFIG}
-struct Heater { centerRadius: vec4<f32>, source: vec4<f32> };
+
 @group(0) @binding(1) var<storage, read> stateIn: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> solid: array<u32>;
 @group(0) @binding(3) var<storage, read> fanForce: array<vec4<f32>>;
-@group(0) @binding(4) var<storage, read> heaters: array<Heater>;
+@group(0) @binding(4) var<storage, read> heatSources: array<vec2<f32>>;
 @group(0) @binding(5) var<storage, read_write> stateOut: array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read> vorticity: array<vec4<f32>>;
 
@@ -180,19 +176,17 @@ fn integrate(@builtin(global_invocation_id) invocation: vec3<u32>) {
     laplacian(i32(i), i32(j), i32(k), 2u, current.z));
   let temperatureDiffusion = laplacian(i32(i), i32(j), i32(k), 3u, current.w);
   let force = fanForce[id].xyz + confinement;
-  var velocity = (advected.xyz + cfg.physics.y * cfg.spacing.w * velocityDiffusion + force * cfg.spacing.w) * exp(-0.08 * cfg.spacing.w);
-  velocity.y += (advected.w - cfg.physics.x) * cfg.limits.y * cfg.spacing.w;
+  var velocity = advected.xyz + force * cfg.spacing.w;
+  velocity.y += (current.w - cfg.physics.x) * cfg.limits.y * cfg.spacing.w;
+  velocity = velocity * exp(-0.08 * cfg.spacing.w);
   velocity = clamp(velocity, vec3<f32>(-cfg.limits.x), vec3<f32>(cfg.limits.x));
   let speed = length(velocity);
   if (speed > cfg.limits.x) { velocity *= cfg.limits.x / speed; }
+  velocity += cfg.physics.y * cfg.spacing.w * velocityDiffusion;
   var temperature = advected.w + cfg.physics.z * cfg.spacing.w * temperatureDiffusion
     + (cfg.physics.x - advected.w) * cfg.physics.w * cfg.spacing.w;
-  for (var heaterIndex = 0u; heaterIndex < cfg.counts.x; heaterIndex += 1u) {
-    let heater = heaters[heaterIndex];
-    let distanceSquared = dot(position - heater.centerRadius.xyz, position - heater.centerRadius.xyz);
-    temperature += heater.source.x * exp(-distanceSquared / (2.0 * heater.centerRadius.w * heater.centerRadius.w)) * cfg.spacing.w;
-  }
-  temperature = clamp(temperature, 0.0, 60.0);
+  temperature += (heatSources[id].x + heatSources[id].y * (cfg.limits.z - temperature)) * cfg.spacing.w;
+  temperature = clamp(temperature, -20.0, 60.0);
   stateOut[id] = vec4<f32>(velocity, temperature);
 }
 `;
@@ -361,6 +355,13 @@ const PROJECT_SHADER = `${COMMON_CONFIG}
 @group(0) @binding(6) var<storage, read> windowPressure: array<f32>;
 @group(0) @binding(7) var<storage, read_write> windowFlowOut: array<f32>;
 @group(0) @binding(8) var<storage, read_write> projectedDivergenceOut: array<f32>;
+fn initialFace(i: i32, j: i32, k: i32, di: i32, dj: i32, dk: i32, component: u32, bit: u32) -> f32 {
+  let id = indexOf(u32(i), u32(j), u32(k));
+  if (!inside(i + di, j + dj, k + dk)) { return select(0.0, candidate[id][component], (outletMask[id] & bit) != 0u); }
+  let other = indexOf(u32(i + di), u32(j + dj), u32(k + dk));
+  if (solid[other] != 0u) { return 0.0; }
+  return 0.5 * (candidate[id][component] + candidate[other][component]);
+}
 fn xEast(i: i32, j: i32, k: i32) -> f32 {
   let id = indexOf(u32(i), u32(j), u32(k));
   if (i + 1 >= i32(cfg.dims.x)) {
@@ -429,7 +430,10 @@ fn project(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let far = zFar(i, j, k);
   projectedDivergenceOut[id] = (east - west) / cfg.spacing.x
     + (north - south) / cfg.spacing.y + (far - near) / cfg.spacing.z;
-  let velocity = vec3<f32>(0.5 * (west + east), 0.5 * (south + north), 0.5 * (near + far));
+  let velocity = candidate[id].xyz + 0.5 * vec3<f32>(
+    west + east - initialFace(i, j, k, -1, 0, 0, 0u, 1u) - initialFace(i, j, k, 1, 0, 0, 0u, 2u),
+    south + north - initialFace(i, j, k, 0, -1, 0, 1u, 0u) - initialFace(i, j, k, 0, 1, 0, 1u, 0u),
+    near + far - initialFace(i, j, k, 0, 0, -1, 2u, 16u) - initialFace(i, j, k, 0, 0, 1, 2u, 32u));
   var temperature = candidate[id].w;
   let mask = outletMask[id];
   if ((mask & 1u) != 0u && west > 0.0) { temperature = cfg.limits.z; }
@@ -605,24 +609,19 @@ function readback(device, source, target, byteLength) {
   });
 }
 
-export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = globalThis.navigator?.gpu) {
+export async function createWebGpuSession(scene, options = {}, gpu = globalThis.navigator?.gpu) {
   validateScene(scene);
-  const settings = {
-    ...SETTINGS,
-    ...options,
+  const settings = validateOptions({
+    ...SETTINGS, ...options,
+    timeStep: options.timeStep ?? ((options.cellSize ?? SETTINGS.cellSize) < 0.15 ? 0.02 : SETTINGS.timeStep),
+    ambientTemperature: options.ambientTemperature ?? scene.room.initialTemperature ?? SETTINGS.ambientTemperature,
+    envelopeUValue: options.envelopeUValue ?? scene.room.envelopeUValue ?? SETTINGS.envelopeUValue,
     outdoorTemperature: options.outdoorTemperature ?? scene.room.outdoorTemperature ?? SETTINGS.outdoorTemperature,
-  };
-  if (!Number.isFinite(settings.outdoorTemperature) || settings.outdoorTemperature < -20 || settings.outdoorTemperature > 50) {
-    throw new RangeError('Outdoor temperature must be between -20 °C and 50 °C.');
-  }
-  if (!Number.isFinite(settings.vorticityConfinement)
-    || settings.vorticityConfinement < 0 || settings.vorticityConfinement > 4) {
-    throw new RangeError('Vorticity confinement must be between 0 and 4.');
-  }
+  }, scene.room);
   if (!gpu) return null;
   const device = await getDevice(gpu);
   if (!device) return null;
-  const grid = createSimulationGrid(scene.room, settings.cellSize);
+  const grid = buildGrid(scene.room, settings.cellSize);
   const count = grid.nx * grid.ny * grid.nz;
   const byteLength = count * 16;
   const inputs = prepareWebGpuInputs(scene, grid, settings);
@@ -634,6 +633,8 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     return resource;
   };
 
+  let retained = false;
+  const dispose = () => resources.forEach((resource) => resource.destroy());
   try {
     const config = allocate(CONFIG_BYTES, usage.UNIFORM | usage.COPY_DST);
     const state = allocate(byteLength, usage.STORAGE | usage.COPY_DST | usage.COPY_SRC);
@@ -643,7 +644,7 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     const windowPressure = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const windowFlow = allocate(count * 4, usage.STORAGE | usage.COPY_SRC);
     const fanForces = allocate(inputs.fanForces.byteLength, usage.STORAGE | usage.COPY_DST);
-    const heaters = allocate(inputs.heaters.byteLength, usage.STORAGE | usage.COPY_DST);
+    const heatRate = allocate(inputs.sources.byteLength, usage.STORAGE | usage.COPY_DST);
     const pressureA = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const divergence = allocate(count * 4, usage.STORAGE | usage.COPY_DST);
     const projectedDivergence = allocate(count * 4, usage.STORAGE | usage.COPY_SRC);
@@ -652,18 +653,18 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     const projectedDivergenceReadBuffer = allocate(count * 4, usage.COPY_DST | usage.MAP_READ);
     const packedState = new Float32Array(count * 4);
     for (let id = 0; id < count; id += 1) packedState[id * 4 + 3] = settings.ambientTemperature;
-    device.queue.writeBuffer(config, 0, makeConfig(grid, settings, inputs.heaterCount));
+    device.queue.writeBuffer(config, 0, makeConfig(grid, settings, 0));
     device.queue.writeBuffer(state, 0, packedState);
     device.queue.writeBuffer(solid, 0, inputs.solid);
     device.queue.writeBuffer(outlets, 0, inputs.outlets);
     device.queue.writeBuffer(windowPressure, 0, inputs.windowPressure);
     device.queue.writeBuffer(fanForces, 0, inputs.fanForces);
-    device.queue.writeBuffer(heaters, 0, inputs.heaters);
+    device.queue.writeBuffer(heatRate, 0, inputs.sources);
 
     const vorticity = allocate(byteLength, usage.STORAGE);
     const [calculateVorticity, integrate, calculate, clear, solveRed, solveBlack, project] = await getPipelines(device);
     const vorticityGroup = bind(device, calculateVorticity, [config, state, solid, vorticity]);
-    const integrateGroup = bind(device, integrate, [config, state, solid, fanForces, heaters, scratch, vorticity]);
+    const integrateGroup = bind(device, integrate, [config, state, solid, fanForces, heatRate, scratch, vorticity]);
     const divergenceGroup = bind(device, calculate, [config, scratch, solid, divergence, outlets]);
     const clearAGroup = bind(device, clear, [config, pressureA]);
     const solveRedGroup = bind(device, solveRed, [config, divergence, solid, pressureA, outlets, windowPressure]);
@@ -671,75 +672,86 @@ export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = global
     const projectGroup = bind(device, project, [config, scratch, solid, pressureA, state, outlets, windowPressure, windowFlow, projectedDivergence]);
     const workgroups = Math.ceil(count / WORKGROUP_SIZE);
     const batchSize = 8;
-    let encoder;
-
-    for (let step = 0; step < settings.steps; step += 1) {
-      if (options.isCancelled?.()) return null;
-      if (step % batchSize === 0) encoder = device.createCommandEncoder();
-      let pass = encoder.beginComputePass();
-      dispatch(pass, calculateVorticity, vorticityGroup, workgroups);
-      pass.end();
-      pass = encoder.beginComputePass();
-      dispatch(pass, integrate, integrateGroup, workgroups);
-      pass.end();
-      pass = encoder.beginComputePass();
-      dispatch(pass, calculate, divergenceGroup, workgroups);
-      if (step === 0) dispatch(pass, clear, clearAGroup, workgroups);
-      for (let iteration = 0; iteration < settings.pressureIterations; iteration += 1) {
-        dispatch(pass, solveRed, solveRedGroup, workgroups);
-        dispatch(pass, solveBlack, solveBlackGroup, workgroups);
-      }
-      dispatch(pass, project, projectGroup, workgroups);
-      pass.end();
-      if (step % batchSize === batchSize - 1 || step === settings.steps - 1) {
+    let currentStep = 0;
+    const advanceTo = async (seconds, { isCancelled = () => false } = {}) => {
+      if (!Number.isFinite(seconds) || seconds < 0 || seconds > 120) throw new RangeError('Elapsed time must be between 0 and 120 seconds.');
+      const target = Math.round(seconds / settings.timeStep);
+      if (target < currentStep) throw new RangeError('A simulation session can only advance forward.');
+      for (; currentStep < target;) {
+        if (isCancelled()) return null;
+        const end = Math.min(target, currentStep + batchSize);
+        const encoder = device.createCommandEncoder();
+        for (; currentStep < end; currentStep += 1) {
+          let pass = encoder.beginComputePass();
+          dispatch(pass, calculateVorticity, vorticityGroup, workgroups);
+          pass.end();
+          pass = encoder.beginComputePass();
+          dispatch(pass, integrate, integrateGroup, workgroups);
+          pass.end();
+          pass = encoder.beginComputePass();
+          dispatch(pass, calculate, divergenceGroup, workgroups);
+          if (currentStep === 0) dispatch(pass, clear, clearAGroup, workgroups);
+          for (let iteration = 0; iteration < settings.pressureIterations; iteration += 1) {
+            dispatch(pass, solveRed, solveRedGroup, workgroups);
+            dispatch(pass, solveBlack, solveBlackGroup, workgroups);
+          }
+          dispatch(pass, project, projectGroup, workgroups);
+          pass.end();
+        }
         device.queue.submit([encoder.finish()]);
         await device.queue.onSubmittedWorkDone();
       }
-    }
-    if (options.isCancelled?.()) return null;
-    const [packedBytes, windowFlowBytes, projectedDivergenceBytes] = await Promise.all([
-      readback(device, state, readBuffer, byteLength),
-      readback(device, windowFlow, windowFlowReadBuffer, count * 4),
-      readback(device, projectedDivergence, projectedDivergenceReadBuffer, count * 4),
-    ]);
-    const packed = new Float32Array(packedBytes);
-    const fields = {
-      u: new Float32Array(count),
-      v: new Float32Array(count),
-      w: new Float32Array(count),
-      temperature: new Float32Array(count),
-      solid: Uint8Array.from(inputs.solid),
-      outlets: Uint8Array.from(inputs.outlets),
-      windowPressure: Float32Array.from(inputs.windowPressure),
-      windowFlow: new Float32Array(windowFlowBytes),
+      if (isCancelled()) return null;
+      const [packedBytes, windowFlowBytes, projectedDivergenceBytes] = await Promise.all([
+        readback(device, state, readBuffer, byteLength),
+        readback(device, windowFlow, windowFlowReadBuffer, count * 4),
+        readback(device, projectedDivergence, projectedDivergenceReadBuffer, count * 4),
+      ]);
+      const packed = new Float32Array(packedBytes);
+      const fields = {
+        u: new Float32Array(count),
+        v: new Float32Array(count),
+        w: new Float32Array(count),
+        temperature: new Float32Array(count),
+        solid: Uint8Array.from(inputs.solid),
+        outlets: Uint8Array.from(inputs.outlets),
+        windowPressure: Float32Array.from(inputs.windowPressure),
+        windowFlow: new Float32Array(windowFlowBytes),
+      };
+      for (let id = 0; id < count; id += 1) {
+        const offset = id * 4;
+        fields.u[id] = packed[offset];
+        fields.v[id] = packed[offset + 1];
+        fields.w[id] = packed[offset + 2];
+        fields.temperature[id] = packed[offset + 3];
+      }
+      return {
+        grid,
+        fields,
+        backend: 'webgpu',
+        ambientTemperature: settings.ambientTemperature,
+        outdoorTemperature: settings.outdoorTemperature,
+        durationSeconds: currentStep * settings.timeStep,
+        assumptions: Object.freeze({
+          ...FIELD_ASSUMPTIONS,
+          units: 'velocity in estimated m/s; temperature in estimated °C',
+          pressureSolver: `${settings.pressureIterations} red/black over-relaxation sweeps per step; no residual-convergence stop`,
+        }),
+        stats: calculateStats(packed, fields.solid, fields.outlets, fields.windowFlow,
+          new Float32Array(projectedDivergenceBytes), grid, settings.ambientTemperature),
+      };
     };
-    for (let id = 0; id < count; id += 1) {
-      const offset = id * 4;
-      fields.u[id] = packed[offset];
-      fields.v[id] = packed[offset + 1];
-      fields.w[id] = packed[offset + 2];
-      fields.temperature[id] = packed[offset + 3];
-    }
-    return {
-      grid,
-      fields,
-      backend: 'webgpu',
-      ambientTemperature: settings.ambientTemperature,
-      outdoorTemperature: settings.outdoorTemperature,
-      durationSeconds: settings.steps * settings.timeStep,
-      assumptions: Object.freeze({
-        model: 'GPU accelerated 3D planning preview with finite-volume face-flux pressure projection; not validated CFD',
-        units: 'velocity in m/s; temperature in estimated °C',
-        boundaries: 'no-penetration voxel walls and pressure-driven open windows with exterior pressure head from wind settings; no-slip walls are not modeled',
-        pressureSolver: `${settings.pressureIterations} red/black over-relaxation sweeps per step; no residual-convergence stop`,
-        thermalDiffusivity: 'effective mixing coefficient; not molecular air diffusivity',
-        turbulence: `vorticity confinement ${settings.vorticityConfinement}; coarse-grid eddy restoration, not a calibrated turbulence closure`,
-        maximumGridCells: 1_500_000,
-      }),
-      stats: calculateStats(packed, fields.solid, fields.outlets, fields.windowFlow,
-        new Float32Array(projectedDivergenceBytes), grid, settings.ambientTemperature),
-    };
+    retained = true;
+    return { timeStep: settings.timeStep, get timeSeconds() { return currentStep * settings.timeStep; }, advanceTo, dispose };
   } finally {
-    for (const resource of resources) resource.destroy();
+    if (!retained) dispose();
   }
+}
+
+export async function simulateRoomFieldsWebGpu(scene, options = {}, gpu = globalThis.navigator?.gpu) {
+  const session = await createWebGpuSession(scene, options, gpu);
+  if (!session) return null;
+  try {
+    return await session.advanceTo((options.steps ?? SETTINGS.steps) * session.timeStep, options);
+  } finally { session.dispose(); }
 }

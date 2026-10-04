@@ -21,11 +21,20 @@
           <button class="asset-button" id="add-fan" type="button" aria-label="Add fan" title="Add fan">
             <span class="asset-glyph">✳</span><span>Fan</span>
           </button>
+          <button class="asset-button" id="add-ceiling-fan" type="button" aria-label="Add ceiling fan with light" title="Add ceiling fan with light">
+            <span class="asset-glyph">✣</span><span>Ceiling fan</span>
+          </button>
           <button class="asset-button" id="add-heater" type="button" aria-label="Add heater" title="Add heater">
             <span class="asset-glyph">▥</span><span>Heater</span>
           </button>
+          <button class="asset-button" id="add-air-conditioner" type="button" aria-label="Add air conditioner" title="Add wall air conditioner">
+            <span class="asset-glyph">❄</span><span>Air con</span>
+          </button>
           <button class="asset-button" id="add-lamp" type="button" aria-label="Add lamp" title="Add lamp">
             <span class="asset-glyph">◉</span><span>Lamp</span>
+          </button>
+          <button class="asset-button" id="add-router" type="button" aria-label="Add router" title="Add router">
+            <span class="asset-glyph">⌁</span><span>Router</span>
           </button>
           <button class="asset-button" id="add-window" type="button" aria-label="Add window" title="Add window">
             <span class="asset-glyph">▣</span><span>Window</span>
@@ -49,8 +58,11 @@
               <button id="show-light" class="field-button" type="button" aria-label="Light mode" title="Light" aria-pressed="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5" /><path d="M12 2v3m0 14v3M4.9 4.9 7 7m10 10 2.1 2.1M2 12h3m14 0h3M4.9 19.1 7 17m10-10 2.1-2.1" /></svg>
               </button>
+              <button id="show-wifi" class="field-button" type="button" aria-label="Wi-Fi coverage mode" title="Wi-Fi coverage" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0" /><circle cx="12" cy="20" r="1.05" fill="currentColor" stroke="none" /></svg>
+              </button>
               <details id="field-display-control" class="field-display-control" hidden>
-                <summary id="field-display-button" aria-haspopup="menu" aria-expanded="false" title="Choose view"><span id="field-display-label">View</span></summary>
+                <summary id="field-display-button" aria-haspopup="menu" aria-expanded="false" title="Choose view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></svg><span id="field-display-label" class="sr-only">View</span></summary>
                 <div id="field-display-menu" class="field-display-menu" role="menu" aria-label="Mode view options"></div>
               </details>
             </div>
@@ -128,7 +140,18 @@
         </div>
         <div class="inspector-content" id="inspector-content">
           <section class="inspector-section room-section">
-            <div class="section-heading"><span>Room</span></div>
+            <div class="section-heading"><span>Room</span><details id="scenario-storage" class="room-actions field-display-control">
+              <summary class="tool-button" aria-label="Room actions" title="Room actions" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></summary>
+              <div class="field-display-menu" role="menu" aria-label="Room actions">
+                <input id="scenario-name" maxlength="80" placeholder="Name" aria-label="Scenario name" />
+                <button id="save-scenario" class="field-display-option" type="button" role="menuitem">Save</button>
+                <select id="saved-scenarios" aria-label="Saved scenarios"><option value="">Choose saved…</option></select>
+                <button id="load-scenario" class="field-display-option" type="button" role="menuitem">Load</button>
+                <button id="delete-scenario" class="field-display-option" type="button" role="menuitem">Delete</button>
+                <button id="reset-room" class="field-display-option" type="button" role="menuitem">Reset room</button>
+
+              </div>
+            </details></div>
             <div class="dimension-fields">
               <label class="field"><span>Width</span><input id="room-width" aria-label="Room width in meters" type="number" min="2" max="20" step="0.1" value="5.2" /></label>
               <label class="field"><span>Depth</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
@@ -138,9 +161,35 @@
             <details id="room-daylight-control" class="room-daylight-control" hidden>
               <summary><span>Time of day</span><output id="clock-label">13:30</output></summary>
               <div class="parameter-menu room-daylight-menu">
+                <label class="field"><span>Date</span><input id="daylight-date" type="date" value="2026-03-21" aria-label="Daylight date" /></label>
+                <label class="field"><span>Room heading · °</span><input id="room-heading" type="number" min="0" max="360" value="0" aria-label="Room heading clockwise from north" /></label>
                 <input id="time-of-day" type="range" min="0" max="1439" step="5" value="810" aria-label="Time of day" />
               </div>
             </details>
+          </section>
+
+          <section class="inspector-section simulation-section" id="simulation-settings" hidden aria-label="Simulation controls">
+            <div class="simulation-timeline">
+              <button id="simulation-play" class="tool-button" type="button" title="Play simulation" aria-label="Play simulation" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 10 7-10 7Z"/></svg></button>
+              <input id="simulation-time" type="range" min="0" max="120" step="0.1" value="3" aria-label="Elapsed simulation time in seconds" />
+              <output id="simulation-time-value" title="Elapsed simulation time">3 s</output>
+              <button id="simulation-restart" class="tool-button" type="button" title="Restart simulation" aria-label="Restart simulation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6"/></svg></button>
+              <details id="resolution-control" class="simulation-popover field-display-control"><summary class="tool-button" title="Simulation detail" aria-label="Simulation detail" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg></summary>
+                <div class="field-display-menu" role="menu" aria-label="Simulation detail">
+                  <button class="field-display-option" type="button" role="menuitemradio" data-resolution="0.25" aria-checked="false">Quick</button>
+                  <button class="field-display-option" type="button" role="menuitemradio" data-resolution="0.15" aria-checked="true">Standard</button>
+                  <button class="field-display-option" type="button" role="menuitemradio" data-resolution="0.075" aria-checked="false">Fine</button>
+                  <hr />
+            <label class="field outdoor-temperature-field"><span>Initial air</span><input id="initial-temperature" type="number" min="-20" max="40" step="1" value="20" aria-label="Initial room air temperature" /><span>°C</span></label>
+            <label class="field outdoor-temperature-field"><span>Envelope U</span><input id="envelope-u-value" type="number" min="0" max="5" step="0.1" value="0.7" aria-label="Envelope heat transfer coefficient" title="Overall wall, floor, and ceiling heat transfer in W/(m² K). Zero means insulated. Wall heat storage is not modeled." /></label>
+                </div>
+              </details>
+
+              <details id="scale-control" class="simulation-popover field-display-control"><summary class="tool-button" title="Temperature scale" aria-label="Temperature scale" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12M6 19h12M12 5v14m-3-3 3 3 3-3M9 8l3-3 3 3"/></svg></summary>
+                <div class="parameter-menu"><div class="dimension-fields"><label class="field"><span>Min °C</span><input id="temperature-min" type="number" min="-20" max="59" value="10" /></label><label class="field"><span>Max °C</span><input id="temperature-max" type="number" min="-19" max="60" value="30" /></label></div></div>
+              </details>
+
+            </div>
           </section>
 
           <section class="inspector-section object-list-section">

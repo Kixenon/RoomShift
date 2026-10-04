@@ -13,14 +13,19 @@ import {
   rotateObject,
   setObjectModel,
   setObjectIntensity,
+  setHeaterPower,
   setDeviceEnabled,
   setWindowFlow,
   setWindowOpen,
   setWindowWall,
+  setDeviceWall,
+  isWallMountedDevice,
+  isCeilingMountedDevice,
 } from './model/room-scene.js';
 import { isOpeningObject } from './model/openings.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
+import { readWorkspace, writeWorkspace } from './model/scenarios.js';
 import { temperatureDisplayRange } from './simulation/room-field-display.js';
 import {
   createEditorState,
@@ -49,6 +54,7 @@ const fieldControls = {
   airflow: $('#show-airflow'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
+  wifi: $('#show-wifi'),
   display: $('#field-display-control'),
   displayButton: $('#field-display-button'),
   displayLabel: $('#field-display-label'),
@@ -72,7 +78,10 @@ const timeControls = {
 };
 
 let editorState = createEditorState();
-let roomScene = editorState.scene;
+const savedWorkspace = readWorkspace(window.localStorage);
+let roomScene = savedWorkspace?.scene ?? editorState.scene;
+let scenarios = savedWorkspace?.scenarios ?? [];
+editorState = { ...editorState, scene: roomScene };
 let selectedId = editorState.selectedId;
 let transformMode = editorState.transformMode;
 let viewport;
@@ -104,6 +113,7 @@ function updateScene(scene, { record = !isDragging } = {}) {
   roomScene = scene;
   editorState = { ...editorState, scene };
   fieldController?.setScene(scene);
+  persistWorkspace();
 }
 
 function renderTimeOfDay() {
@@ -120,20 +130,37 @@ timeControls.slider.addEventListener('input', () => {
   viewport.setTimeOfDay({ timeMinutes: Number(timeControls.slider.value) });
   renderTimeOfDay();
 });
-function renderFieldState({ mode, loading, result, error }) {
+function renderFieldState({ mode, loading, result, error, stale, playing = false }) {
+  const physical = ['airflow', 'temperature'].includes(mode);
+  $('#simulation-settings').hidden = !physical;
+  if (physical) {
+    $('#simulation-time').value = String(fieldController.durationSeconds);
+    $('#simulation-time-value').textContent = `${Number((result && !stale ? result.durationSeconds : fieldController.durationSeconds).toFixed(1))} s`;
+    const play = $('#simulation-play');
+    play.setAttribute('aria-pressed', String(playing));
+    play.setAttribute('aria-label', playing ? 'Pause simulation' : 'Play simulation');
+    play.title = playing && loading ? 'Buffering · click to pause' : playing ? 'Pause simulation' : 'Play simulation';
+    play.classList.toggle('is-buffering', playing && loading);
+    play.innerHTML = playing ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 10 7-10 7Z"/></svg>';
+    $('#scale-control').hidden = mode !== 'temperature';
+    for (const option of document.querySelectorAll('[data-resolution]')) option.setAttribute('aria-checked', String(Number(option.dataset.resolution) === fieldController.cellSize));
+
+  }
   const viewportElement = $('#viewport');
   const displayStyle = fieldController?.displayStyle;
   for (const [name, button] of Object.entries({
     airflow: fieldControls.airflow,
     temperature: fieldControls.temperature,
     light: fieldControls.light,
+    wifi: fieldControls.wifi,
   })) setPressed(button, mode === name);
   const availableStyles = {
-    airflow: ['gas', 'volume', 'slice'],
+    airflow: ['volume', 'slice'],
     temperature: ['surfaces', 'volume', 'slice'],
     light: ['preview', 'map'],
+    wifi: ['volume', 'slice'],
   }[mode] ?? [];
-  const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
+  const styleLabels = { volume: 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Lamp map' };
   fieldControls.display.hidden = !mode;
   if (!mode) fieldControls.display.open = false;
   fieldControls.displayButton.setAttribute('aria-label', `Choose ${mode ?? 'field'} view`);
@@ -151,7 +178,7 @@ function renderFieldState({ mode, loading, result, error }) {
     option.textContent = styleLabels[style];
     return option;
   }));
-  const showSlice = (mode === 'airflow' || mode === 'temperature') && displayStyle === 'slice';
+  const showSlice = ['airflow', 'temperature', 'wifi'].includes(mode) && displayStyle === 'slice';
   fieldControls.sliceControl.hidden = !showSlice;
   if (fieldController?.scene) {
     fieldControls.sliceHeight.max = String(fieldController.scene.room.height);
@@ -182,22 +209,29 @@ function renderFieldState({ mode, loading, result, error }) {
   let legend;
   if (mode === 'airflow') {
     legend = {
-      title: displayStyle === 'volume' ? 'Air speed · 3D volume' : displayStyle === 'slice' ? 'Air speed · horizontal slice' : 'Airflow · moving gas',
+      title: displayStyle === 'volume' ? 'Airflow speed · 3D volume' : 'Airflow speed · horizontal slice',
       minimum: '0 m/s',
-      maximum: `${(result.stats.maxSpeed ?? 1.2).toFixed(2)} m/s`,
+      maximum: '2.50 m/s',
     };
   } else if (mode === 'temperature') {
     const { minimum, maximum } = temperatureDisplayRange(result);
     legend = {
-      title: displayStyle === 'volume' ? 'Air temperature · 3D volume' : displayStyle === 'slice' ? `Air temperature · ${fieldController.sliceHeight.toFixed(2)} m slice` : 'Air temperature · surfaces and objects',
+      title: displayStyle === 'volume' ? 'Air temperature · 3D volume' : displayStyle === 'slice' ? `Air temperature · ${fieldController.sliceHeight.toFixed(2)} m slice` : 'Infrared · nearby air temperature',
       minimum: `${minimum.toFixed(1)} °C`,
       maximum: `${maximum.toFixed(1)} °C`,
     };
   } else if (displayStyle === 'map') {
     legend = {
-      title: 'Estimated relative illumination',
+      title: 'Lamp illumination · relative',
       minimum: `${result.ambientLevel.toFixed(2)} normalized`,
       maximum: `${result.stats.maxLevel.toFixed(2)} normalized`,
+    };
+  } else if (mode === 'wifi') {
+    const heightLabel = displayStyle === 'slice' ? ` · ${fieldController.sliceHeight.toFixed(2)} m slice` : ' · 3D volume';
+    legend = {
+      title: result.stats.routerCount ? `Wi-Fi coverage${heightLabel} · ${result.stats.routerCount} router${result.stats.routerCount === 1 ? '' : 's'}` : 'Add a router to view coverage',
+      minimum: 'Weak · −75 dBm',
+      maximum: 'Strong · −35 dBm',
     };
   } else {
     legend = {
@@ -207,6 +241,7 @@ function renderFieldState({ mode, loading, result, error }) {
     };
   }
   fieldControls.legendTitle.textContent = legend.title;
+  fieldControls.legend.title = legend.title;
   fieldControls.legendMin.textContent = legend.minimum;
   fieldControls.legendMax.textContent = legend.maximum;
 }
@@ -264,6 +299,10 @@ function redo() {
 function syncRoomInputs() {
   for (const [dimension, input] of Object.entries(roomInputs)) input.value = roomScene.room[dimension];
   outdoorTemperatureInput.value = roomScene.room.outdoorTemperature ?? 10;
+  $('#initial-temperature').value = roomScene.room.initialTemperature ?? 20;
+  $('#envelope-u-value').value = roomScene.room.envelopeUValue ?? 0.7;
+  $('#daylight-date').value = roomScene.room.daylightDate ?? '2026-03-21';
+  $('#room-heading').value = roomScene.room.headingDegrees ?? 0;
 }
 
 function renderObjectList() {
@@ -278,15 +317,24 @@ function renderObjectList() {
 }
 
 function propertyField(label, axis, value, kind, limits = {}) {
-  return `<label class="property-field"><span>${label}</span><input class="property-input" type="number" step="0.05" value="${value.toFixed(2)}" data-${kind}="${axis}" aria-label="${kind === 'position' ? 'Position' : 'Dimensions'} ${label}" ${limits.min === undefined ? '' : `min="${limits.min}"`} ${limits.max === undefined ? '' : `max="${limits.max}"`} /></label>`;
+  return `<label class="property-field"><span>${label}</span><input class="property-input" type="number" step="0.05" value="${value.toFixed(2)}" data-${kind}="${axis}" aria-label="${kind === 'position' ? 'Position' : 'Dimensions'} ${label}" ${limits.min === undefined ? '' : `min="${limits.min}"`} ${limits.max === undefined ? '' : `max="${limits.max}"`} ${limits.disabled ? 'disabled' : ''} /></label>`;
 }
 
 function renderProperties() {
   const object = selectedObject();
   const isOpening = isOpeningObject(object);
   const isDevice = DEVICE_MODELS.includes(object?.model);
+  const isWallMounted = isWallMountedDevice(object);
+  const isCeilingMounted = isCeilingMountedDevice(object);
   const openingLabel = object?.model === 'door' ? 'Door' : 'Window';
-  const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative' };
+  const sourceLabels = {
+    fan: 'Fan strength · relative',
+    'ceiling-fan': 'Fan speed · relative',
+    heater: 'Heater output · relative',
+    'air-conditioner': 'Cooling output · relative',
+    lamp: 'Lamp brightness · relative',
+    router: 'Transmit power · relative',
+  };
   const sourceLabel = sourceLabels[object?.model];
   const intensity = object?.intensity ?? 1;
   $('#delete-object').disabled = !object;
@@ -316,18 +364,23 @@ function renderProperties() {
           <option value="exchange">Stack exchange · two-way</option><option value="inlet">Positive pressure · intake bias</option><option value="outlet">Negative pressure · exhaust bias</option>
         </select></label>
         <div class="property-group">
-          <div class="range-heading"><span>Outside wind</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
+          <div class="range-heading"><span>Wind for intake/exhaust</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
           <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Exterior wind speed in meters per second" />
         </div>
+      ` : isWallMounted ? `
+        <label class="property-field"><span>Wall</span><select class="property-input" data-device-wall aria-label="Air conditioner wall">
+          <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
+        </select></label>
       ` : isDevice ? '' : `<label class="property-field"><span>Type</span><select class="property-input" data-object-model aria-label="Object type">${modelOptions}</select></label>`}
       <div class="property-group">
         <div class="property-label">Position · m</div>
         <div class="property-fields">
           ${propertyField('x', 'x', object.position.x, 'position', { min: 0, max: roomScene.room.width })}
-          ${propertyField('y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height })}
+          ${propertyField('y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height, disabled: isCeilingMounted })}
           ${propertyField('z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
         </div>
       </div>
+      ${object.model === 'heater' ? `<label class="property-field"><span>Power · W</span><input class="property-input" data-heater-power type="number" min="0" max="3000" step="50" value="${object.powerWatts ?? 750}" aria-label="Heater power in watts" /></label>` : ''}
       ${sourceLabel ? `<div class="property-group">
         <label class="window-open-toggle"><input type="checkbox" data-device-enabled aria-label="Device on" ${object.enabled !== false ? 'checked' : ''} /><span>On</span></label>
         <div class="range-heading"><span>${sourceLabel}</span><output data-range-output>${intensity.toFixed(2)}×</output></div>
@@ -336,12 +389,12 @@ function renderProperties() {
       <div class="property-group">
         <div class="property-label">Size · m</div>
         <div class="property-fields">
-          ${propertyField('w', 'width', object.dimensions.width, 'dimension', isOpening ? { min: 0.4, max: maxOpeningWidth } : dimensionLimits.width)}
-          ${propertyField('h', 'height', object.dimensions.height, 'dimension', isOpening ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
+          ${propertyField('w', 'width', object.dimensions.width, 'dimension', isOpening || isWallMounted ? { min: 0.4, max: maxOpeningWidth } : dimensionLimits.width)}
+          ${propertyField('h', 'height', object.dimensions.height, 'dimension', isOpening ? { min: 0.4, max: roomScene.room.height - 0.2 } : isWallMounted ? { min: 0.1, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
           ${isOpening ? '' : propertyField('d', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
         </div>
       </div>
-      ${isOpening ? '' : `<div class="property-group">
+      ${isOpening || isWallMounted || isCeilingMounted ? '' : `<div class="property-group">
         <div class="property-label">Rotation · °</div>
         <div class="property-fields rotation-fields">
           ${propertyField('x', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
@@ -355,7 +408,7 @@ function renderProperties() {
   if (isOpening) {
     properties.querySelector('[data-window-wall]').value = object.wall ?? 'back';
     properties.querySelector('[data-window-flow-direction]').value = object.flowDirection ?? 'exchange';
-  }
+  } else if (isWallMounted) properties.querySelector('[data-device-wall]').value = object.wall ?? 'back';
   else if (!isDevice) properties.querySelector('[data-object-model]').value = object.model;
 }
 
@@ -387,6 +440,7 @@ function syncPropertyInputs(object) {
 function refreshScene() {
   viewport.setScene(roomScene, selectedId);
   renderInspector();
+  persistWorkspace();
 }
 
 function addRoomObject() {
@@ -451,6 +505,7 @@ $('#add-door').addEventListener('click', addRoomDoor);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
+fieldControls.wifi.addEventListener('click', () => toggleFieldMode('wifi'));
 fieldControls.displayMenu.addEventListener('click', (event) => {
   const option = event.target.closest('[data-display-style]');
   if (!option) return;
@@ -511,6 +566,10 @@ outdoorTemperatureInput.addEventListener('change', () => {
   const temperature = Number(outdoorTemperatureInput.value);
   if (outdoorTemperatureInput.value.trim() === '' || !Number.isFinite(temperature) || temperature < -20 || temperature > 50) {
     outdoorTemperatureInput.value = roomScene.room.outdoorTemperature ?? 10;
+  $('#initial-temperature').value = roomScene.room.initialTemperature ?? 20;
+  $('#envelope-u-value').value = roomScene.room.envelopeUValue ?? 0.7;
+  $('#daylight-date').value = roomScene.room.daylightDate ?? '2026-03-21';
+  $('#room-heading').value = roomScene.room.headingDegrees ?? 0;
     outdoorTemperatureInput.setCustomValidity('Enter an outdoor temperature from -20 °C to 50 °C.');
     outdoorTemperatureInput.reportValidity();
     outdoorTemperatureInput.setCustomValidity('');
@@ -536,6 +595,10 @@ properties.addEventListener('change', (event) => {
       updateScene(setWindowOpen(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-wall]')) {
       updateScene(setWindowWall(roomScene, object.id, input.value).scene);
+    } else if (input.matches('[data-device-wall]')) {
+      updateScene(setDeviceWall(roomScene, object.id, input.value).scene);
+    } else if (input.matches('[data-heater-power]')) {
+      updateScene(setHeaterPower(roomScene, object.id, Number(input.value)).scene);
     } else if (input.matches('[data-device-enabled]')) {
       updateScene(setDeviceEnabled(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-flow-direction]')) {
@@ -647,11 +710,15 @@ viewportInfo.addEventListener('focusout', (event) => {
   if (!viewportInfo.contains(event.relatedTarget) && !viewportInfo.matches(':hover')) setShortcutHelpOpen(false);
 });
 document.addEventListener('pointerdown', (event) => {
+  for (const menu of document.querySelectorAll('.simulation-popover')) if (!menu.contains(event.target)) menu.open = false;
+  if (!$('#scenario-storage').contains(event.target)) $('#scenario-storage').open = false;
   if (!cameraViewPicker.contains(event.target)) cameraViewPicker.open = false;
   if (!viewportInfo.contains(event.target) && !viewportInfo.matches(':hover')) setShortcutHelpOpen(false);
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
+    for (const menu of document.querySelectorAll('.simulation-popover')) menu.open = false;
+    $('#scenario-storage').open = false;
     cameraViewPicker.open = false;
     setShortcutHelpOpen(false);
   }
@@ -686,7 +753,107 @@ fieldController = new RoomFieldController({
   onState: renderFieldState,
 });
 fieldController.setScene(roomScene);
+renderScenarios();
 window.addEventListener('pagehide', () => {
   fieldController.dispose();
   viewport.dispose();
 }, { once: true });
+
+function persistWorkspace() {
+  try { writeWorkspace(window.localStorage, { scene: roomScene, scenarios }); }
+  catch { setEditorStatus('Browser storage unavailable.'); }
+}
+
+function renderScenarios() {
+  $('#saved-scenarios').innerHTML = '<option value="">Choose saved…</option>' + scenarios.map((scenario, index) => `<option value="${index}">${escapeHtml(scenario.name)}</option>`).join('');
+}
+
+$('#simulation-time').addEventListener('input', (event) => {
+  fieldController.setPlaying(false);
+  fieldController.setSimulationTime(Number(event.target.value));
+  $('#simulation-time-value').textContent = `${fieldController.durationSeconds} s`;
+});
+$('#resolution-control').addEventListener('click', (event) => {
+  const option = event.target.closest('[data-resolution]');
+  if (!option) return;
+  fieldController.setPlaying(false);
+  fieldController.setResolution(Number(option.dataset.resolution));
+  $('#resolution-control').open = false;
+});
+$('#simulation-play').addEventListener('click', () => fieldController.setPlaying(!fieldController.playing));
+$('#simulation-restart').addEventListener('click', () => { fieldController.setPlaying(false); fieldController.setSimulationTime(0); });
+for (const id of ['temperature-min', 'temperature-max']) $('#' + id).addEventListener('change', () => {
+  const minimum = Number($('#temperature-min').value), maximum = Number($('#temperature-max').value);
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum < -20 || maximum > 60 || minimum >= maximum) { setEditorStatus('Choose a temperature scale between −20 and 60 °C with min below max.'); return; }
+  fieldController.setDisplayRanges({ temperature: { minimum, maximum }, speedMaximum: 2.5 });
+});
+$('#save-scenario').addEventListener('click', () => {
+  const name = $('#scenario-name').value.trim();
+  if (!name) { setEditorStatus('Name the scenario first.'); return; }
+  const existing = scenarios.findIndex((scenario) => scenario.name === name);
+  const entry = { name, scene: structuredClone(roomScene) };
+  if (existing >= 0) scenarios[existing] = entry;
+  else if (scenarios.length < 20) scenarios.push(entry);
+  else { setEditorStatus('Delete a saved scenario before adding another.'); return; }
+  renderScenarios(); persistWorkspace(); setEditorStatus(`Saved ${name}`);
+});
+$('#load-scenario').addEventListener('click', () => {
+  const value = $('#saved-scenarios').value;
+  if (value === '') return;
+  const scenario = scenarios[Number(value)];
+  updateScene(structuredClone(scenario.scene)); updateSelection(null); refreshScene();
+  $('#scenario-name').value = scenario.name;
+});
+$('#delete-scenario').addEventListener('click', () => {
+  const value = $('#saved-scenarios').value;
+  if (value === '') return;
+  scenarios.splice(Number(value), 1); renderScenarios(); persistWorkspace();
+});
+
+for (const [id, property, min, max] of [['initial-temperature', 'initialTemperature', -20, 40], ['envelope-u-value', 'envelopeUValue', 0, 5], ['room-heading', 'headingDegrees', 0, 360]]) {
+  $('#' + id).addEventListener('change', (event) => {
+    const value = Number(event.target.value);
+    if (!Number.isFinite(value) || value < min || value > max) { setEditorStatus(`Value must be between ${min} and ${max}.`); return; }
+    updateScene({ ...roomScene, room: { ...roomScene.room, [property]: value } }); refreshScene();
+  });
+}
+
+$('#daylight-date').addEventListener('change', (event) => {
+  if (!event.target.value || !event.target.validity.valid) return;
+  updateScene({ ...roomScene, room: { ...roomScene.room, daylightDate: event.target.value } }); refreshScene();
+});
+
+$('#scenario-storage').addEventListener('toggle', () => {
+  $('#scenario-storage summary').setAttribute('aria-expanded', String($('#scenario-storage').open));
+});
+$('#reset-room').addEventListener('click', () => {
+  updateScene(createEditorState().scene); updateSelection(null); refreshScene();
+  $('#scenario-storage').open = false;
+});
+
+$('#scenario-storage').addEventListener('click', (event) => {
+  if (event.target.closest('button:not(:disabled)')) $('#scenario-storage').open = false;
+});
+
+for (const menu of document.querySelectorAll('.simulation-popover')) menu.addEventListener('toggle', () => {
+  menu.querySelector('summary').setAttribute('aria-expanded', String(menu.open));
+});
+
+for (const menu of document.querySelectorAll('.field-display-control')) menu.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && menu.open) {
+    menu.open = false;
+    menu.querySelector('summary').focus();
+    event.stopPropagation();
+    return;
+  }
+  if (!event.target.matches('summary, [role="menuitem"], [role="menuitemradio"]')) return;
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  const options = [...menu.querySelectorAll('[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)')];
+  if (!options.length) return;
+  event.preventDefault();
+  menu.open = true;
+  const current = options.indexOf(document.activeElement);
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
+    : event.key === 'ArrowDown' ? (current + 1) % options.length : (current - 1 + options.length) % options.length;
+  options[next].focus();
+});

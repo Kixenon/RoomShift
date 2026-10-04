@@ -11,7 +11,7 @@ const DAY = { sun: { direction: { x: 0, y: 0.5, z: -0.866 }, altitude: 30, dayli
 
 function roomWithWindow(open) {
   const placed = addWindow(emptyRoom(), 'back');
-  return setWindowOpen(placed.scene, 'window-1', open).scene;
+  return setWindowOpen(placed.scene, placed.object.id, open).scene;
 }
 
 function emptyRoom() {

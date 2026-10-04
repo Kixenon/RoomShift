@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as THREE from 'three';
 import { RoomViewport } from '../src/scene/room-viewport.js';
 import { addWindow, createRoomScene, setDeviceEnabled, setWindowOpen } from '../src/model/room-scene.js';
+import { isOpeningObject } from '../src/model/openings.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES } from '../src/simulation/daylight.js';
 
 // Exercises the three.js side of the time-of-day model against stand-in lights,
@@ -39,10 +40,18 @@ function harness(overrides = {}) {
   return viewport;
 }
 
-const sceneWithOpenWindow = (wall = 'back') => {
-  const withWindow = addWindow(createRoomScene(), wall);
-  return setWindowOpen(withWindow.scene, 'window-1', true).scene;
+// A scene with the default openings stripped and exactly one window added, so the
+// patch counts are unambiguous.
+const windowOnlyScene = (wall, open) => {
+  const base = createRoomScene();
+  base.objects = base.objects.filter((object) => !isOpeningObject(object));
+  base.nextWindowId = 1;
+  base.nextDoorId = 1;
+  const placed = addWindow(base, wall);
+  return setWindowOpen(placed.scene, placed.object.id, open).scene;
 };
+
+const sceneWithOpenWindow = (wall = 'back') => windowOnlyScene(wall, true);
 
 const setClock = (viewport, timeMinutes) => viewport.setTimeOfDay({ timeMinutes });
 
@@ -175,12 +184,12 @@ test('a window in shade drops its patch mesh', () => {
   assert.equal(geometryBefore.attributes.position.count % 3, 0, 'the old geometry is a valid fan');
 });
 
-test('a closed window produces no patch mesh', () => {
-  const placed = addWindow(createRoomScene(), 'back');
-  const closed = setWindowOpen(placed.scene, 'window-1', false).scene;
-  const viewport = harness({ roomScene: closed });
+test('a closed glass window still casts a sun patch', () => {
+  const viewport = harness({ roomScene: windowOnlyScene('back', false) });
   setClock(viewport, 10 * 60);
-  assert.equal(viewport.sunPatchMeshes.length, 0);
+  // Closed glass passes most direct sun, so it still projects a patch. Only a
+  // closed door (opaque) blocks it.
+  assert.equal(viewport.sunPatchMeshes.length, 1);
 });
 
 test('daylight state is derived but not applied while the preview is off', () => {

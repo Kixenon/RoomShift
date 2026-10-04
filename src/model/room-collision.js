@@ -47,11 +47,15 @@ function overlapsOpenings(a, b) {
   return alongOverlap && verticalOverlap;
 }
 
+const isWallMountedDevice = (object) => object.primitive === 'device' && Boolean(object.wall);
+
 export function findObjectCollision(objects, candidate, ignoreId = candidate.id) {
   for (const other of objects) {
     if (other.id === ignoreId) continue;
     if (isOpeningObject(candidate) || isOpeningObject(other)) {
-      if (isOpeningObject(candidate) && isOpeningObject(other) && overlapsOpenings(candidate, other)) return other;
+      const candidateMounted = isOpeningObject(candidate) || isWallMountedDevice(candidate);
+      const otherMounted = isOpeningObject(other) || isWallMountedDevice(other);
+      if (candidateMounted && otherMounted && overlapsOpenings(candidate, other)) return other;
       continue;
     }
     if (overlapsBoxes(candidate, other)) return other;
