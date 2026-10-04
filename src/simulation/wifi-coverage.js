@@ -4,7 +4,17 @@ import { buildSolidMask, validateScene } from './room-fields-3d.js';
 
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const indexOf = (i, j, k, grid) => (j * grid.nz + k) * grid.nx + i;
-const BLOCKER_ATTENUATION_DB = Object.freeze({ bed: 7, desk: 5, heater: 3, lamp: 2, sofa: 8, table: 4 });
+const BLOCKER_ATTENUATION_DB = Object.freeze({
+  bed: 7,
+  chair: 3,
+  'ceiling-fan': 1,
+  desk: 5,
+  heater: 3,
+  'air-conditioner': 2,
+  lamp: 2,
+  sofa: 8,
+  table: 4,
+});
 
 function createGrid(room) {
   const nx = Math.min(80, Math.ceil(room.width / 0.25));
@@ -78,7 +88,7 @@ export async function estimateWifiCoverage(scene, { isCancelled = () => false } 
   const grid = createGrid(scene.room);
   const routers = scene.objects.filter((object) => object.model === 'router' && object.enabled !== false && (object.intensity ?? 1) > 0);
   const blockers = scene.objects
-    .filter((object) => object.model !== 'router' && object.model !== 'fan' && !isOpeningObject(object))
+    .filter((object) => object.model !== 'router' && !['fan', 'ceiling-fan'].includes(object.model) && !isOpeningObject(object))
     .map(makeBox);
   const objectsWithoutRouters = { ...scene, objects: scene.objects.filter((object) => object.model !== 'router') };
   const solid = buildSolidMask(objectsWithoutRouters, grid);

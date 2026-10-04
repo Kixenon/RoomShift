@@ -31,22 +31,23 @@ export function prepareWebGpuInputs(scene, grid, settings = {}) {
   const solid = Uint32Array.from(mask);
   const boundary = buildWindowBoundary(scene, grid, physics);
   const outlets = Uint32Array.from(boundary.outlets);
-  const heaters = scene.objects.filter((object) => object.model === 'heater' && object.enabled !== false);
-  const heaterData = new Float32Array(Math.max(1, heaters.length) * 8);
+  const thermalSources = scene.objects.filter((object) => ['heater', 'air-conditioner'].includes(object.model) && object.enabled !== false);
+  const heaterData = new Float32Array(Math.max(1, thermalSources.length) * 8);
   const fanForces = buildFanAccelerationField(scene, grid, solid, physics);
 
-  heaters.forEach((heater, index) => {
+  thermalSources.forEach((source, index) => {
     const offset = index * 8;
+    const sourceRate = source.model === 'air-conditioner' ? -physics.airConditionerRate : physics.heaterRate;
     heaterData.set([
-      heater.position.x,
-      heater.position.y + heater.dimensions.height / 2,
-      heater.position.z,
+      source.position.x,
+      source.position.y + source.dimensions.height / 2,
+      source.position.z,
       physics.heaterRadius,
-      physics.heaterRate * (heater.intensity ?? 1), 0, 0, 0,
+      sourceRate * (source.intensity ?? 1), 0, 0, 0,
     ], offset);
   });
 
-  return { solid, outlets, windowPressure: boundary.pressure, fanForces, heaters: heaterData, heaterCount: heaters.length };
+  return { solid, outlets, windowPressure: boundary.pressure, fanForces, heaters: heaterData, heaterCount: thermalSources.length };
 }
 
 const COMMON_CONFIG = `

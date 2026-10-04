@@ -7,8 +7,18 @@ export { rotationMatrixXYZ } from './room-transform.js';
 export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
 
 export const DEFAULT_BOX_DIMENSIONS = Object.freeze({ width: 1, height: 1, depth: 1 });
-export const DEVICE_MODELS = Object.freeze(['fan', 'heater', 'lamp', 'router']);
+export const DEVICE_MODELS = Object.freeze(['fan', 'ceiling-fan', 'heater', 'air-conditioner', 'lamp', 'router']);
+export const WALL_MOUNTED_DEVICE_MODELS = Object.freeze(['air-conditioner']);
+export const CEILING_MOUNTED_DEVICE_MODELS = Object.freeze(['ceiling-fan']);
 export const SOURCE_INTENSITY_LIMITS = Object.freeze({ min: 0, max: 2 });
+
+export function isWallMountedDevice(object) {
+  return WALL_MOUNTED_DEVICE_MODELS.includes(object?.model);
+}
+
+export function isCeilingMountedDevice(object) {
+  return CEILING_MOUNTED_DEVICE_MODELS.includes(object?.model);
+}
 
 const preset = (label, icon, dimensions) => Object.freeze({
   label,
@@ -19,12 +29,15 @@ const preset = (label, icon, dimensions) => Object.freeze({
 export const MODEL_PRESETS = Object.freeze({
   box: preset('Object', '□', DEFAULT_BOX_DIMENSIONS),
   fan: preset('Fan', '✳', { width: 0.42, height: 1.35, depth: 0.42 }),
+  'ceiling-fan': preset('Ceiling fan with light', '✣', { width: 1.1, height: 0.32, depth: 1.1 }),
   sofa: preset('Sofa', '▰', { width: 1.55, height: 0.78, depth: 0.84 }),
   bed: preset('Bed', '▰', { width: 1.6, height: 0.55, depth: 2 }),
   desk: preset('Desk', '▤', { width: 1.18, height: 0.74, depth: 0.62 }),
+  chair: preset('Office chair', '◒', { width: 0.58, height: 0.92, depth: 0.58 }),
   table: preset('Table', '▱', { width: 0.92, height: 0.38, depth: 0.62 }),
   lamp: preset('Lamp', '◉', { width: 0.32, height: 1.55, depth: 0.32 }),
   heater: preset('Heater', '▥', { width: 0.9, height: 0.56, depth: 0.18 }),
+  'air-conditioner': preset('Air conditioner', '❄', { width: 0.86, height: 0.3, depth: 0.22 }),
   router: preset('Router', '⌁', { width: 0.28, height: 0.12, depth: 0.22 }),
   window: preset('Window', '▣', { width: 1.4, height: 1, depth: 0.06 }),
   door: preset('Door', '▯', { width: 0.9, height: 2.1, depth: 0.06 }),
@@ -34,16 +47,19 @@ const INITIAL_OBJECTS = Object.freeze([
   { id: 'fan-1', primitive: 'device', model: 'fan', name: 'Pedestal fan', enabled: true, intensity: 1, position: { x: 3.6, y: 0, z: 3.2 }, rotation: { x: 0, y: -110, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
   { id: 'sofa-2', primitive: 'box', model: 'sofa', name: 'Sofa', position: { x: 0.58, y: 0, z: 2 }, rotation: { x: 0, y: 90, z: 0 }, dimensions: { width: 1.55, height: 0.78, depth: 0.84 } },
   { id: 'desk-3', primitive: 'box', model: 'desk', name: 'Desk', position: { x: 4.83, y: 0, z: 2 }, rotation: { x: 0, y: -90, z: 0 }, dimensions: { width: 1.18, height: 0.74, depth: 0.62 } },
+  { id: 'chair-5', primitive: 'box', model: 'chair', name: 'Office chair', position: { x: 4.08, y: 0, z: 2 }, rotation: { x: 0, y: -90, z: 0 }, dimensions: { width: 0.58, height: 0.92, depth: 0.58 } },
   { id: 'table-4', primitive: 'box', model: 'table', name: 'Coffee table', position: { x: 1.75, y: 0, z: 2 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.92, height: 0.38, depth: 0.62 } },
   { id: 'lamp-1', primitive: 'device', model: 'lamp', name: 'Floor lamp', enabled: true, intensity: 1, position: { x: 1.35, y: 0, z: 3.15 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
   { id: 'heater-1', primitive: 'device', model: 'heater', name: 'Panel heater', enabled: true, intensity: 1, position: { x: 2.6, y: 0.05, z: 0.13 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
+  { id: 'air-conditioner-1', primitive: 'device', model: 'air-conditioner', name: 'Wall AC', wall: 'back', enabled: true, intensity: 1, position: { x: 2.6, y: 2.08, z: 3.89 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 0.86, height: 0.3, depth: 0.22 } },
+  { id: 'ceiling-fan-1', primitive: 'device', model: 'ceiling-fan', name: 'Ceiling fan with light', enabled: true, intensity: 1, position: { x: 2.6, y: 2.38, z: 2 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.1, height: 0.32, depth: 1.1 } },
 ]);
 
 export function createRoomScene() {
   return {
     room: { ...DEFAULT_ROOM },
     objects: INITIAL_OBJECTS.map((object) => structuredClone(object)),
-    nextObjectId: 5,
+    nextObjectId: 6,
     nextWindowId: 1,
     nextDoorId: 1,
   };
@@ -77,6 +93,122 @@ function anchoredOpeningPosition(object, position, room) {
         : alongWall,
     },
     rotation: { x: 0, y: wall === 'left' ? 90 : wall === 'right' ? -90 : wall === 'back' ? 180 : 0, z: 0 },
+  };
+}
+
+function anchoredWallMountedDevice(object, position, room, wall = object.wall ?? 'back') {
+  if (!['back', 'front', 'left', 'right'].includes(wall)) throw new RangeError(`Unsupported device wall: ${wall}`);
+  const alongX = wall === 'back' || wall === 'front';
+  const span = alongX ? room.width : room.depth;
+  const depthOffset = object.dimensions.depth / 2;
+  const wallInset = alongX ? 0 : depthOffset;
+  const alongAxis = alongX ? 'x' : 'z';
+  const alongWall = clampAndRound(
+    position[alongAxis] ?? object.position[alongAxis],
+    object.dimensions.width / 2 + wallInset,
+    span - object.dimensions.width / 2 - wallInset,
+  );
+  return {
+    ...object,
+    wall,
+    position: {
+      x: alongX ? alongWall : wall === 'left' ? depthOffset : room.width - depthOffset,
+      y: clampAndRound(position.y ?? object.position.y, 0.1, room.height - object.dimensions.height - 0.1),
+      z: alongX ? wall === 'front' ? depthOffset : room.depth - depthOffset : alongWall,
+    },
+    rotation: { x: 0, y: wall === 'left' ? 90 : wall === 'right' ? -90 : wall === 'back' ? 180 : 0, z: 0 },
+  };
+}
+
+function anchoredCeilingMountedDevice(object, position, room) {
+  const [halfWidth, , halfDepth] = rotatedHalfExtents(object.dimensions, object.rotation);
+  return {
+    ...object,
+    position: {
+      x: clampAndRound(position.x ?? object.position.x, halfWidth, room.width - halfWidth),
+      y: room.height - object.dimensions.height,
+      z: clampAndRound(position.z ?? object.position.z, halfDepth, room.depth - halfDepth),
+    },
+  };
+}
+
+function addWallMountedDevice(scene, model) {
+  const idNumber = scene.nextObjectId;
+  const dimensions = { ...MODEL_PRESETS[model].dimensions };
+  const template = {
+    id: `${model}-${idNumber}`,
+    primitive: 'device',
+    model,
+    name: `${MODEL_PRESETS[model].label} ${idNumber}`,
+    wall: 'back',
+    enabled: true,
+    intensity: 1,
+    dimensions,
+    position: { x: scene.room.width / 2, y: scene.room.height - dimensions.height - 0.35, z: scene.room.depth / 2 },
+    rotation: { x: 0, y: 180, z: 0 },
+  };
+  const span = scene.room.width;
+  let object;
+  for (let step = 0; step <= Math.ceil(span / 0.1); step += 1) {
+    for (const sign of step === 0 ? [0] : [-1, 1]) {
+      const position = anchoredWallMountedDevice(template, {
+        x: scene.room.width / 2 + step * 0.1 * sign,
+        y: template.position.y,
+      }, scene.room);
+      if (!findObjectCollision(scene.objects, position)) {
+        object = position;
+        break;
+      }
+    }
+    if (object) break;
+  }
+  if (!object) throw new RangeError(`No clear space remains for an ${MODEL_PRESETS[model].label.toLowerCase()} on the back wall.`);
+  return {
+    object,
+    scene: { ...scene, nextObjectId: idNumber + 1, objects: [...scene.objects, object] },
+  };
+}
+
+function addCeilingMountedDevice(scene, model) {
+  const idNumber = scene.nextObjectId;
+  const dimensions = { ...MODEL_PRESETS[model].dimensions };
+  const template = {
+    id: `${model}-${idNumber}`,
+    primitive: 'device',
+    model,
+    name: `${MODEL_PRESETS[model].label} ${idNumber}`,
+    enabled: true,
+    intensity: 1,
+    dimensions,
+    position: { x: scene.room.width / 2, y: scene.room.height - dimensions.height, z: scene.room.depth / 2 },
+    rotation: { x: 0, y: 0, z: 0 },
+  };
+  const [halfWidth, , halfDepth] = rotatedHalfExtents(dimensions, template.rotation);
+  const candidates = [];
+  for (let xi = 0; xi <= Math.floor(scene.room.width / 0.25); xi += 1) {
+    for (let zi = 0; zi <= Math.floor(scene.room.depth / 0.25); zi += 1) {
+      const x = clampAndRound(xi * 0.25, halfWidth, scene.room.width - halfWidth);
+      const z = clampAndRound(zi * 0.25, halfDepth, scene.room.depth - halfDepth);
+      candidates.push({
+        x,
+        z,
+        distance: (x - scene.room.width / 2) ** 2 + (z - scene.room.depth / 2) ** 2,
+      });
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  let object;
+  for (const candidate of candidates) {
+    const position = anchoredCeilingMountedDevice(template, candidate, scene.room);
+    if (!findObjectCollision(scene.objects, position)) {
+      object = position;
+      break;
+    }
+  }
+  if (!object) throw new RangeError(`No clear ceiling space remains for a ${MODEL_PRESETS[model].label.toLowerCase()}.`);
+  return {
+    object,
+    scene: { ...scene, nextObjectId: idNumber + 1, objects: [...scene.objects, object] },
   };
 }
 
@@ -172,13 +304,35 @@ export function setWindowWall(scene, objectId, wall) {
   };
 }
 
+export function setDeviceWall(scene, objectId, wall) {
+  const existing = scene.objects.find((object) => object.id === objectId);
+  if (!isWallMountedDevice(existing)) throw new RangeError(`Unknown wall-mounted device: ${objectId}`);
+  const wasAlongX = existing.wall === 'back' || existing.wall === 'front';
+  const isAlongX = wall === 'back' || wall === 'front';
+  const position = wasAlongX === isAlongX ? existing.position : {
+    ...existing.position,
+    x: scene.room.width / 2,
+    z: scene.room.depth / 2,
+  };
+  const updated = anchoredWallMountedDevice(existing, position, scene.room, wall);
+  assertPlacementClear(scene.objects, updated, objectId);
+  return {
+    object: updated,
+    scene: { ...scene, objects: scene.objects.map((object) => object.id === objectId ? updated : object) },
+  };
+}
+
 export function addObject(scene, options = {}) {
   const { model = 'box', name } = options;
   if (!MODEL_PRESETS[model]) throw new RangeError(`Unsupported object model: ${model}`);
   if (isOpeningObject({ model })) throw new RangeError('Use the opening tools to place a window or door on a room wall.');
+  if (isWallMountedDevice({ model }) || isCeilingMountedDevice({ model })) {
+    throw new RangeError('Use the device tools to place mounted devices.');
+  }
 
   const idNumber = scene.nextObjectId;
   const isDevice = DEVICE_MODELS.includes(model);
+  const initialY = model === 'router' ? 1.1 : 0;
   const boxDimensions = { ...(options.dimensions ?? (isDevice ? MODEL_PRESETS[model].dimensions : DEFAULT_BOX_DIMENSIONS)) };
   if (!['width', 'height', 'depth'].every((axis) => Number.isFinite(boxDimensions[axis]) && boxDimensions[axis] > 0)) {
     throw new RangeError('Object dimensions must be positive finite values.');
@@ -194,7 +348,7 @@ export function addObject(scene, options = {}) {
     name: normalizeObjectName(name ?? `${isDevice ? MODEL_PRESETS[model].label : 'Object'} ${idNumber}`),
     ...(isDevice ? { enabled: true, intensity: 1 } : {}),
     dimensions: boxDimensions,
-    position: { x: scene.room.width / 2, y: 0, z: scene.room.depth / 2 },
+    position: { x: scene.room.width / 2, y: initialY, z: scene.room.depth / 2 },
     rotation: { x: 0, y: 0, z: 0 },
   };
   let object = null;
@@ -211,7 +365,7 @@ export function addObject(scene, options = {}) {
   }
   candidates.sort((a, b) => a.distance - b.distance);
   for (const candidate of candidates) {
-    const attempt = { ...template, position: { x: candidate.x, y: 0, z: candidate.z } };
+      const attempt = { ...template, position: { x: candidate.x, y: initialY, z: candidate.z } };
     if (!findObjectCollision(scene.objects, attempt)) {
       object = attempt;
       break;
@@ -223,6 +377,8 @@ export function addObject(scene, options = {}) {
 
 export function addDevice(scene, model) {
   if (!DEVICE_MODELS.includes(model)) throw new RangeError(`Unsupported device type: ${model}`);
+  if (isWallMountedDevice({ model })) return addWallMountedDevice(scene, model);
+  if (isCeilingMountedDevice({ model })) return addCeilingMountedDevice(scene, model);
   return addObject(scene, { model });
 }
 
@@ -231,6 +387,9 @@ export function setObjectModel(scene, objectId, model) {
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
   if (!MODEL_PRESETS[model]) throw new RangeError(`Unsupported object model: ${model}`);
   if (isOpeningObject({ model })) throw new RangeError('Use the opening tools to place a window or door on a room wall.');
+  if (isWallMountedDevice({ model }) || isCeilingMountedDevice({ model })) {
+    throw new RangeError('Mounted devices must be added with their device tool.');
+  }
   const isDevice = DEVICE_MODELS.includes(model);
   const updated = { ...existing, primitive: isDevice ? 'device' : 'box', model };
   if (isDevice) updated.intensity = existing.intensity ?? 1;
@@ -308,9 +467,18 @@ function boundedPosition(object, position, room) {
 export function moveObject(scene, objectId, position) {
   const existing = scene.objects.find((object) => object.id === objectId);
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
-  const moved = { ...existing, position: boundedPosition(existing, position, scene.room) };
+  if (isCeilingMountedDevice(existing)) {
+    const anchored = anchoredCeilingMountedDevice(existing, position, scene.room);
+    assertPlacementClear(scene.objects, anchored, objectId);
+    const objects = scene.objects.map((object) => object.id === objectId ? anchored : object);
+    return { scene: { ...scene, objects }, object: anchored };
+  }
+  const wallMounted = isWallMountedDevice(existing);
+  const moved = wallMounted
+    ? existing
+    : { ...existing, position: boundedPosition(existing, position, scene.room) };
   let anchored = moved;
-  if (isOpeningObject(existing)) {
+  if (isOpeningObject(existing) || wallMounted) {
     const candidate = {
       x: position.x ?? existing.position.x,
       y: position.y ?? existing.position.y,
@@ -325,7 +493,9 @@ export function moveObject(scene, objectId, position) {
     };
     const closestWall = Object.keys(distances).sort((a, b) => distances[a] - distances[b])[0];
     const wall = distances[closestWall] + 0.12 < distances[existing.wall ?? 'back'] ? closestWall : existing.wall ?? 'back';
-    anchored = anchoredOpeningPosition({ ...existing, wall }, candidate, scene.room);
+    anchored = wallMounted
+      ? anchoredWallMountedDevice(existing, candidate, scene.room, wall)
+      : anchoredOpeningPosition({ ...existing, wall }, candidate, scene.room);
   }
   const objects = scene.objects.map((object) => object.id === objectId ? anchored : object);
   assertPlacementClear(scene.objects, anchored, objectId);
@@ -347,7 +517,11 @@ export function resizeRoom(scene, dimensions) {
   }
   const objects = scene.objects.map((object) => isOpeningObject(object)
     ? anchoredOpeningPosition(object, object.position, room)
-    : { ...object, position: boundedPosition(object, object.position, room) });
+    : isWallMountedDevice(object)
+      ? anchoredWallMountedDevice(object, object.position, room)
+      : isCeilingMountedDevice(object)
+        ? anchoredCeilingMountedDevice(object, object.position, room)
+      : { ...object, position: boundedPosition(object, object.position, room) });
   for (let index = 0; index < objects.length; index += 1) {
     assertPlacementClear(objects.slice(0, index), objects[index]);
   }
@@ -371,6 +545,30 @@ export function resizeObject(scene, objectId, dimensions) {
     return { scene: { ...scene, objects }, object: resized };
   }
   const nextDimensions = { ...existing.dimensions, ...dimensions };
+  if (isWallMountedDevice(existing)) {
+    const span = existing.wall === 'back' || existing.wall === 'front' ? scene.room.width : scene.room.depth;
+    if (nextDimensions.width < 0.4 || nextDimensions.width > span - 0.2
+      || nextDimensions.height < 0.1 || nextDimensions.height > scene.room.height - 0.2
+      || nextDimensions.depth < 0.08 || nextDimensions.depth > 0.6) {
+      throw new RangeError(`${MODEL_PRESETS[existing.model].label} dimensions do not fit on this wall.`);
+    }
+    const resized = anchoredWallMountedDevice({ ...existing, dimensions: nextDimensions }, existing.position, scene.room);
+    assertPlacementClear(scene.objects, resized, objectId);
+    const objects = scene.objects.map((object) => object.id === objectId ? resized : object);
+    return { scene: { ...scene, objects }, object: resized };
+  }
+  if (isCeilingMountedDevice(existing)) {
+    for (const axis of ['width', 'height', 'depth']) {
+      const roomLimit = axis === 'height' ? scene.room.height : axis === 'width' ? scene.room.width : scene.room.depth;
+      if (!Number.isFinite(nextDimensions[axis]) || nextDimensions[axis] < 0.1 || nextDimensions[axis] > roomLimit) {
+        throw new RangeError(`Object ${axis} must be between 0.1 and ${roomLimit} meters.`);
+      }
+    }
+    const resized = anchoredCeilingMountedDevice({ ...existing, dimensions: nextDimensions }, existing.position, scene.room);
+    assertPlacementClear(scene.objects, resized, objectId);
+    const objects = scene.objects.map((object) => object.id === objectId ? resized : object);
+    return { scene: { ...scene, objects }, object: resized };
+  }
   for (const axis of ['width', 'height', 'depth']) {
     const roomLimit = axis === 'height' ? scene.room.height : axis === 'width' ? scene.room.width : scene.room.depth;
     if (!Number.isFinite(nextDimensions[axis]) || nextDimensions[axis] < 0.1 || nextDimensions[axis] > roomLimit) {
@@ -390,7 +588,7 @@ export function resizeObject(scene, objectId, dimensions) {
 export function rotateObject(scene, objectId, rotation) {
   const existing = scene.objects.find((object) => object.id === objectId);
   if (!existing) throw new RangeError(`Unknown object: ${objectId}`);
-  if (isOpeningObject(existing)) return { scene, object: existing };
+  if (isOpeningObject(existing) || isWallMountedDevice(existing) || isCeilingMountedDevice(existing)) return { scene, object: existing };
   const nextRotation = {};
   for (const axis of ['x', 'y', 'z']) {
     const degrees = rotation?.[axis] ?? existing.rotation[axis];

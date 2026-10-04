@@ -19,6 +19,8 @@ const COLORS = Object.freeze({
   lamp: 0x86a88f,
   heater: 0xaab2aa,
   router: 0x536d83,
+  chair: 0x65756d,
+  airConditioner: 0xe7ebe7,
   metal: 0x75877d,
   shade: 0xe3dfd0,
   windowFrame: 0x68847b,
@@ -122,17 +124,22 @@ function createDesk(group, dimensions) {
   box(group, { width: w * 0.39, height: h * 0.33, depth: 0.008 }, { x: 0, y: h * 0.7, z: -d * 0.25 + 0.028 }, 0x90b5ba);
   box(group, { width: w * 0.055, height: h * 0.25, depth: 0.045 }, { x: 0, y: h * 0.35, z: -d * 0.25 }, 0x6d7773);
   box(group, { width: w * 0.36, height: 0.018, depth: d * 0.22 }, { x: 0, y: h / 2 + 0.012, z: d * 0.22 }, 0x4d5652);
-  const chairZ = d / 2 + 0.55;
-  box(group, { width: w * 0.38, height: 0.075, depth: 0.42 }, { x: 0, y: -h * 0.24, z: chairZ }, 0x65756d);
-  box(group, { width: w * 0.37, height: h * 0.48, depth: 0.065 }, { x: 0, y: h * 0.02, z: chairZ + 0.2 }, 0x71847a);
-  for (const x of [-1, 1]) {
-    for (const z of [-1, 1]) {
-      box(group, { width: 0.025, height: h * 0.21, depth: 0.025 }, {
-        x: x * w * 0.15,
-        y: -h * 0.39,
-        z: chairZ + z * 0.16,
-      }, 0x525c56);
-    }
+}
+
+function createOfficeChair(group, dimensions) {
+  const { width: w, height: h, depth: d } = dimensions;
+  box(group, { width: w * 0.84, height: h * 0.095, depth: d * 0.78 }, { x: 0, y: -h * 0.02, z: 0 }, COLORS.chair);
+  box(group, { width: w * 0.78, height: h * 0.49, depth: d * 0.1 }, { x: 0, y: h * 0.23, z: -d * 0.38 }, 0x71847a);
+  cylinder(group, 0.035, 0.045, h * 0.38, { x: 0, y: -h * 0.25, z: 0 }, 0x89968e, 12);
+  cylinder(group, 0.12, 0.14, 0.035, { x: 0, y: -h * 0.43, z: 0 }, 0x89968e, 20);
+  for (let index = 0; index < 5; index += 1) {
+    const angle = index * Math.PI * 2 / 5;
+    const leg = box(group, { width: w * 0.32, height: 0.028, depth: 0.035 }, {
+      x: Math.cos(angle) * w * 0.2,
+      y: -h * 0.43,
+      z: Math.sin(angle) * d * 0.2,
+    }, 0x89968e);
+    leg.rotation.y = -angle;
   }
 }
 
@@ -195,6 +202,54 @@ function createRouter(group, dimensions) {
   }
 }
 
+function createAirConditioner(group, dimensions) {
+  const { width: w, height: h, depth: d } = dimensions;
+  box(group, { width: w, height: h, depth: d }, { x: 0, y: 0, z: 0 }, COLORS.airConditioner);
+  box(group, { width: w * 0.78, height: h * 0.34, depth: 0.012 }, { x: 0, y: -h * 0.2, z: d / 2 + 0.008 }, 0xb8c3bd);
+  for (let index = 0; index < 5; index += 1) {
+    box(group, { width: w * 0.72, height: 0.012, depth: 0.018 }, {
+      x: 0,
+      y: -h * 0.31 + index * h * 0.055,
+      z: d / 2 + 0.02,
+    }, 0x71847a);
+  }
+  const status = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0xa7ddbe, emissive: 0x275c3a, roughness: 0.48 }),
+  );
+  status.position.set(w * 0.39, h * 0.3, d / 2 + 0.01);
+  group.add(status);
+}
+
+function createCeilingFan(group, dimensions) {
+  const { width, height } = dimensions;
+  box(group, { width: width * 0.22, height: 0.035, depth: width * 0.22 }, { x: 0, y: height * 0.43, z: 0 }, 0x77847e);
+  cylinder(group, 0.026, 0.026, height * 0.48, { x: 0, y: height * 0.18, z: 0 }, 0x89968e, 10);
+
+  const rotor = new THREE.Group();
+  rotor.name = 'fan-rotor';
+  rotor.userData.rotationAxis = 'y';
+  rotor.position.y = -height * 0.04;
+  cylinder(rotor, width * 0.11, width * 0.15, height * 0.25, { x: 0, y: 0, z: 0 }, 0x738178);
+  for (let index = 0; index < 4; index += 1) {
+    const angle = index * Math.PI / 2;
+    const blade = box(rotor, { width: width * 0.42, height: 0.025, depth: width * 0.12 }, {
+      x: Math.cos(angle) * width * 0.28,
+      y: 0.015,
+      z: -Math.sin(angle) * width * 0.28,
+    }, COLORS.fan);
+    blade.rotation.y = angle;
+  }
+  const diffuser = new THREE.Mesh(
+    new THREE.SphereGeometry(width * 0.13, 16, 10),
+    material(0xffe4a5, { emissive: 0x75531c, emissiveIntensity: 0.32, roughness: 0.4 }),
+  );
+  diffuser.scale.y = 0.48;
+  diffuser.position.y = -height * 0.24;
+  rotor.add(diffuser);
+  group.add(rotor);
+}
+
 function createOpening(group, dimensions, open, model) {
   const { width, height, depth } = dimensions;
   const frame = 0.045;
@@ -223,7 +278,19 @@ function createOpening(group, dimensions, open, model) {
   }
 }
 
-const BUILDERS = Object.freeze({ fan: createFan, sofa: createSofa, bed: createBed, desk: createDesk, table: createTable, lamp: createLamp, heater: createHeater, router: createRouter });
+const BUILDERS = Object.freeze({
+  fan: createFan,
+  'ceiling-fan': createCeilingFan,
+  sofa: createSofa,
+  bed: createBed,
+  desk: createDesk,
+  chair: createOfficeChair,
+  table: createTable,
+  lamp: createLamp,
+  heater: createHeater,
+  'air-conditioner': createAirConditioner,
+  router: createRouter,
+});
 
 function disposeTree(root) {
   root.traverse((child) => {
@@ -542,7 +609,7 @@ export class RoomViewport {
     else if (builder) builder(group, object.dimensions);
     else box(group, object.dimensions, { x: 0, y: 0, z: 0 }, COLORS.metal);
     group.userData.open = object.open;
-    if (object.model === 'fan') {
+    if (object.model === 'fan' || object.model === 'ceiling-fan') {
       const rotor = group.getObjectByName('fan-rotor');
       rotor.userData.enabled = object.enabled !== false && (object.intensity ?? 1) > 0;
       rotor.traverse((child) => {
@@ -593,7 +660,7 @@ export class RoomViewport {
     for (const object of roomScene.objects) this.createObjectGroup(object);
     this.select(selectedId);
     if (initialScene) this.fitRoom();
-    if (showLighting) this.setLightingPreview(true);
+    if (showLighting) this.setLightingPreview(true, true);
   }
 
   setFields(result, mode, options = {}) {
@@ -654,8 +721,8 @@ export class RoomViewport {
     delete this.renderer.domElement.dataset.exteriorTracerVolumeM3;
   }
 
-  setLightingPreview(enabled) {
-    if (enabled === this.lightingPreview) return;
+  setLightingPreview(enabled, force = false) {
+    if (enabled === this.lightingPreview && !force) return;
     this.lightingPreview = enabled;
     this.clearSunPatches();
     for (const light of this.lightingLights) {
@@ -683,13 +750,13 @@ export class RoomViewport {
     });
 
     if (enabled) {
-      for (const object of this.roomScene.objects.filter((item) => item.model === 'lamp' && item.enabled !== false)) {
+      for (const object of this.roomScene.objects.filter((item) => ['lamp', 'ceiling-fan'].includes(item.model) && item.enabled !== false)) {
         const group = this.groups.get(object.id);
         if (!group) continue;
         const source = new THREE.PointLight(0xffffff, 1, LAMP_LIGHT_DISTANCE, 2);
-        source.power = DEFAULT_LAMP_POWER * (object.intensity ?? 1);
+        source.power = DEFAULT_LAMP_POWER * (object.model === 'lamp' ? object.intensity ?? 1 : 0.75);
         source.castShadow = true;
-        source.position.set(0, object.dimensions.height * 0.22, 0);
+        source.position.set(0, object.model === 'lamp' ? object.dimensions.height * 0.22 : -object.dimensions.height * 0.24, 0);
         group.localToWorld(source.position);
         source.shadow.mapSize.set(1024, 1024);
         source.shadow.camera.near = 0.05;
@@ -766,8 +833,9 @@ export class RoomViewport {
     this.renderer.toneMappingExposure = state.exposure;
 
     for (const light of this.lightingLights) {
-      const lamp = this.roomScene.objects.find((object) => object.id === light.userData.objectId);
-      light.power = (lamp?.enabled !== false ? DEFAULT_LAMP_POWER : 0) * (lamp?.intensity ?? 1);
+      const fixture = this.roomScene.objects.find((object) => object.id === light.userData.objectId);
+      const brightness = fixture?.model === 'lamp' ? fixture.intensity ?? 1 : 0.75;
+      light.power = (fixture?.enabled !== false ? DEFAULT_LAMP_POWER * brightness : 0);
     }
     this.rebuildSunPatches();
     this.updateDaylightDataset();
@@ -781,7 +849,7 @@ export class RoomViewport {
     data.sunAltitude = String(Number(state.sun.altitude.toFixed(1)));
     data.sunAzimuth = String(Number(state.sun.azimuth.toFixed(1)));
     data.clockTime = state.clock;
-    data.lampsOn = String(this.roomScene.objects.some((object) => object.model === 'lamp' && object.enabled !== false));
+    data.lampsOn = String(this.roomScene.objects.some((object) => ['lamp', 'ceiling-fan'].includes(object.model) && object.enabled !== false));
     data.sunPatches = String(this.sunPatchMeshes.length);
   }
 
@@ -863,7 +931,7 @@ export class RoomViewport {
       const object = this.roomScene.objects.find((item) => item.id === light.userData.objectId);
       const group = this.groups.get(light.userData.objectId);
       if (!object || !group) continue;
-      light.position.set(0, object.dimensions.height * 0.22, 0);
+      light.position.set(0, object.model === 'lamp' ? object.dimensions.height * 0.22 : -object.dimensions.height * 0.24, 0);
       group.localToWorld(light.position);
     }
   }
@@ -1074,7 +1142,9 @@ export class RoomViewport {
     }
     if (!this.prefersReducedMotion) {
       for (const rotor of this.fanRotors.values()) {
-        if (rotor.userData.enabled) rotor.rotation.z += delta * 19;
+        if (!rotor.userData.enabled) continue;
+        if (rotor.userData.rotationAxis === 'y') rotor.rotation.y += delta * 9;
+        else rotor.rotation.z += delta * 19;
       }
     }
     this.selectionBox?.update();
