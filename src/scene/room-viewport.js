@@ -565,20 +565,6 @@ export class RoomViewport {
     if (showLighting) this.setLightingPreview(true, true);
   }
 
-  setProbe(point) {
-    if (!point) {
-      if (this.probeMarker) this.probeMarker.visible = false;
-      return;
-    }
-    if (!this.probeMarker) {
-      this.probeMarker = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), new THREE.MeshBasicMaterial({ color: 0x9b35d0, depthTest: false }));
-      this.probeMarker.renderOrder = 10;
-      this.scene.add(this.probeMarker);
-    }
-    this.probeMarker.visible = true;
-    this.probeMarker.position.set(point.x - this.roomScene.room.width / 2, point.y, point.z - this.roomScene.room.depth / 2);
-  }
-
   setFields(result, mode, options = {}) {
     this.clearFields();
     if (mode === 'light' && options.displayStyle !== 'map') {
@@ -1014,7 +1000,6 @@ export class RoomViewport {
     this.orbit.dispose();
     this.transform.dispose();
     disposeTree(this.sceneRoot);
-    if (this.probeMarker) disposeTree(this.probeMarker);
     this.renderer.dispose();
   }
 }

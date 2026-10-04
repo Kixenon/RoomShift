@@ -206,7 +206,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .simulation-note { display: block; margin: 8px 0; color: #65786e; font-size: 10px; line-height: 1.5; }
 .simulation-section .field { margin-bottom: 9px; }
 .simulation-section input[type="range"] { width: 100%; }
-#simulation-status, #probe-reading, #comparison-reading { font-variant-numeric: tabular-nums; }
 
 .room-actions > summary { min-width: 26px; width: 26px; height: 24px; font-size: 18px; padding: 0; }
 .room-actions > summary::after { display: none; }
@@ -219,7 +218,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .simulation-timeline { display: flex; align-items: center; gap: 7px; }
 .simulation-timeline input[type="range"] { min-width: 30px; flex: 1; accent-color: #27816d; }
 .simulation-timeline output { min-width: 38px; font-size: 10px; color: #60766b; text-align: right; font-variant-numeric: tabular-nums; }
-.simulation-options { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .simulation-popover > summary { min-width: 30px; width: 30px; height: 30px; padding: 5px; }
 .simulation-popover > summary::after { display: none; }
 .simulation-popover[open] > summary, #simulation-play[aria-pressed="true"] { color: #2c775f; background: #e9f2eb; }
@@ -236,7 +234,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 #field-display-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .field-legend-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
-.simulation-options { position: relative; }
-.simulation-options .simulation-popover { position: static; }
-.simulation-options .parameter-menu, .simulation-options .field-display-menu { left: 0; right: auto; width: 100%; top: calc(100% + 6px); }
 .simulation-popover[hidden] { display: none; }
+
+.tool-button { padding: 0; flex-shrink: 0; line-height: 1; }
+.field-display-control > summary.tool-button { display: grid; place-items: center; justify-content: center; gap: 0; padding: 0; }
+.room-actions > summary svg { fill: currentColor; }
+.simulation-timeline { position: relative; }
+.simulation-timeline .simulation-popover { position: static; }
+.simulation-timeline .parameter-menu, .simulation-timeline .field-display-menu { left: 0; right: auto; width: 100%; top: calc(100% + 6px); }

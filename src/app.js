@@ -26,7 +26,6 @@ import { isOpeningObject } from './model/openings.js';
 import { UndoHistory } from './model/undo-history.js';
 import { RoomFieldController } from './simulation/room-field-controller.js';
 import { readWorkspace, writeWorkspace } from './model/scenarios.js';
-import { sampleRoomFields } from './simulation/room-field-analysis.js';
 import { temperatureDisplayRange } from './simulation/room-field-display.js';
 import {
   createEditorState,
@@ -81,7 +80,6 @@ const timeControls = {
 let editorState = createEditorState();
 const savedWorkspace = readWorkspace(window.localStorage);
 let roomScene = savedWorkspace?.scene ?? editorState.scene;
-let baseline = savedWorkspace?.baseline ?? null;
 let scenarios = savedWorkspace?.scenarios ?? [];
 editorState = { ...editorState, scene: roomScene };
 let selectedId = editorState.selectedId;
@@ -135,7 +133,6 @@ timeControls.slider.addEventListener('input', () => {
 function renderFieldState({ mode, loading, result, error, stale, playing = false }) {
   const physical = ['airflow', 'temperature'].includes(mode);
   $('#simulation-settings').hidden = !physical;
-  viewport?.setProbe(physical && $('#probe-control').open ? fieldController.probe : null);
   if (physical) {
     $('#simulation-time').value = String(fieldController.durationSeconds);
     $('#simulation-time-value').textContent = `${result && !stale ? result.durationSeconds : fieldController.durationSeconds} s`;
@@ -147,18 +144,7 @@ function renderFieldState({ mode, loading, result, error, stale, playing = false
     play.innerHTML = playing ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 10 7-10 7Z"/></svg>';
     $('#scale-control').hidden = mode !== 'temperature';
     for (const option of document.querySelectorAll('[data-resolution]')) option.setAttribute('aria-checked', String(Number(option.dataset.resolution) === fieldController.cellSize));
-    $('#simulation-status').textContent = error ? `Unavailable: ${error.message ?? error}`
-      : !result ? 'Calculating…'
-      : `${stale ? 'Previous result · ' : ''}Showing ${result.durationSeconds.toFixed(1)} s${loading ? ` · calculating ${fieldController.durationSeconds} s` : ''} · ${result.stats.meanTemperature.toFixed(2)} °C mean${result.stats.boundaryFlowImbalancePercent > 1 ? ` · flow balance error ${result.stats.boundaryFlowImbalancePercent.toFixed(1)}%` : ''}`;
-    for (const axis of ['x', 'y', 'z']) $('#probe-' + axis).value = fieldController.probe[axis];
-    const point = result && !stale ? sampleRoomFields(result, fieldController.probe) : null;
-    $('#probe-reading').textContent = point?.solid ? 'Measurement point is inside an object.' : point ? `${point.speed.toFixed(3)} m/s · ${point.temperature.toFixed(2)} °C` : '—';
-    const comparison = !stale && result?.comparison;
-    const signed = (value, decimals) => `${value >= 0 ? '+' : ''}${value.toFixed(decimals)}`;
-    $('#comparison-reading').textContent = !baseline ? '' : !comparison ? 'Baseline comparison pending…'
-      : !comparison.comparable ? comparison.reason
-      : comparison.speedDelta === null ? 'Point obstructed in one scenario; choose another point.'
-      : `Change at point: ${signed(comparison.speedDelta, 3)} m/s · ${signed(comparison.temperatureDelta, 2)} °C. Room mean: ${signed(comparison.meanTemperatureDelta, 2)} °C.`;
+
   }
   const viewportElement = $('#viewport');
   const displayStyle = fieldController?.displayStyle;
@@ -453,7 +439,6 @@ function syncPropertyInputs(object) {
 
 function refreshScene() {
   viewport.setScene(roomScene, selectedId);
-  viewport.setProbe($('#probe-control').open && ['airflow', 'temperature'].includes(fieldController?.mode) ? fieldController.probe : null);
   renderInspector();
   persistWorkspace();
 }
@@ -768,7 +753,6 @@ fieldController = new RoomFieldController({
   onState: renderFieldState,
 });
 fieldController.setScene(roomScene);
-fieldController.setComparison(baseline);
 renderScenarios();
 window.addEventListener('pagehide', () => {
   fieldController.dispose();
@@ -776,13 +760,11 @@ window.addEventListener('pagehide', () => {
 }, { once: true });
 
 function persistWorkspace() {
-  try { writeWorkspace(window.localStorage, { scene: roomScene, baseline, scenarios }); }
+  try { writeWorkspace(window.localStorage, { scene: roomScene, scenarios }); }
   catch { setEditorStatus('Browser storage unavailable.'); }
 }
 
 function renderScenarios() {
-  $('#restore-baseline').disabled = !baseline;
-  $('#clear-baseline').disabled = !baseline;
   $('#saved-scenarios').innerHTML = '<option value="">Choose saved…</option>' + scenarios.map((scenario, index) => `<option value="${index}">${escapeHtml(scenario.name)}</option>`).join('');
 }
 
@@ -800,30 +782,10 @@ $('#resolution-control').addEventListener('click', (event) => {
 });
 $('#simulation-play').addEventListener('click', () => fieldController.setPlaying(!fieldController.playing));
 $('#simulation-restart').addEventListener('click', () => { fieldController.setPlaying(false); fieldController.setSimulationTime(0); });
-for (const axis of ['x', 'y', 'z']) $('#probe-' + axis).addEventListener('change', () => {
-  const point = Object.fromEntries(['x', 'y', 'z'].map((axis) => [axis, Number($('#probe-' + axis).value)]));
-  if (!Object.values(point).every(Number.isFinite) || point.x < 0 || point.x > roomScene.room.width || point.y < 0 || point.y > roomScene.room.height || point.z < 0 || point.z > roomScene.room.depth) {
-    setEditorStatus('Measurement point must be inside the room.'); return;
-  }
-  fieldController.setComparison(baseline, point);
-  viewport.setProbe($('#probe-control').open ? point : null);
-});
 for (const id of ['temperature-min', 'temperature-max']) $('#' + id).addEventListener('change', () => {
   const minimum = Number($('#temperature-min').value), maximum = Number($('#temperature-max').value);
   if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum < -20 || maximum > 60 || minimum >= maximum) { setEditorStatus('Choose a temperature scale between −20 and 60 °C with min below max.'); return; }
   fieldController.setDisplayRanges({ temperature: { minimum, maximum }, speedMaximum: 2.5 });
-});
-$('#capture-baseline').addEventListener('click', () => {
-  baseline = structuredClone(roomScene);
-  fieldController.setComparison(baseline);
-  renderScenarios(); persistWorkspace();
-});
-$('#restore-baseline').addEventListener('click', () => {
-  if (!baseline) return;
-  updateScene(structuredClone(baseline)); updateSelection(null); refreshScene();
-});
-$('#clear-baseline').addEventListener('click', () => {
-  baseline = null; fieldController.setComparison(null); renderScenarios(); persistWorkspace();
 });
 $('#save-scenario').addEventListener('click', () => {
   const name = $('#scenario-name').value.trim();
@@ -861,9 +823,6 @@ $('#daylight-date').addEventListener('change', (event) => {
   updateScene({ ...roomScene, room: { ...roomScene.room, daylightDate: event.target.value } }); refreshScene();
 });
 
-$('#probe-control').addEventListener('toggle', () => {
-  viewport.setProbe($('#probe-control').open && ['airflow', 'temperature'].includes(fieldController.mode) ? fieldController.probe : null);
-});
 $('#scenario-storage').addEventListener('toggle', () => {
   $('#scenario-storage summary').setAttribute('aria-expanded', String($('#scenario-storage').open));
 });

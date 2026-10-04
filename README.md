@@ -25,14 +25,13 @@ npm run validate:simulation
 
 1. Set the room dimensions, initial air temperature, outdoor temperature, and envelope heat-transfer coefficient (W/m² K).
 2. Place furniture and devices. Heaters have a power setting in watts; device strength and on/off controls remain independent.
-3. Press **Set baseline**, then change the layout. The baseline remains a separate snapshot.
-4. Select **Air** or **Heat**. Set an **elapsed time** from 0 to 120 seconds. Open the target icon to enable its measurement marker; its speed, air temperature, and changes from baseline are reported numerically.
-5. Repeat at **Fine** detail. A result that changes substantially with resolution is unsuitable for deciding between layouts.
-6. Use the **Room ⋯** menu to save, load, delete, or reset layouts and manage a baseline. Save named scenarios to revisit them. The current scene, baseline, and up to twenty named scenarios persist in this browser. Saving the same name replaces that scenario. Unsupported or invalid saved data is ignored.
+3. Select **Air** or **Heat**. Set an **elapsed time** from 0 to 120 seconds.
+4. Repeat at **Fine** detail. A result that changes substantially with resolution is unsuitable for deciding between layouts.
+5. Use the **Room ⋯** menu to save, load, delete, or reset layouts. Save named scenarios to revisit them. The current scene and up to twenty named scenarios persist in this browser. Saving the same name replaces that scenario. Unsupported or invalid saved data is ignored.
 
 Time is elapsed since the initial uniformly tempered, stationary air state with the current device/opening configuration. Every geometry, source, or room-physics change starts a fresh experiment. Scrubbing forward continues resident solver state; already computed points are cached. An earlier uncached point starts again from the same initial state. Air and Heat share the same solve. Display scales stay fixed across time and layouts; the temperature scale is adjustable.
 
-The first partial result appears before a long solve finishes. The timeline shows simulated time; the readings icon reveals mean temperature, solve progress, and comparisons. Baseline comparisons use the same time and resolution; comparisons across different room/grid dimensions are refused. A point inside an obstacle is reported as obstructed rather than as still air.
+The first partial result appears before a long solve finishes. The timeline shows the visible simulated time and buffers while the next result is calculated.
 
 **Air** defaults to a speed volume; a static speed slice with direction arrows is also available. The animated Gas view was removed: its dye playback did not evolve the airflow solution or measure ventilation, and consumed substantial rendering work.
 
@@ -54,7 +53,7 @@ This is an **uncalibrated planning model**. It has numerical regression tests, n
 - Fans are a prescribed force distribution with fixed physical extent and voxel-averaged sampling. Their strength is not a measured fan curve. Numerical diffusion, coarse-grid vorticity confinement, slip walls, and incomplete pressure convergence can affect results. Significant boundary-flow imbalance is displayed.
 - Heater watts are distributed over surrounding fluid cells and normalized to total power using air density 1.204 kg/m³ and heat capacity 1006 J/(kg K). Heat-source rates are precomputed once per scene. Envelope conduction uses a uniform U-value and outdoor temperature; it omits wall/furniture heat storage, radiation, solar gains, people, humidity, and HVAC. A zero U-value represents an insulated envelope. Surface colors represent nearby air temperature, not material temperature.
 - Exchange openings use an approximate hydrostatic pressure head based on the initial indoor/outdoor temperature difference and aperture height; it vanishes when temperatures match. It is not an exterior wind/stack-network model and does not update that head as the room warms. Intake/exhaust modes use prescribed exterior pressure from the wind setting.
-- Two resident simulations support current/baseline layouts. Snapshot caches are bounded by count and memory. Cached arrays are copied before transfer to the main thread. Canceled work never replaces a newer result.
+- Two resident simulations support switching between layouts. Snapshot caches are bounded by count and memory. Cached arrays are copied before transfer to the main thread. Canceled work never replaces a newer result.
 
 ## Validation and next evidence
 
@@ -78,4 +77,4 @@ Before claiming predictive usefulness, measure one specific decision: for exampl
 
 The starter room includes a router, ceiling fan with light, wall-mounted AC, window, and door. Wi-Fi has volume and slice views; its propagation model estimates distance loss and obstruction attenuation, not measured coverage. AC uses a default 1500 W cooling source scaled by its output setting; heating and cooling share the same power-normalized CPU/GPU source calculation.
 
-Simulation controls use icon popovers for detail, temperature scale, measurement point, and readings. Play advances in half-second simulated snapshots, waiting when the next solve is still running; Pause holds the requested time and Restart returns to zero. Playback stops on room edits, mode changes, errors, and at 120 seconds. Physics settings are under the detail icon.
+Simulation controls use icon popovers for detail and temperature scale in the playback row. Play advances in half-second simulated snapshots, waiting when the next solve is still running; Pause holds the requested time and Restart returns to zero. Playback stops on room edits, mode changes, errors, and at 120 seconds. Physics settings are under the detail icon.

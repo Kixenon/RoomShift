@@ -5,15 +5,14 @@ export function readWorkspace(storage) {
     const saved = JSON.parse(storage.getItem('roomshift.workspace'));
     if (saved?.version !== 1 || !Array.isArray(saved.scenarios) || saved.scenarios.length > 20) return null;
     validateScene(saved.scene);
-    if (saved.baseline) validateScene(saved.baseline);
     for (const scenario of saved.scenarios) {
       if (typeof scenario.name !== 'string' || !scenario.name.trim() || scenario.name.length > 80) return null;
       validateScene(scenario.scene);
     }
-    return saved;
+    return { scene: saved.scene, scenarios: saved.scenarios };
   } catch { return null; }
 }
 
-export function writeWorkspace(storage, { scene, baseline, scenarios }) {
-  storage.setItem('roomshift.workspace', JSON.stringify({ version: 1, scene, baseline, scenarios }));
+export function writeWorkspace(storage, { scene, scenarios }) {
+  storage.setItem('roomshift.workspace', JSON.stringify({ version: 1, scene, scenarios }));
 }

@@ -4,7 +4,7 @@ import { addWindow, createRoomScene } from '../src/model/room-scene.js';
 import { objectParts } from '../src/model/object-parts.js';
 import { buildFanAccelerationField, buildGrid, buildHeatRate, buildSolidMask, buildWindowBoundary, createRoomFieldsSession, simulateRoomFields } from '../src/simulation/room-fields-3d.js';
 import { RoomFieldSolver } from '../src/simulation/room-field-backend.js';
-import { compareRoomFields, sampleRoomFields } from '../src/simulation/room-field-analysis.js';
+import { sampleRoomFields } from '../src/simulation/room-field-analysis.js';
 import { readWorkspace, writeWorkspace } from '../src/model/scenarios.js';
 
 const empty = () => ({ ...createRoomScene(), room: { width: 2, height: 2, depth: 2, outdoorTemperature: 20, envelopeUValue: 0 }, objects: [] });
@@ -73,11 +73,9 @@ test('solver caches identical time points across air and heat modes and honors c
   solver.dispose();
 });
 
-test('comparison refuses different grids or times and reports obstruction instead of a false improvement', () => {
+test('field sampling reports solid obstruction', () => {
   const result = simulateRoomFields(empty(), { steps: 1, cellSize: 0.25 });
   const point = { x: 1, y: 1, z: 1 };
-  assert.equal(compareRoomFields(result, { ...result, durationSeconds: 1 }, point).comparable, false);
-  assert.equal(compareRoomFields(result, result, point).speedDelta, 0);
   result.fields.solid[index(result.grid, 1, 1, 1)] = 1;
   assert.deepEqual(sampleRoomFields(result, point), { solid: true });
 });
@@ -85,7 +83,7 @@ test('comparison refuses different grids or times and reports obstruction instea
 test('workspace saves scenes and rejects malformed or unsupported data', () => {
   let value;
   const storage = { getItem: () => value, setItem: (_, next) => value = next };
-  writeWorkspace(storage, { scene: empty(), baseline: empty(), scenarios: [{ name: 'Before', scene: empty() }] });
+  writeWorkspace(storage, { scene: empty(), scenarios: [{ name: 'Before', scene: empty() }] });
   assert.equal(readWorkspace(storage).scenarios[0].name, 'Before');
   value = JSON.stringify({ version: 2, scene: empty(), scenarios: [] });
   assert.equal(readWorkspace(storage), null);

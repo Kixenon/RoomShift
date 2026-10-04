@@ -24,8 +24,6 @@ export class RoomFieldController {
     this.durationSeconds = 3;
     this.cellSize = 0.15;
     this.cache = new Map();
-    this.baseline = null;
-    this.probe = { x: 2.6, y: 1.2, z: 2 };
     this.displayRanges = { temperature: { minimum: 10, maximum: 30 }, speedMaximum: 2.5 };
     this.result = null;
     this.latestRequestId = 0;
@@ -43,7 +41,6 @@ export class RoomFieldController {
   setScene(scene) {
     this.stopPlayback();
     this.scene = scene;
-    this.probe = { x: Math.min(this.probe.x, scene.room.width), y: Math.min(this.probe.y, scene.room.height), z: Math.min(this.probe.z, scene.room.depth) };
     this.sliceHeight = Math.min(this.sliceHeight, scene.room.height);
     if (!this.mode || (this.mode === 'light' && this.displayStyles.light === 'preview')) return;
     if (this.interactionActive) {
@@ -159,12 +156,6 @@ export class RoomFieldController {
     this.emitState({ mode: this.mode, loading: Boolean(this.pendingRequest || this.inFlight), result: this.result, stale: Boolean(this.pendingRequest || this.inFlight), error: null, displayStyle: this.displayStyle });
   }
 
-  setComparison(baseline, probe = this.probe) {
-    this.baseline = baseline;
-    this.probe = probe;
-    if (['airflow', 'temperature'].includes(this.mode)) this.scheduleUpdate({ preserveResult: true });
-  }
-
   setDisplayRanges(ranges) {
     this.displayRanges = ranges;
     if (this.result) {
@@ -215,7 +206,7 @@ export class RoomFieldController {
   }
 
   cacheKey() {
-    return JSON.stringify([['light', 'wifi'].includes(this.mode) ? this.scene : fieldSceneKey(this.scene, this.cellSize), ['light', 'wifi'].includes(this.mode) ? this.mode : 'fields', this.durationSeconds, this.cellSize, this.baseline && fieldSceneKey(this.baseline, this.cellSize), this.probe]);
+    return JSON.stringify([['light', 'wifi'].includes(this.mode) ? this.scene : fieldSceneKey(this.scene, this.cellSize), ['light', 'wifi'].includes(this.mode) ? this.mode : 'fields', this.durationSeconds, this.cellSize]);
   }
 
   scheduleUpdate({ preserveResult = false } = {}) {
@@ -241,8 +232,6 @@ export class RoomFieldController {
       displayStyle: this.displayStyle,
       durationSeconds: this.durationSeconds,
       cellSize: this.cellSize,
-      baseline: this.baseline,
-      probe: this.probe,
     };
     if (!preserveResult) this.viewport.clearFields();
     this.emitState({ mode: this.mode, loading: true, result: this.result, error: null, stale: preserveResult, displayStyle: this.displayStyle });

@@ -21,21 +21,6 @@ export function sampleRoomFields(result, point) {
   return total ? { solid: false, speed: Math.hypot(value[0], value[1], value[2]) / total, temperature: value[3] / total } : null;
 }
 
-export function compareRoomFields(current, baseline, point) {
-  if (current.durationSeconds !== baseline.durationSeconds
-    || ['nx', 'ny', 'nz', 'width', 'height', 'depth'].some((key) => current.grid[key] !== baseline.grid[key])) {
-    return { comparable: false, reason: 'Comparison requires the same room dimensions, grid, and elapsed time.' };
-  }
-  const before = sampleRoomFields(baseline, point);
-  const after = sampleRoomFields(current, point);
-  return {
-    comparable: true, before, after,
-    speedDelta: before && after && !before.solid && !after.solid ? after.speed - before.speed : null,
-    temperatureDelta: before && after && !before.solid && !after.solid ? after.temperature - before.temperature : null,
-    meanTemperatureDelta: current.stats.meanTemperature - baseline.stats.meanTemperature,
-  };
-}
-
 export function fieldSceneKey(scene, cellSize) {
   const room = Object.fromEntries(['width', 'height', 'depth', 'outdoorTemperature', 'initialTemperature', 'envelopeUValue'].map((key) => [key, scene.room[key]]));
   const objects = scene.objects.map((object) => Object.fromEntries(['model', 'position', 'rotation', 'dimensions', 'enabled', 'intensity', 'powerWatts', 'wall', 'open', 'flowDirection', 'flowRate'].map((key) => [key, object[key]])));

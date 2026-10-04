@@ -54,7 +54,7 @@ test.before(async () => {
 
 test.beforeEach(async () => {
   browserErrors = [];
-  await page.addInitScript((scene) => { localStorage.clear(); localStorage.setItem('roomshift.workspace', JSON.stringify({ version: 1, scene, baseline: null, scenarios: [] })); }, editorScene);
+  await page.addInitScript((scene) => { localStorage.clear(); localStorage.setItem('roomshift.workspace', JSON.stringify({ version: 1, scene, scenarios: [] })); }, editorScene);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 577 });
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });

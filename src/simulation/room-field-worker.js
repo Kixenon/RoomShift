@@ -1,4 +1,3 @@
-import { compareRoomFields } from './room-field-analysis.js';
 import { RoomFieldSolver } from './room-field-backend.js';
 
 const solver = new RoomFieldSolver();
@@ -14,7 +13,7 @@ self.addEventListener('message', (event) => {
   void solve(message);
 });
 
-async function solve({ requestId, mode, scene, durationSeconds, cellSize, baseline, probe }) {
+async function solve({ requestId, mode, scene, durationSeconds, cellSize }) {
   active.add(requestId);
   try {
     if (!['airflow', 'temperature', 'light', 'wifi'].includes(mode)) {
@@ -27,12 +26,6 @@ async function solve({ requestId, mode, scene, durationSeconds, cellSize, baseli
     if (cancelled.has(requestId)) {
       self.postMessage({ requestId, cancelled: true });
       return;
-    }
-    if (baseline && ['airflow', 'temperature'].includes(mode)) {
-      postResult(requestId, result, true);
-      const before = await solver.solve(baseline, mode, { durationSeconds, cellSize, isCancelled: () => cancelled.has(requestId) });
-      if (!before || cancelled.has(requestId)) { self.postMessage({ requestId, cancelled: true }); return; }
-      result.comparison = compareRoomFields(result, before, probe);
     }
     postResult(requestId, result);
   } catch (error) {

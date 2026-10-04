@@ -47,7 +47,7 @@ const INITIAL_OBJECTS = Object.freeze([
   { id: 'fan-1', primitive: 'device', model: 'fan', name: 'Pedestal fan', enabled: true, intensity: 1, position: { x: 3.6, y: 0, z: 3.2 }, rotation: { x: 0, y: -110, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
   { id: 'sofa-2', primitive: 'box', model: 'sofa', name: 'Sofa', position: { x: 0.58, y: 0, z: 2 }, rotation: { x: 0, y: 90, z: 0 }, dimensions: { width: 1.55, height: 0.78, depth: 0.84 } },
   { id: 'desk-3', primitive: 'box', model: 'desk', name: 'Desk', position: { x: 4.75, y: 0, z: 2 }, rotation: { x: 0, y: -90, z: 0 }, dimensions: { width: 1.18, height: 0.74, depth: 0.62 } },
-  { id: 'chair-5', primitive: 'box', model: 'chair', name: 'Office chair', position: { x: 3.8, y: 0, z: 2 }, rotation: { x: 0, y: -90, z: 0 }, dimensions: { width: 0.58, height: 0.92, depth: 0.58 } },
+  { id: 'chair-5', primitive: 'box', model: 'chair', name: 'Office chair', position: { x: 3.8, y: 0, z: 2 }, rotation: { x: 0, y: 90, z: 0 }, dimensions: { width: 0.58, height: 0.92, depth: 0.58 } },
   { id: 'table-4', primitive: 'box', model: 'table', name: 'Coffee table', position: { x: 1.75, y: 0, z: 2 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.92, height: 0.38, depth: 0.62 } },
   { id: 'lamp-1', primitive: 'device', model: 'lamp', name: 'Floor lamp', enabled: true, intensity: 1, position: { x: 1.5, y: 0, z: 3.15 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
   { id: 'heater-1', primitive: 'device', model: 'heater', name: 'Panel heater', enabled: true, intensity: 1, position: { x: 2.6, y: 0.05, z: 0.13 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
