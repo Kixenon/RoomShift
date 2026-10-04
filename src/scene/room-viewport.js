@@ -4,14 +4,24 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
+import { indirectLux, lightContext, skyLux, windowRadiance } from '../simulation/room-light.js';
 import { objectParts } from '../model/object-parts.js';
 import { isOpeningObject } from '../model/openings.js';
+
+// Hand-tuned bridge from the radiosity model's radiance (nits-like) to a Three.js
+// light power in lumens. Chosen so a bright open window reads about like the
+// lamps and does not blow out the tone-mapped preview; not a photometric value.
+const WINDOW_LIGHT_GAIN = 0.06;
+// Diffuse illuminance (lux-like) that maps to full ambient fill. The sky through
+// the openings and the light they bounce both feed it, so the ambient tracks the
+// daylight rather than sitting at a constant. The shadow-casting window light is
+// what gives that daylight direction; this is only the soft fill around it.
+const AMBIENT_FILL_REFERENCE_LUX = 800;
 
 // Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
 // light preview used before there was a time of day, so an unchanged scene looks
 // the same at the times when the lamps are on.
 const LAMP_LIGHT_DISTANCE = 9;
-
 const COLORS = Object.freeze({
   fan: 0x6d9c85,
   sofa: 0x819f84,
@@ -265,8 +275,12 @@ export class RoomViewport {
     this.fieldLayer = null;
     this.lightingPreview = false;
     this.lightingLights = [];
+    this.windowLights = [];
+    this.windowLightTargets = [];
+    this.radiosityContext = null;
     this.timeMinutes = DEFAULT_TIME_MINUTES;
     this.daylightState = null;
+    this.sunPatchMeshes = [];
     this.pointerStart = null;
     this.projection = 'perspective';
     this.orthoFrustumHeight = 8;
@@ -288,7 +302,12 @@ export class RoomViewport {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // PCFSoftShadowMap filters across neighbouring texels instead of testing a single
+    // sample, so the sun gets a penumbra rather than a hard one-pixel edge where
+    // lit floor meets shadowed floor. VSM honours shadow.radius for a wider blur,
+    // but it leaked light across the whole room here and washed the direct sun
+    // out entirely, so the softer-but-wrong look was not worth trading for.
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.domElement.id = 'room-canvas';
     this.renderer.domElement.setAttribute('aria-label', 'Three-dimensional room. Click an object to select it.');
     this.renderer.domElement.dataset.projection = this.projection;
@@ -300,6 +319,7 @@ export class RoomViewport {
     this.keyLight.shadow.camera.near = 0.1;
     this.keyLight.shadow.camera.far = 50;
     this.keyLight.shadow.bias = -0.0002;
+    this.keyLight.shadow.normalBias = 0.03;
     this.keyLight.position.set(-4, 8, 6);
     this.scene.add(this.hemisphereLight, this.keyLight, this.keyLight.target);
     this.setupControls(this.camera, new THREE.Vector3(0, 1.1, 0));
@@ -458,6 +478,9 @@ export class RoomViewport {
     ceiling.name = 'daylight-ceiling-occluder';
     ceiling.rotation.x = -Math.PI / 2;
     ceiling.position.y = height;
+    // The roof is part of the shell and has to keep blocking the sun, otherwise
+    // daylight lands on the room as if it came through the roof. Direct sun
+    // reaches the interior only through the apertures in the walls below.
     ceiling.castShadow = true;
     ceiling.raycast = () => {};
     this.sceneRoot.add(ceiling);
@@ -624,11 +647,14 @@ export class RoomViewport {
   setLightingPreview(enabled, force = false) {
     if (enabled === this.lightingPreview && !force) return;
     this.lightingPreview = enabled;
-    for (const light of this.lightingLights) {
+    this.clearSunPatches();
+    for (const light of [...this.lightingLights, ...this.windowLights, ...this.windowLightTargets]) {
       this.scene.remove(light);
       light.dispose?.();
     }
     this.lightingLights = [];
+    this.windowLights = [];
+    this.windowLightTargets = [];
 
     if (!enabled) {
       // Restore the neutral studio lighting the editor shows outside the preview.
@@ -668,6 +694,44 @@ export class RoomViewport {
         this.scene.add(source);
         this.lightingLights.push(source);
       }
+
+      // A single shadow-casting spot at each aperture stands in for the sky it
+      // admits. The radiosity model decides how bright each one is
+      // (applyDaylight); this only builds and aims them. A spot can cast shadows
+      // (a RectAreaLight cannot), so furniture in front of a window now blocks
+      // the window light — otherwise the room's openings lit everything with no
+      // shadow term at all. The wide cone and heavy penumbra keep it soft.
+      const { width: roomWidth, depth: roomDepth, height: roomHeight } = this.roomScene.room;
+      const reach = Math.max(roomWidth, roomDepth, roomHeight) * 2.4;
+      for (const object of this.roomScene.objects.filter(isOpeningObject)) {
+        const inward = { front: [0, 0, 1], back: [0, 0, -1], left: [1, 0, 0], right: [-1, 0, 0] }[object.wall];
+        if (!inward) continue;
+        const alongX = object.wall === 'back' || object.wall === 'front';
+        const plane = object.wall === 'front' ? -roomDepth / 2
+          : object.wall === 'back' ? roomDepth / 2
+            : object.wall === 'left' ? -roomWidth / 2 : roomWidth / 2;
+        const across = alongX ? object.position.x - roomWidth / 2 : object.position.z - roomDepth / 2;
+        const centre = new THREE.Vector3(
+          alongX ? across : plane,
+          object.position.y + object.dimensions.height / 2,
+          alongX ? plane : across,
+        );
+        const into = new THREE.Vector3(inward[0], 0, inward[2]);
+        const source = new THREE.SpotLight(0xffffff, 0, 0, Math.PI / 2.3, 0.85, 2);
+        source.position.copy(centre).addScaledVector(into, 0.05);
+        source.target.position.copy(centre).addScaledVector(into, reach);
+        source.castShadow = true;
+        source.shadow.mapSize.set(1024, 1024);
+        source.shadow.camera.near = 0.05;
+        source.shadow.camera.far = reach + 2;
+        source.shadow.bias = -0.0004;
+        source.shadow.normalBias = 0.03;
+        source.shadow.radius = 3;
+        source.userData.openingId = object.id;
+        this.scene.add(source, source.target);
+        this.windowLights.push(source);
+        this.windowLightTargets.push(source.target);
+      }
     }
     if (enabled) {
       // Daylight replaces the fixed preview lighting, so derive it from the
@@ -705,10 +769,33 @@ export class RoomViewport {
     const { colour, intensity, direction } = state.sun;
     this.keyLight.color.setRGB(colour.r, colour.g, colour.b);
     this.keyLight.intensity = intensity;
-    // Park the sun far enough out that its shadow camera covers the room.
+    // The room shell blocks the sun, so direct light can only arrive through the
+    // apertures in the walls. Lighting the sun from a point far outside the room
+    // would have every interior surface sit behind the shell in the shadow map,
+    // leaving furniture uniformly dark and casting nothing. Placing the light just
+    // outside each sun-facing wall, along the real sun vector, lets the aperture
+    // do the shaping: sun enters the opening, and anything it touches casts a
+    // shadow inside the room. Walls the sun is not shining into contribute no
+    // light, which is what keeps daylight from appearing to fall from the roof.
     const reach = Math.max(this.roomScene?.room.width ?? 5, this.roomScene?.room.depth ?? 4) + 6;
-    this.keyLight.position.set(direction.x * reach, direction.y * reach, direction.z * reach);
-    const shadowRadius = Math.max(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
+    const { width = 5, depth = 4 } = this.roomScene?.room ?? {};
+    // The sceneRoot room is built centred on the origin (objects are placed at
+    // their model position minus half the room), so the light and its target must
+    // be too. Using the model-space centre here offset the shadow frustum by half
+    // the room, leaving the far corners outside it: those regions fell back to
+    // fully lit and read as a hard rectangular patch that swept as the sun moved.
+    const roomCentre = new THREE.Vector3(0, this.roomScene.room.height / 2, 0);
+    // Step just outside whichever wall the sun is arriving through, along the sun
+    // vector, so the aperture sits between the light and the room interior.
+    const margins = [
+      ...(direction.x !== 0 ? [width / 2 + 0.6] : []),
+      ...(direction.z !== 0 ? [depth / 2 + 0.6] : []),
+    ];
+    // Distance from the room centre back out to just past the sun-facing wall.
+    const back = Math.max(...margins, 0.6);
+    const sun = new THREE.Vector3(direction.x, Math.max(direction.y, 0.05), direction.z).normalize();
+    this.keyLight.position.copy(roomCentre).addScaledVector(sun, back + reach * 0.25);
+    const shadowRadius = Math.hypot(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
     Object.assign(this.keyLight.shadow.camera, {
       left: -shadowRadius,
       right: shadowRadius,
@@ -716,15 +803,36 @@ export class RoomViewport {
       bottom: -shadowRadius,
     });
     this.keyLight.shadow.camera.updateProjectionMatrix();
-    this.keyLight.target.position.set(0, 0, 0);
+    // Aim at the same point the light was placed from, so the direction is
+    // exactly the negative sun vector the rest of the model uses.
+    this.keyLight.target.position.copy(roomCentre);
     this.keyLight.target.updateMatrixWorld();
     this.keyLight.castShadow = direction.y > 0 && state.sun.daylight > 0.02;
     this.keyLight.visible = direction.y > 0 && state.sun.daylight > 0;
 
-    // Keep only a small neutral fill for readability. Exterior light comes from
-    // the shadow-casting sun, which the room shell blocks except at open apertures.
+    // The radiosity model supplies the fill: the sky through the openings plus
+    // the light they bounce off the room. Both scale with the daylight, so the
+    // ambient brightens through the day instead of sitting at a constant. It is
+    // kept well below the direct sources so it only softens their shadows; the
+    // window lights above are what cast directionally.
+    const context = lightContext(this.roomScene, state);
+    this.radiosityContext = context;
+    const { width: fillWidth, depth: fillDepth } = this.roomScene.room;
+    const sample = { x: fillWidth / 2, y: 0.75, z: fillDepth / 2 };
+    const ambient = skyLux(context, sample) + indirectLux(context, sample);
     this.hemisphereLight.color.setHex(0xeaf3ed);
-    this.hemisphereLight.intensity = 0.06;
+    this.hemisphereLight.intensity = 0.25 + 0.9 * THREE.MathUtils.clamp(ambient / AMBIENT_FILL_REFERENCE_LUX, 0, 1);
+    for (const light of this.windowLights ?? []) {
+      const opening = context.windows.find((window) => window.object.id === light.userData.openingId);
+      if (!opening) {
+        light.visible = false;
+        continue;
+      }
+      const radiance = windowRadiance(context, opening);
+      light.color.setRGB(state.sky.colour.r, state.sky.colour.g, state.sky.colour.b);
+      light.power = radiance * opening.area * Math.PI * WINDOW_LIGHT_GAIN;
+      light.visible = radiance > 0 && state.sun.daylight > 0.01;
+    }
 
     this.scene.background.setRGB(state.background.r, state.background.g, state.background.b);
     this.renderer.toneMappingExposure = state.exposure;
@@ -734,6 +842,7 @@ export class RoomViewport {
       const brightness = fixture?.model === 'lamp' ? fixture.intensity ?? 1 : 0.75;
       light.power = (fixture?.enabled !== false ? DEFAULT_LAMP_POWER * brightness : 0);
     }
+    this.rebuildSunPatches();
     this.updateDaylightDataset();
   }
 
@@ -746,7 +855,7 @@ export class RoomViewport {
     data.sunAzimuth = String(Number(state.sun.azimuth.toFixed(1)));
     data.clockTime = state.clock;
     data.lampsOn = String(this.roomScene.objects.some((object) => ['lamp', 'ceiling-fan'].includes(object.model) && object.enabled !== false));
-    data.sunPatches = String(state.patches.length);
+    data.sunPatches = String(this.sunPatchMeshes.length);
   }
 
   clearDaylightDataset() {
@@ -756,6 +865,54 @@ export class RoomViewport {
     delete data.clockTime;
     delete data.lampsOn;
     delete data.sunPatches;
+  }
+
+  clearSunPatches() {
+    for (const mesh of this.sunPatchMeshes) {
+      this.sceneRoot.remove(mesh);
+      disposeTree(mesh);
+    }
+    this.sunPatchMeshes = [];
+  }
+
+  /** Sunlit floor patches, drawn as translucent polygons just above the floor. */
+  rebuildSunPatches() {
+    this.clearSunPatches();
+    const state = this.daylightState;
+    if (!state || !state.patches.length) return;
+    const floorY = 0.012;
+
+    for (const patch of state.patches) {
+      const points = patch.polygon;
+      if (points.length < 3) continue;
+      const positions = [];
+      for (let index = 1; index < points.length - 1; index += 1) {
+        for (const point of [points[0], points[index], points[index + 1]]) {
+          positions.push(point.x, floorY, point.z);
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.computeVertexNormals();
+      const colour = state.sun.colour;
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+        color: new THREE.Color(colour.r, colour.g, colour.b),
+        transparent: true,
+        // The directional light already washes the whole floor, so the patch is
+        // what makes direct sun legible. Grazing light spreads the same energy
+        // over more floor and reads as a softer wash rather than a hard shape.
+        opacity: Math.min(0.9, 0.34 + 0.62 * patch.intensity),
+        depthWrite: false,
+        toneMapped: false,
+      }));
+      mesh.renderOrder = 2;
+      mesh.name = `sun-patch-${patch.windowId}`;
+      mesh.userData.windowId = patch.windowId;
+      mesh.userData.area = patch.area;
+      mesh.userData.intensity = patch.intensity;
+      this.sceneRoot.add(mesh);
+      this.sunPatchMeshes.push(mesh);
+    }
   }
 
   applyLightingToMaterial(item, enabled = this.lightingPreview) {

@@ -39,7 +39,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .asset-rail.is-collapsed > .panel-toggle { align-self: center; }
 .asset-items { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
 .asset-rail.is-collapsed .asset-items { display: none; }
-.asset-button { min-height: 55px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 5px 2px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #6e7d77; cursor: pointer; font-size: 8px; transition: background .14s ease, border-color .14s ease, color .14s ease; }
+.asset-button { min-height: 55px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 5px 2px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #6e7d77; cursor: pointer; font-size: 11px; transition: background .14s ease, border-color .14s ease, color .14s ease; }
 .asset-button:hover { border-color: #e4ece5; background: #f7faf6; color: var(--accent-dark); }
 .asset-button:active { transform: translateY(1px); }
 .asset-glyph { height: 24px; display: grid; place-items: center; color: #648c77; font-size: 21px; line-height: 1; }

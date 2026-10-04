@@ -16,7 +16,9 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const mix = (a, b, t) => a + (b - a) * t;
 
 export const WALLS = Object.freeze(['back', 'front', 'left', 'right']);
-export const DEFAULT_LAMP_POWER = 4500;
+// Interior fill light. Kept well below the sun so daylight reads as the dominant
+// source and the lamp does not drown out the daylight coming through the windows.
+export const DEFAULT_LAMP_POWER = 1400;
 // Mid-afternoon opens the preview with clear sun patches; lamp state is controlled
 // independently on each lamp.
 export const DEFAULT_TIME_MINUTES = 13 * 60 + 30;
@@ -221,7 +223,7 @@ export function describeDaylight({
       daylight,
       warmth,
       colour: sunColour,
-      intensity: 2.2 * daylight,
+      intensity: 3.4 * daylight,
     },
     sky: { colour: skyColour, intensity: mix(0.3, 0.78, daylight) },
     background,
