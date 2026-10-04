@@ -40,8 +40,9 @@ function harness(overrides = {}) {
 }
 
 const sceneWithOpenWindow = (wall = 'back') => {
-  const withWindow = addWindow(createRoomScene(), wall);
-  return setWindowOpen(withWindow.scene, 'window-1', true).scene;
+  const scene = { ...createRoomScene(), objects: [], nextWindowId: 1, nextDoorId: 1 };
+  const withWindow = addWindow(scene, wall);
+  return setWindowOpen(withWindow.scene, withWindow.object.id, true).scene;
 };
 
 const setClock = (viewport, timeMinutes) => viewport.setTimeOfDay({ timeMinutes });
@@ -174,8 +175,9 @@ test('a window in shade drops its patch mesh', () => {
 });
 
 test('a closed window produces no patch mesh', () => {
-  const placed = addWindow(createRoomScene(), 'back');
-  const closed = setWindowOpen(placed.scene, 'window-1', false).scene;
+  const scene = { ...createRoomScene(), objects: [], nextWindowId: 1, nextDoorId: 1 };
+  const placed = addWindow(scene, 'back');
+  const closed = setWindowOpen(placed.scene, placed.object.id, false).scene;
   const viewport = harness({ roomScene: closed });
   setClock(viewport, 10 * 60);
   assert.equal(viewport.sunPatchMeshes.length, 0);

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 :root {
   color-scheme: light;
@@ -13,7 +13,7 @@
   --paper: #fff;
   --asset-column: 74px;
   --inspector-column: 298px;
-  font-family: 'DM Sans', 'Avenir Next', Avenir, ui-sans-serif, system-ui, sans-serif;
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -112,6 +112,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .field-gradient { height: 7px; border-radius: 5px; background: linear-gradient(90deg, #04061c, #0438f2, #00dcff, #24ee7a, #ffe000, #ff1715); }
 .field-gradient[data-mode="temperature"] { background: linear-gradient(90deg, #101b84 0%, #185bde 18%, #09b8e0 38%, #35d973 58%, #f0df37 76%, #ef6b28 90%, #fff4dd 100%); }
 .field-gradient[data-mode="light"] { background: linear-gradient(90deg, #111, #fff); }
+.field-gradient[data-mode="wifi"] { background: linear-gradient(90deg, #c0392b, #e1b12c 52%, #27ae60); }
 .field-gradient-labels { display: flex; justify-content: space-between; color: #87958e; font-variant-numeric: tabular-nums; }
 
 .inspector { min-width: 0; display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--line); background: #fff; }
@@ -190,12 +191,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 }
 
 .viewport-info { position: relative; margin-left: auto; pointer-events: auto; }
-.info-button { color: #657b70; font: 600 12px 'Manrope', sans-serif; }
+.info-button { color: #657b70; font: 600 12px 'IBM Plex Sans', sans-serif; }
 .shortcut-help { position: absolute; top: 36px; right: 0; width: 218px; display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #dfe7df; border-radius: 9px; background: #fff; box-shadow: 0 10px 28px rgba(30, 48, 39, .13); color: #62766c; font-size: 9px; }
 .shortcut-help[hidden] { display: none; }
 .shortcut-heading { margin-bottom: 1px; color: #35554a; font-size: 10px; font-weight: 700; }
 .shortcut-help > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.shortcut-help kbd { padding: 3px 5px; border: 1px solid #e5ebe5; border-radius: 4px; background: #f7f9f6; color: #5f7068; font: 8px 'DM Sans', sans-serif; }
+.shortcut-help kbd { padding: 3px 5px; border: 1px solid #e5ebe5; border-radius: 4px; background: #f7f9f6; color: #5f7068; font: 8px 'IBM Plex Mono', monospace; }
 .shortcut-help p { margin: 2px 0 0; color: #8a9990; font-size: 8px; }
 .window-open-toggle { display: flex; align-items: center; gap: 7px; min-height: 29px; color: #60766b; font-size: 9px; }
 .window-open-toggle input { accent-color: #27816d; }

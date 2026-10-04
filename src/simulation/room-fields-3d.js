@@ -29,6 +29,7 @@ export const FIELD_PHYSICS_DEFAULTS = Object.freeze({
   fanOutletSpeed: 1.2,
   vorticityConfinement: 2,
   heaterRate: 0.8,
+  airConditionerRate: 0.8,
   heaterRadius: 0.45,
 });
 const DEFAULTS = Object.freeze({
@@ -82,7 +83,7 @@ export function validateScene(scene) {
       || object.dimensions.width <= 0 || object.dimensions.height <= 0 || object.dimensions.depth <= 0) {
       throw new TypeError(`Object ${object?.id ?? '(unknown)'} has invalid geometry.`);
     }
-    if (['fan', 'heater', 'lamp'].includes(object.model)
+    if (DEVICE_MODELS.includes(object.model)
       && object.intensity !== undefined
       && (!Number.isFinite(object.intensity) || object.intensity < 0 || object.intensity > 2)) {
       throw new RangeError(`Object ${object.id ?? '(unknown)'} source strength must be between 0 and 2.`);
@@ -145,6 +146,7 @@ function validateOptions(options, room) {
     ['fanOutletSpeed', 0, 3],
     ['vorticityConfinement', 0, 4],
     ['heaterRate', 0, 10],
+    ['airConditionerRate', 0, 10],
     ['heaterRadius', 0.05, roomReach],
   ];
   for (const [name, min, max] of boundedParameters) {
@@ -192,7 +194,7 @@ function inverseRotate(x, y, z, matrix) {
 export function buildSolidMask(scene, grid) {
   const solid = new Uint8Array(grid.nx * grid.ny * grid.nz);
   for (const object of scene.objects) {
-    if (object.model === 'fan' || isOpeningObject(object)) continue;
+    if (['fan', 'ceiling-fan'].includes(object.model) || isOpeningObject(object)) continue;
     const [halfWidth, halfHeight, halfDepth] = rotatedHalfExtents(object.dimensions, object.rotation);
     const centerY = object.position.y + object.dimensions.height / 2;
     const minI = clamp(Math.floor((object.position.x - halfWidth) / grid.dx), 0, grid.nx - 1);
@@ -563,8 +565,8 @@ function rayIsClear(start, endX, endY, endZ, blockers) {
 
 export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULTS) {
   const acceleration = new Float32Array(grid.nx * grid.ny * grid.nz * 4);
-  const fans = scene.objects.filter((object) => object.model === 'fan' && object.enabled !== false);
-  const blockers = scene.objects.filter((object) => object.model !== 'fan' && !isOpeningObject(object)).map((object) => ({
+  const fans = scene.objects.filter((object) => ['fan', 'ceiling-fan'].includes(object.model) && object.enabled !== false);
+  const blockers = scene.objects.filter((object) => !['fan', 'ceiling-fan'].includes(object.model) && !isOpeningObject(object)).map((object) => ({
     center: { x: object.position.x, y: object.position.y + object.dimensions.height / 2, z: object.position.z },
     halfWidth: object.dimensions.width / 2,
     halfHeight: object.dimensions.height / 2,
@@ -572,24 +574,32 @@ export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULT
     rotation: rotationMatrixXYZ(object.rotation),
   }));
   for (const fan of fans) {
+    const isCeilingFan = fan.model === 'ceiling-fan';
     const matrix = rotationMatrixXYZ(fan.rotation);
-    const direction = [matrix[0][2], matrix[1][2], matrix[2][2]];
+    const direction = isCeilingFan ? [0, -1, 0] : [matrix[0][2], matrix[1][2], matrix[2][2]];
     const localSource = {
       x: 0,
       y: fan.dimensions.height * 0.24,
       z: fan.dimensions.depth / 2 + Math.min(grid.dx, grid.dy, grid.dz) * 0.5,
     };
-    const source = {
+    const pedestalSource = {
       x: fan.position.x + matrix[0][0] * localSource.x + matrix[0][1] * localSource.y + matrix[0][2] * localSource.z,
       y: fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * localSource.x + matrix[1][1] * localSource.y + matrix[1][2] * localSource.z,
       z: fan.position.z + matrix[2][0] * localSource.x + matrix[2][1] * localSource.y + matrix[2][2] * localSource.z,
     };
+    const source = isCeilingFan ? {
+      x: fan.position.x,
+      y: fan.position.y + fan.dimensions.height * 0.38,
+      z: fan.position.z,
+    } : pedestalSource;
     const sourceReach = FAN_SOURCE_GRID_CELLS * Math.hypot(
       grid.dx * direction[0],
       grid.dy * direction[1],
       grid.dz * direction[2],
     );
-    const radius = Math.max(0.08, Math.min(fan.dimensions.width * 0.4, fan.dimensions.height * 0.22));
+    const radius = isCeilingFan
+      ? Math.max(0.12, Math.min(fan.dimensions.width * 0.43, fan.dimensions.depth * 0.43))
+      : Math.max(0.08, Math.min(fan.dimensions.width * 0.4, fan.dimensions.height * 0.22));
     const speed = settings.fanOutletSpeed * (fan.intensity ?? 1);
     // Spread the target grille speed over a source slab measured in grid cells.
     const sourceAcceleration = speed ** 2 / Math.max(4 * sourceReach, 1e-6);
@@ -844,9 +854,12 @@ function diffuse(field, coefficient, timeStep, grid, solid, clampMin, clampMax, 
   return next;
 }
 
-function addHeatSources(temperature, heaters, grid, solid, settings, timeStep) {
-  for (const heater of heaters) {
-    const centerY = heater.position.y + heater.dimensions.height / 2;
+function addThermalSources(temperature, sources, grid, solid, settings, timeStep) {
+  for (const source of sources) {
+    const centerY = source.position.y + source.dimensions.height / 2;
+    const sourceRate = source.model === 'air-conditioner'
+      ? -settings.airConditionerRate
+      : settings.heaterRate;
     const radiusSquared = 2 * settings.heaterRadius ** 2;
     for (let j = 0; j < grid.ny; j += 1) {
       for (let k = 0; k < grid.nz; k += 1) {
@@ -856,9 +869,9 @@ function addHeatSources(temperature, heaters, grid, solid, settings, timeStep) {
           const x = (i + 0.5) * grid.dx;
           const y = (j + 0.5) * grid.dy;
           const z = (k + 0.5) * grid.dz;
-          const distanceSquared = (x - heater.position.x) ** 2
-            + (y - centerY) ** 2 + (z - heater.position.z) ** 2;
-          temperature[index] += settings.heaterRate * (heater.intensity ?? 1) * Math.exp(-distanceSquared / radiusSquared) * timeStep;
+          const distanceSquared = (x - source.position.x) ** 2
+            + (y - centerY) ** 2 + (z - source.position.z) ** 2;
+          temperature[index] += sourceRate * (source.intensity ?? 1) * Math.exp(-distanceSquared / radiusSquared) * timeStep;
         }
       }
     }
@@ -958,7 +971,7 @@ function createSimulationState(scene, options) {
     pressureWorkspace: buildPressureWorkspace(count),
     vorticityWorkspace: buildVorticityWorkspace(count),
     fanAcceleration: buildFanAccelerationField(scene, grid, solid, settings),
-    heaters: scene.objects.filter((object) => object.model === 'heater' && object.enabled !== false),
+    thermalSources: scene.objects.filter((object) => ['heater', 'air-conditioner'].includes(object.model) && object.enabled !== false),
     u: new Float32Array(count),
     v: new Float32Array(count),
     w: new Float32Array(count),
@@ -971,7 +984,7 @@ function createSimulationState(scene, options) {
 }
 
 function advanceSimulation(state) {
-  const { settings, grid, solid, outlets, windowPressure, windowFlow, pressureStencil, pressureWorkspace, vorticityWorkspace, fanAcceleration, heaters } = state;
+  const { settings, grid, solid, outlets, windowPressure, windowFlow, pressureStencil, pressureWorkspace, vorticityWorkspace, fanAcceleration, thermalSources } = state;
   const { u, v, w, temperature, nextU, nextV, nextW, nextTemperature } = state;
   const previousU = u;
   const previousV = v;
@@ -1027,7 +1040,7 @@ function advanceSimulation(state) {
       if (isInlet) temperature[index] = settings.outdoorTemperature;
     }
   }
-  addHeatSources(temperature, heaters, grid, solid, settings, settings.timeStep);
+  addThermalSources(temperature, thermalSources, grid, solid, settings, settings.timeStep);
   for (let index = 0; index < temperature.length; index += 1) {
     temperature[index] = clamp(temperature[index], 0, LIMITS.maxTemperature);
   }

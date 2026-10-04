@@ -188,7 +188,23 @@ test('gas follows open-window outflow beyond the wall', () => {
 });
 
 test('an open exchange window transports the solved airflow tracer outside the room', () => {
-  const base = createRoomScene();
+  const sample = createRoomScene();
+  const originalLayout = {
+    fan: [{ x: 0.82, y: 0, z: 3.15 }, 180],
+    sofa: [{ x: 4.18, y: 0, z: 3.04 }, 0],
+    desk: [{ x: 4.18, y: 0, z: 0.86 }, 0],
+    table: [{ x: 2.62, y: 0, z: 2.12 }, 0],
+    lamp: [{ x: 1.2, y: 0, z: 0.9 }, 0],
+    heater: [{ x: 0.55, y: 0, z: 1.9 }, 0],
+  };
+  const objects = sample.objects
+    .filter((object) => Object.hasOwn(originalLayout, object.model))
+    .map((object) => ({
+      ...object,
+      position: originalLayout[object.model][0],
+      rotation: { x: 0, y: originalLayout[object.model][1], z: 0 },
+    }));
+  const base = { ...sample, objects, nextWindowId: 1, nextDoorId: 1 };
   const placed = addWindow(base, 'front');
   const window = {
     ...placed.object,
@@ -214,7 +230,7 @@ test('an open exchange window transports the solved airflow tracer outside the r
   assert.ok(inflowFaces > 0, 'the exchange window should admit outdoor air');
   assert.ok(outflowFaces > 0, 'the exchange window should exhaust room air');
   assert.ok(result.stats.boundaryFlowImbalancePercent < 1,
-    `default exchange flow imbalance was ${result.stats.boundaryFlowImbalancePercent}%`);
+    `exchange flow imbalance was ${result.stats.boundaryFlowImbalancePercent}%`);
   assert.ok(layer.userData.exteriorTracerVolumeM3 > 0,
     'the rendered tracer should cross the open window');
 

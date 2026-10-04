@@ -15,7 +15,7 @@ self.addEventListener('message', (event) => {
 async function solve({ requestId, mode, scene }) {
   active.add(requestId);
   try {
-    if (!['airflow', 'temperature', 'light'].includes(mode)) {
+    if (!['airflow', 'temperature', 'light', 'wifi'].includes(mode)) {
       throw new RangeError(`Unsupported room field mode: ${mode}`);
     }
     const result = await solveRoomFields(scene, mode, { isCancelled: () => cancelled.has(requestId) });

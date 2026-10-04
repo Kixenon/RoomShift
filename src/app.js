@@ -17,6 +17,9 @@ import {
   setWindowFlow,
   setWindowOpen,
   setWindowWall,
+  setDeviceWall,
+  isWallMountedDevice,
+  isCeilingMountedDevice,
 } from './model/room-scene.js';
 import { isOpeningObject } from './model/openings.js';
 import { UndoHistory } from './model/undo-history.js';
@@ -49,6 +52,7 @@ const fieldControls = {
   airflow: $('#show-airflow'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
+  wifi: $('#show-wifi'),
   display: $('#field-display-control'),
   displayButton: $('#field-display-button'),
   displayLabel: $('#field-display-label'),
@@ -127,13 +131,15 @@ function renderFieldState({ mode, loading, result, error }) {
     airflow: fieldControls.airflow,
     temperature: fieldControls.temperature,
     light: fieldControls.light,
+    wifi: fieldControls.wifi,
   })) setPressed(button, mode === name);
   const availableStyles = {
     airflow: ['gas', 'volume', 'slice'],
     temperature: ['surfaces', 'volume', 'slice'],
     light: ['preview', 'map'],
+    wifi: ['volume', 'slice'],
   }[mode] ?? [];
-  const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
+  const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : mode === 'wifi' ? '3D volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
   fieldControls.display.hidden = !mode;
   if (!mode) fieldControls.display.open = false;
   fieldControls.displayButton.setAttribute('aria-label', `Choose ${mode ?? 'field'} view`);
@@ -151,7 +157,7 @@ function renderFieldState({ mode, loading, result, error }) {
     option.textContent = styleLabels[style];
     return option;
   }));
-  const showSlice = (mode === 'airflow' || mode === 'temperature') && displayStyle === 'slice';
+  const showSlice = ['airflow', 'temperature', 'wifi'].includes(mode) && displayStyle === 'slice';
   fieldControls.sliceControl.hidden = !showSlice;
   if (fieldController?.scene) {
     fieldControls.sliceHeight.max = String(fieldController.scene.room.height);
@@ -198,6 +204,13 @@ function renderFieldState({ mode, loading, result, error }) {
       title: 'Estimated relative illumination',
       minimum: `${result.ambientLevel.toFixed(2)} normalized`,
       maximum: `${result.stats.maxLevel.toFixed(2)} normalized`,
+    };
+  } else if (mode === 'wifi') {
+    const heightLabel = displayStyle === 'slice' ? ` · ${fieldController.sliceHeight.toFixed(2)} m slice` : ' · 3D volume';
+    legend = {
+      title: result.stats.routerCount ? `Wi-Fi coverage${heightLabel} · ${result.stats.routerCount} router${result.stats.routerCount === 1 ? '' : 's'}` : 'Add a router to view coverage',
+      minimum: 'Weak · −75 dBm',
+      maximum: 'Strong · −35 dBm',
     };
   } else {
     legend = {
@@ -278,15 +291,24 @@ function renderObjectList() {
 }
 
 function propertyField(label, axis, value, kind, limits = {}) {
-  return `<label class="property-field"><span>${label}</span><input class="property-input" type="number" step="0.05" value="${value.toFixed(2)}" data-${kind}="${axis}" aria-label="${kind === 'position' ? 'Position' : 'Dimensions'} ${label}" ${limits.min === undefined ? '' : `min="${limits.min}"`} ${limits.max === undefined ? '' : `max="${limits.max}"`} /></label>`;
+  return `<label class="property-field"><span>${label}</span><input class="property-input" type="number" step="0.05" value="${value.toFixed(2)}" data-${kind}="${axis}" aria-label="${kind === 'position' ? 'Position' : 'Dimensions'} ${label}" ${limits.min === undefined ? '' : `min="${limits.min}"`} ${limits.max === undefined ? '' : `max="${limits.max}"`} ${limits.disabled ? 'disabled' : ''} /></label>`;
 }
 
 function renderProperties() {
   const object = selectedObject();
   const isOpening = isOpeningObject(object);
   const isDevice = DEVICE_MODELS.includes(object?.model);
+  const isWallMounted = isWallMountedDevice(object);
+  const isCeilingMounted = isCeilingMountedDevice(object);
   const openingLabel = object?.model === 'door' ? 'Door' : 'Window';
-  const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative' };
+  const sourceLabels = {
+    fan: 'Fan strength · relative',
+    'ceiling-fan': 'Fan speed · relative',
+    heater: 'Heater output · relative',
+    'air-conditioner': 'Cooling output · relative',
+    lamp: 'Lamp brightness · relative',
+    router: 'Transmit power · relative',
+  };
   const sourceLabel = sourceLabels[object?.model];
   const intensity = object?.intensity ?? 1;
   $('#delete-object').disabled = !object;
@@ -319,12 +341,16 @@ function renderProperties() {
           <div class="range-heading"><span>Outside wind</span><output data-range-output>${(object.flowRate ?? 0.35).toFixed(2)} m/s</output></div>
           <input class="property-slider" type="range" min="0" max="1.5" step="0.05" value="${object.flowRate ?? 0.35}" data-window-flow-rate aria-label="Exterior wind speed in meters per second" />
         </div>
+      ` : isWallMounted ? `
+        <label class="property-field"><span>Wall</span><select class="property-input" data-device-wall aria-label="Air conditioner wall">
+          <option value="back">Back</option><option value="front">Front</option><option value="left">Left</option><option value="right">Right</option>
+        </select></label>
       ` : isDevice ? '' : `<label class="property-field"><span>Type</span><select class="property-input" data-object-model aria-label="Object type">${modelOptions}</select></label>`}
       <div class="property-group">
         <div class="property-label">Position · m</div>
         <div class="property-fields">
           ${propertyField('x', 'x', object.position.x, 'position', { min: 0, max: roomScene.room.width })}
-          ${propertyField('y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height })}
+          ${propertyField('y', 'y', object.position.y, 'position', { min: 0, max: roomScene.room.height, disabled: isCeilingMounted })}
           ${propertyField('z', 'z', object.position.z, 'position', { min: 0, max: roomScene.room.depth })}
         </div>
       </div>
@@ -336,12 +362,12 @@ function renderProperties() {
       <div class="property-group">
         <div class="property-label">Size · m</div>
         <div class="property-fields">
-          ${propertyField('w', 'width', object.dimensions.width, 'dimension', isOpening ? { min: 0.4, max: maxOpeningWidth } : dimensionLimits.width)}
-          ${propertyField('h', 'height', object.dimensions.height, 'dimension', isOpening ? { min: 0.4, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
+          ${propertyField('w', 'width', object.dimensions.width, 'dimension', isOpening || isWallMounted ? { min: 0.4, max: maxOpeningWidth } : dimensionLimits.width)}
+          ${propertyField('h', 'height', object.dimensions.height, 'dimension', isOpening ? { min: 0.4, max: roomScene.room.height - 0.2 } : isWallMounted ? { min: 0.1, max: roomScene.room.height - 0.2 } : dimensionLimits.height)}
           ${isOpening ? '' : propertyField('d', 'depth', object.dimensions.depth, 'dimension', dimensionLimits.depth)}
         </div>
       </div>
-      ${isOpening ? '' : `<div class="property-group">
+      ${isOpening || isWallMounted || isCeilingMounted ? '' : `<div class="property-group">
         <div class="property-label">Rotation · °</div>
         <div class="property-fields rotation-fields">
           ${propertyField('x', 'x', object.rotation.x, 'rotation', { min: -180, max: 180 })}
@@ -355,7 +381,7 @@ function renderProperties() {
   if (isOpening) {
     properties.querySelector('[data-window-wall]').value = object.wall ?? 'back';
     properties.querySelector('[data-window-flow-direction]').value = object.flowDirection ?? 'exchange';
-  }
+  } else if (isWallMounted) properties.querySelector('[data-device-wall]').value = object.wall ?? 'back';
   else if (!isDevice) properties.querySelector('[data-object-model]').value = object.model;
 }
 
@@ -451,6 +477,7 @@ $('#add-door').addEventListener('click', addRoomDoor);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
+fieldControls.wifi.addEventListener('click', () => toggleFieldMode('wifi'));
 fieldControls.displayMenu.addEventListener('click', (event) => {
   const option = event.target.closest('[data-display-style]');
   if (!option) return;
@@ -536,6 +563,8 @@ properties.addEventListener('change', (event) => {
       updateScene(setWindowOpen(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-wall]')) {
       updateScene(setWindowWall(roomScene, object.id, input.value).scene);
+    } else if (input.matches('[data-device-wall]')) {
+      updateScene(setDeviceWall(roomScene, object.id, input.value).scene);
     } else if (input.matches('[data-device-enabled]')) {
       updateScene(setDeviceEnabled(roomScene, object.id, input.checked).scene);
     } else if (input.matches('[data-window-flow-direction]')) {
