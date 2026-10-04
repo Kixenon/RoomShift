@@ -4,17 +4,18 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
-import { indirectLux, lightContext, windowRadiance } from '../simulation/room-light.js';
+import { indirectLux, lightContext, skyLux, windowRadiance } from '../simulation/room-light.js';
 import { isOpeningObject } from '../model/openings.js';
 
 // Hand-tuned bridge from the radiosity model's radiance (nits-like) to a Three.js
 // light power in lumens. Chosen so a bright open window reads about like the
 // lamps and does not blow out the tone-mapped preview; not a photometric value.
 const WINDOW_LIGHT_GAIN = 0.06;
-// Inter-reflected illuminance (lux-like) that maps to full ambient fill. Only the
-// bounce drives this; the sky through the openings is a directional window light
-// that casts shadows, so it must not also become flat, shadow-free ambient.
-const BOUNCE_FILL_REFERENCE_LUX = 800;
+// Diffuse illuminance (lux-like) that maps to full ambient fill. The sky through
+// the openings and the light they bounce both feed it, so the ambient tracks the
+// daylight rather than sitting at a constant. The shadow-casting window light is
+// what gives that daylight direction; this is only the soft fill around it.
+const AMBIENT_FILL_REFERENCE_LUX = 800;
 
 // Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
 // light preview used before there was a time of day, so an unchanged scene looks
@@ -787,18 +788,18 @@ this.renderer.localClippingEnabled = true;
     this.keyLight.castShadow = state.sun.daylight > 0.02;
     this.keyLight.visible = state.sun.daylight > 0;
 
-    // The radiosity model supplies the fill. Only the inter-reflected (bounce)
-    // term becomes flat ambient here — it is diffuse by nature — and it is kept
-    // small so it mutes the shadows of the sun and the window lights rather than
-    // flattening them. The sky through each opening is a shadow-casting window
-    // light instead, so it shades the room directionally.
+    // The radiosity model supplies the fill: the sky through the openings plus
+    // the light they bounce off the room. Both scale with the daylight, so the
+    // ambient brightens through the day instead of sitting at a constant. It is
+    // kept well below the direct sources so it only softens their shadows; the
+    // window lights above are what cast directionally.
     const context = lightContext(this.roomScene, state);
     this.radiosityContext = context;
     const { width: fillWidth, depth: fillDepth } = this.roomScene.room;
     const sample = { x: fillWidth / 2, y: 0.75, z: fillDepth / 2 };
-    const bounce = indirectLux(context, sample);
+    const ambient = skyLux(context, sample) + indirectLux(context, sample);
     this.hemisphereLight.color.setHex(0xeaf3ed);
-    this.hemisphereLight.intensity = 0.25 + 0.9 * THREE.MathUtils.clamp(bounce / BOUNCE_FILL_REFERENCE_LUX, 0, 1);
+    this.hemisphereLight.intensity = 0.25 + 0.9 * THREE.MathUtils.clamp(ambient / AMBIENT_FILL_REFERENCE_LUX, 0, 1);
     for (const light of this.windowLights ?? []) {
       const opening = context.windows.find((window) => window.object.id === light.userData.openingId);
       if (!opening) {
