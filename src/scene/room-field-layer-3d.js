@@ -7,9 +7,10 @@ import {
   getAirflowColor,
   getLightColor,
   getTemperatureColor,
+  getWifiColor,
 } from './room-field-renderer.js';
 
-export { getAirflowColor, getLightColor, getTemperatureColor };
+export { getAirflowColor, getLightColor, getTemperatureColor, getWifiColor };
 
 function validateResult(result, mode) {
   const grid = result?.grid;
@@ -22,13 +23,14 @@ function validateResult(result, mode) {
     || (mode === 'airflow' && fields.solid?.length !== cellCount)
     || (mode === 'airflow' && [fields.u, fields.v, fields.w].some((field) => field?.length !== cellCount))
     || (mode === 'temperature' && fields.temperature?.length !== cellCount)
+    || (mode === 'wifi' && (fields.wifi?.length !== cellCount || fields.solid?.length !== cellCount))
     || (mode === 'light' && fields.light?.length !== cellCount)) {
     throw new TypeError('Room fields must contain complete 3D arrays matching the grid dimensions.');
   }
 }
 
 export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
-  if (!['airflow', 'temperature', 'light'].includes(mode)) {
+  if (!['airflow', 'temperature', 'light', 'wifi'].includes(mode)) {
     throw new RangeError(`Unsupported room field mode: ${mode}`);
   }
   validateResult(result, mode);
@@ -37,7 +39,7 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
   layer.name = `room-field-${mode}`;
   layer.userData.fieldMode = mode;
   layer.userData.volumeVoxelCount = 0;
-  const displayStyle = options.displayStyle ?? (options.volumetric ? 'volume' : mode === 'airflow' ? 'volume' : 'surfaces');
+  const displayStyle = options.displayStyle ?? (options.volumetric ? 'volume' : ['airflow', 'wifi'].includes(mode) ? 'volume' : 'surfaces');
   if (mode === 'temperature') {
     if (displayStyle === 'volume') {
       const volume = createFieldVolume(result, mode);
@@ -61,6 +63,16 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
       layer.add(createScalarSliceLayer(result, mode, options.sliceHeight ?? grid.height / 2));
       layer.userData.airflowVisualization = 'speed-slice';
       return layer;
+    }
+  } else if (mode === 'wifi') {
+    if (displayStyle === 'volume') {
+      const volume = createFieldVolume(result, mode);
+      layer.add(volume);
+      layer.userData.volumeVoxelCount = volume.userData.voxelCount;
+      layer.userData.wifiVisualization = 'volume';
+    } else {
+      layer.add(createScalarSliceLayer(result, mode, options.sliceHeight ?? grid.height / 2));
+      layer.userData.wifiVisualization = 'signal-slice';
     }
   } else if (displayStyle === 'map') {
     const volume = createFieldVolume(result, mode);

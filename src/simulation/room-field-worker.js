@@ -17,7 +17,7 @@ self.addEventListener('message', (event) => {
 async function solve({ requestId, mode, scene, durationSeconds, cellSize, baseline, probe }) {
   active.add(requestId);
   try {
-    if (!['airflow', 'temperature', 'light'].includes(mode)) {
+    if (!['airflow', 'temperature', 'light', 'wifi'].includes(mode)) {
       throw new RangeError(`Unsupported room field mode: ${mode}`);
     }
     const result = await solver.solve(scene, mode, {
@@ -28,7 +28,7 @@ async function solve({ requestId, mode, scene, durationSeconds, cellSize, baseli
       self.postMessage({ requestId, cancelled: true });
       return;
     }
-    if (baseline && mode !== 'light') {
+    if (baseline && ['airflow', 'temperature'].includes(mode)) {
       postResult(requestId, result, true);
       const before = await solver.solve(baseline, mode, { durationSeconds, cellSize, isCancelled: () => cancelled.has(requestId) });
       if (!before || cancelled.has(requestId)) { self.postMessage({ requestId, cancelled: true }); return; }

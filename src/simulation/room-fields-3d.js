@@ -87,12 +87,12 @@ export function validateScene(scene) {
       || object.dimensions.width <= 0 || object.dimensions.height <= 0 || object.dimensions.depth <= 0) {
       throw new TypeError(`Object ${object?.id ?? '(unknown)'} has invalid geometry.`);
     }
-    if (['fan', 'heater', 'lamp'].includes(object.model)
+    if (DEVICE_MODELS.includes(object.model)
       && object.intensity !== undefined
       && (!Number.isFinite(object.intensity) || object.intensity < 0 || object.intensity > 2)) {
       throw new RangeError(`Object ${object.id ?? '(unknown)'} source strength must be between 0 and 2.`);
     }
-    if (object.model === 'heater' && object.powerWatts !== undefined
+    if (['heater', 'air-conditioner'].includes(object.model) && object.powerWatts !== undefined
       && (!Number.isFinite(object.powerWatts) || object.powerWatts < 0 || object.powerWatts > 3000)) {
       throw new RangeError('Heater power must be between 0 and 3000 watts.');
     }
@@ -553,7 +553,7 @@ function rayIsClear(start, endX, endY, endZ, blockers) {
 
 export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULTS) {
   const acceleration = new Float32Array(grid.nx * grid.ny * grid.nz * 4);
-  const fans = scene.objects.filter((object) => object.model === 'fan' && object.enabled !== false);
+  const fans = scene.objects.filter((object) => ['fan', 'ceiling-fan'].includes(object.model) && object.enabled !== false);
   const blockers = roomObstacles(scene).map((object) => ({
     center: { x: object.position.x, y: object.position.y + object.dimensions.height / 2, z: object.position.z },
     halfWidth: object.dimensions.width / 2,
@@ -562,20 +562,22 @@ export function buildFanAccelerationField(scene, grid, solid, settings = DEFAULT
     rotation: rotationMatrixXYZ(object.rotation),
   }));
   for (const fan of fans) {
+    const isCeilingFan = fan.model === 'ceiling-fan';
     const matrix = rotationMatrixXYZ(fan.rotation);
-    const direction = [matrix[0][2], matrix[1][2], matrix[2][2]];
+    const direction = isCeilingFan ? [0, -1, 0] : [matrix[0][2], matrix[1][2], matrix[2][2]];
     const localSource = {
       x: 0,
       y: fan.dimensions.height * 0.24,
       z: fan.dimensions.depth / 2,
     };
-    const source = {
+    const pedestalSource = {
       x: fan.position.x + matrix[0][0] * localSource.x + matrix[0][1] * localSource.y + matrix[0][2] * localSource.z,
       y: fan.position.y + fan.dimensions.height / 2 + matrix[1][0] * localSource.x + matrix[1][1] * localSource.y + matrix[1][2] * localSource.z,
       z: fan.position.z + matrix[2][0] * localSource.x + matrix[2][1] * localSource.y + matrix[2][2] * localSource.z,
     };
+    const source = isCeilingFan ? { x: fan.position.x, y: fan.position.y + fan.dimensions.height * 0.38, z: fan.position.z } : pedestalSource;
     const sourceReach = FAN_SOURCE_DEPTH;
-    const radius = Math.max(0.08, Math.min(fan.dimensions.width * 0.4, fan.dimensions.height * 0.22));
+    const radius = isCeilingFan ? Math.max(0.12, Math.min(fan.dimensions.width * 0.43, fan.dimensions.depth * 0.43)) : Math.max(0.08, Math.min(fan.dimensions.width * 0.4, fan.dimensions.height * 0.22));
     const speed = settings.fanOutletSpeed * (fan.intensity ?? 1);
     // Average the same physical source over each voxel to reduce grid-alignment artifacts.
     const sourceAcceleration = speed ** 2 / Math.max(4 * sourceReach, 1e-6);
@@ -839,7 +841,7 @@ export function buildHeatRate(scene, grid, solid, settings = DEFAULTS) {
   const rate = new Float32Array(solid.length);
   const volume = grid.dx * grid.dy * grid.dz;
   const heatCapacity = 1.204 * 1006;
-  for (const heater of scene.objects.filter((object) => object.model === 'heater' && object.enabled !== false)) {
+  for (const heater of scene.objects.filter((object) => ['heater', 'air-conditioner'].includes(object.model) && object.enabled !== false)) {
     const weights = new Float32Array(solid.length);
     let total = 0;
     for (let j = 0; j < grid.ny; j += 1) for (let k = 0; k < grid.nz; k += 1) for (let i = 0; i < grid.nx; i += 1) {
@@ -851,7 +853,7 @@ export function buildHeatRate(scene, grid, solid, settings = DEFAULTS) {
       weights[id] = Math.exp(-distanceSquared / (2 * settings.heaterRadius ** 2));
       total += weights[id];
     }
-    const watts = (heater.powerWatts ?? 750) * (heater.intensity ?? 1);
+    const watts = (heater.model === 'air-conditioner' ? -(heater.powerWatts ?? 1500) : (heater.powerWatts ?? 750)) * (heater.intensity ?? 1);
     const scale = total ? watts / (heatCapacity * volume * total) : 0;
     for (let id = 0; id < rate.length; id += 1) rate[id] += weights[id] * scale;
   }

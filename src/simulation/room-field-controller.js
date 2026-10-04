@@ -1,9 +1,10 @@
 import { cacheSnapshot, fieldSceneKey } from './room-field-analysis.js';
-const MODES = new Set(['airflow', 'temperature', 'light']);
+const MODES = new Set(['airflow', 'temperature', 'light', 'wifi']);
 const DISPLAY_STYLES = Object.freeze({
   airflow: new Set(['volume', 'slice']),
   temperature: new Set(['surfaces', 'volume', 'slice']),
   light: new Set(['preview', 'map']),
+  wifi: new Set(['slice', 'volume']),
 });
 
 export class RoomFieldController {
@@ -15,7 +16,7 @@ export class RoomFieldController {
     this.debounceMs = debounceMs;
     this.scene = null;
     this.mode = null;
-    this.displayStyles = { airflow: 'volume', temperature: 'surfaces', light: 'preview' };
+    this.displayStyles = { airflow: 'volume', temperature: 'surfaces', light: 'preview', wifi: 'volume' };
     this.sliceHeight = 1.2;
     this.durationSeconds = 3;
     this.cellSize = 0.15;
@@ -143,7 +144,7 @@ export class RoomFieldController {
   setSliceHeight(height) {
     if (!this.scene || !Number.isFinite(height)) return;
     this.sliceHeight = Math.min(this.scene.room.height, Math.max(0, height));
-    if (this.result && ['airflow', 'temperature'].includes(this.mode) && this.displayStyle === 'slice') {
+    if (this.result && ['airflow', 'temperature', 'wifi'].includes(this.mode) && this.displayStyle === 'slice') {
       this.viewport.setFields(this.result, this.mode, {
         displayStyle: this.displayStyle,
         sliceHeight: this.sliceHeight,
@@ -181,7 +182,7 @@ export class RoomFieldController {
   }
 
   cacheKey() {
-    return JSON.stringify([this.mode === 'light' ? this.scene : fieldSceneKey(this.scene, this.cellSize), this.mode === 'light' ? 'light' : 'fields', this.durationSeconds, this.cellSize, this.baseline && fieldSceneKey(this.baseline, this.cellSize), this.probe]);
+    return JSON.stringify([['light', 'wifi'].includes(this.mode) ? this.scene : fieldSceneKey(this.scene, this.cellSize), ['light', 'wifi'].includes(this.mode) ? this.mode : 'fields', this.durationSeconds, this.cellSize, this.baseline && fieldSceneKey(this.baseline, this.cellSize), this.probe]);
   }
 
   scheduleUpdate({ preserveResult = false } = {}) {

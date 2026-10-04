@@ -2,6 +2,7 @@ import { createRoomFieldsSession } from './room-fields-3d.js';
 import { createWebGpuSession } from './room-fields-webgpu.js';
 import { cacheSnapshot, fieldSceneKey } from './room-field-analysis.js';
 import { estimateRoomLightAsync } from './room-light.js';
+import { estimateWifiCoverage } from './wifi-coverage.js';
 
 export class RoomFieldSolver {
   constructor({ gpu = globalThis.navigator?.gpu } = {}) {
@@ -11,6 +12,7 @@ export class RoomFieldSolver {
   }
 
   async solve(scene, mode, { durationSeconds = 3, cellSize = 0.15, isCancelled = () => false, onProgress = () => {} } = {}) {
+    if (mode === 'wifi') return estimateWifiCoverage(scene, { isCancelled });
     if (mode === 'light') return estimateRoomLightAsync(scene, {}, { isCancelled });
     if (!['airflow', 'temperature'].includes(mode)) throw new RangeError(`Unsupported room field mode: ${mode}`);
     if (!Number.isFinite(durationSeconds) || durationSeconds < 0 || durationSeconds > 120) {

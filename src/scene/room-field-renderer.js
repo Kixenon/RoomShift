@@ -12,6 +12,10 @@ function normalizeTemperature(value, result) {
   return clamp((value - minimum) / (maximum - minimum), 0, 1) ** 0.82;
 }
 
+function normalizeWifi(value) {
+  return clamp((value + 75) / 40, 0, 1);
+}
+
 export function getAirflowColor(speed, maximumSpeed) {
   const intensity = clamp(Number.isFinite(speed) ? speed / Math.max(0.001, maximumSpeed) : 0, 0, 1);
   return new THREE.Color().setHSL(0.62 - intensity * 0.6, 0.9, 0.24 + intensity * 0.22);
@@ -26,6 +30,16 @@ export function getTemperatureColor(temperature, ambientTemperature, maximumTemp
 export function getLightColor(intensity) {
   const level = clamp(Number.isFinite(intensity) ? intensity : 0, 0, 1);
   return new THREE.Color().setHSL(0.12 - level * 0.055, 0.3 + level * 0.58, 0.24 + level * 0.48);
+}
+
+export function getWifiColor(signalDbm) {
+  const level = normalizeWifi(signalDbm);
+  const weak = new THREE.Color(0xc0392b);
+  const moderate = new THREE.Color(0xe1b12c);
+  const strong = new THREE.Color(0x27ae60);
+  return level < 0.52
+    ? weak.lerp(moderate, level / 0.52)
+    : moderate.lerp(strong, (level - 0.52) / 0.48);
 }
 
 function sampleField(field, x, y, z, grid, solid, fallback = 0) {
@@ -58,6 +72,7 @@ function sampleField(field, x, y, z, grid, solid, fallback = 0) {
 function normalizeScalar(result, mode, value) {
   if (mode === 'airflow') return clamp(value / airflowDisplayRange(result), 0, 1);
   if (mode === 'temperature') return normalizeTemperature(value, result);
+  if (mode === 'wifi') return normalizeWifi(value);
   return clamp((value - result.ambientLevel) / Math.max((result.stats.maxLevel ?? result.stats.maxLight) - result.ambientLevel, 0.05), 0, 1);
 }
 
@@ -68,7 +83,7 @@ function createFieldTexture(result, mode) {
   for (let index = 0; index < voxelCount; index += 1) {
     const value = mode === 'airflow'
       ? Math.hypot(fields.u[index], fields.v[index], fields.w[index])
-      : mode === 'temperature' ? fields.temperature[index] : fields.light[index];
+      : mode === 'temperature' ? fields.temperature[index] : mode === 'wifi' ? fields.wifi[index] : fields.light[index];
     data[index * 4] = Math.round(normalizeScalar(result, mode, value) * 255);
     data[index * 4 + 1] = fields.solid?.[index] ? 255 : 0;
     if (mode === 'temperature') {
@@ -106,7 +121,7 @@ export function createFieldVolume(result, mode) {
       uVolumeSize: { value: new THREE.Vector3(grid.width, grid.height, grid.depth) },
       uStepLength: { value: stepLength },
       uOpacity: { value: mode === 'airflow' ? 1.2 : mode === 'temperature' ? 1.5 : 2.1 },
-      uFieldMode: { value: mode === 'airflow' ? 0 : mode === 'temperature' ? 1 : 2 },
+      uFieldMode: { value: mode === 'airflow' ? 0 : mode === 'temperature' ? 1 : mode === 'wifi' ? 3 : 2 },
     },
     side: THREE.DoubleSide,
     transparent: true,
@@ -150,6 +165,13 @@ export function createFieldVolume(result, mode) {
           if (value < 0.76) return mix(green, yellow, (value - 0.58) / 0.18);
           if (value < 0.9) return mix(yellow, orange, (value - 0.76) / 0.14);
           return mix(orange, vec3(1.0, 0.905, 0.723), (value - 0.9) / 0.1);
+        }
+        if (uFieldMode == 3) {
+          vec3 weak = vec3(0.527, 0.047, 0.024);
+          vec3 moderate = vec3(0.753, 0.434, 0.025);
+          vec3 strong = vec3(0.020, 0.423, 0.117);
+          if (value < 0.52) return mix(weak, moderate, value / 0.52);
+          return mix(moderate, strong, (value - 0.52) / 0.48);
         }
         vec3 navy = vec3(0.015, 0.025, 0.11);
         vec3 blue = vec3(0.02, 0.22, 0.95);
@@ -203,6 +225,7 @@ export function createFieldVolume(result, mode) {
           float density = 0.012 * smoothstep(0.002, 0.035, field.r)
             + 0.28 * smoothstep(0.04, 0.22, field.r);
           if (uFieldMode == 1) { density = 0.015 + 0.65 * smoothstep(0.002, 0.08, field.b); }
+          if (uFieldMode == 3) { density = 0.018 + 0.24 * smoothstep(0.0, 0.14, field.r); }
           density *= 1.0 - step(0.5, field.g);
           float alpha = 1.0 - exp(-density * 2.35 * stepLength * uOpacity);
           float contribution = (1.0 - accumulated.a) * alpha;
@@ -246,6 +269,9 @@ export function createScalarSliceLayer(result, mode, height) {
         sampleField(fields.w, x, height, z, grid, fields.solid),
       );
       getAirflowColor(speed, airflowDisplayRange(result)).toArray(colors, index * 4);
+    } else if (mode === 'wifi') {
+      const signal = sampleField(fields.wifi, x, height, z, grid, fields.solid, -100);
+      getWifiColor(signal).toArray(colors, index * 4);
     } else {
       const temperature = sampleField(fields.temperature, x, height, z, grid, fields.solid, result.ambientTemperature);
       infraredColor(temperature, result, color).toArray(colors, index * 4);

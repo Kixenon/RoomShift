@@ -37,8 +37,9 @@ function harness(overrides = {}) {
 }
 
 const sceneWithOpenWindow = (wall = 'back') => {
-  const withWindow = addWindow(createRoomScene(), wall);
-  return setWindowOpen(withWindow.scene, 'window-1', true).scene;
+  const scene = { ...createRoomScene(), objects: [], nextWindowId: 1, nextDoorId: 1 };
+  const withWindow = addWindow(scene, wall);
+  return setWindowOpen(withWindow.scene, withWindow.object.id, true).scene;
 };
 
 const setClock = (viewport, timeMinutes) => viewport.setTimeOfDay({ timeMinutes });

@@ -10,7 +10,11 @@ test('WebGPU reports an unavailable adapter so the worker can use its CPU previe
 
 test('GPU inputs preserve rotated fan direction and voxelize room obstacles', () => {
   const scene = createRoomScene();
-  const fan = { ...scene.objects.find((object) => object.model === 'fan'), rotation: { x: 0, y: 90, z: 0 } };
+  const fan = {
+    ...scene.objects.find((object) => object.model === 'fan'),
+    position: { x: 0.82, y: 0, z: 3.15 },
+    rotation: { x: 0, y: 90, z: 0 },
+  };
   const obstacle = {
     id: 'block', primitive: 'box', model: 'box', name: 'Block',
     position: { x: 2.6, y: 0.8, z: 2 }, rotation: { x: 0, y: 0, z: 0 },

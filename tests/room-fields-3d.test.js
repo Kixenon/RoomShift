@@ -3,13 +3,8 @@ import test from 'node:test';
 import { addWindow, createRoomScene } from '../src/model/room-scene.js';
 import { simulateRoomFields } from '../src/simulation/room-fields-3d.js';
 
-function sceneWithoutSources() {
-  const scene = createRoomScene();
-  return {
-    ...scene,
-    room: { ...scene.room, outdoorTemperature: 20 },
-    objects: scene.objects.filter((object) => !['fan', 'heater', 'lamp'].includes(object.model)),
-  };
+function emptyRoomScene() {
+  return { ...createRoomScene(), room: { ...createRoomScene().room, outdoorTemperature: 20 }, objects: [], nextWindowId: 1, nextDoorId: 1 };
 }
 
 function fieldIndex(grid, x, y, z) {
@@ -20,7 +15,7 @@ function fieldIndex(grid, x, y, z) {
 }
 
 test('an unforced room has a bounded 3D metre grid and remains at ambient temperature', () => {
-  const result = simulateRoomFields(sceneWithoutSources(), { steps: 4 });
+  const result = simulateRoomFields(emptyRoomScene(), { steps: 4 });
   const { nx, ny, nz, dx, dy, dz } = result.grid;
   const { u, v, w, temperature, solid } = result.fields;
   const cellCount = nx * ny * nz;
@@ -42,10 +37,10 @@ test('an unforced room has a bounded 3D metre grid and remains at ambient temper
 });
 
 test('an open window cools the room more than envelope conduction alone', () => {
-  const closed = simulateRoomFields(createRoomScene(), { steps: 20 });
+  const base = { ...emptyRoomScene(), room: { ...emptyRoomScene().room, outdoorTemperature: 10 } };
+  const closed = simulateRoomFields(base, { steps: 20 });
   assert.ok(closed.stats.minTemperature < closed.ambientTemperature);
 
-  const base = createRoomScene();
   const placed = addWindow(base, 'front');
   const window = { ...placed.object, open: true, flowDirection: 'inlet', flowRate: 0.8 };
   const openScene = {
@@ -61,7 +56,7 @@ test('an open window cools the room more than envelope conduction alone', () => 
 test('an angled fan drives a 3D field in its facing direction', () => {
   const template = createRoomScene().objects.find((object) => object.model === 'fan');
   const fan = { ...template, position: { x: 2.6, y: 0, z: 2 }, rotation: { x: 0, y: 90, z: 0 } };
-  const result = simulateRoomFields({ ...sceneWithoutSources(), objects: [fan] });
+  const result = simulateRoomFields({ ...emptyRoomScene(), objects: [fan] });
   const downstream = result.fields.u[fieldIndex(result.grid, 3.1, 1, 2)];
 
   assert.ok(result.stats.maxSpeed > 0.1);
@@ -71,9 +66,17 @@ test('an angled fan drives a 3D field in its facing direction', () => {
 });
 
 test('fan airflow redistributes heat away from a heater', () => {
-  const base = createRoomScene();
-  const fan = base.objects.find((object) => object.model === 'fan');
-  const heater = base.objects.find((object) => object.model === 'heater');
+  const template = createRoomScene();
+  const base = emptyRoomScene();
+  const fan = {
+    ...template.objects.find((object) => object.model === 'fan'),
+    position: { x: 0.82, y: 0, z: 3.15 },
+    rotation: { x: 0, y: 180, z: 0 },
+  };
+  const heater = {
+    ...template.objects.find((object) => object.model === 'heater'),
+    position: { x: 0.55, y: 0, z: 1.9 },
+  };
   const scene = { ...base, objects: [fan, heater] };
   const active = simulateRoomFields(scene, { steps: 120 });
   const still = simulateRoomFields({
@@ -96,15 +99,15 @@ test('fan airflow redistributes heat away from a heater', () => {
 test('a fan pointed directly at a nearby wall retains a visible near-wall flow', () => {
   const template = createRoomScene().objects.find((object) => object.model === 'fan');
   const fan = { ...template, position: { x: 0.82, y: 0, z: 3.79 }, rotation: { x: 0, y: 0, z: 0 } };
-  const result = simulateRoomFields({ ...sceneWithoutSources(), objects: [fan] });
+  const result = simulateRoomFields({ ...emptyRoomScene(), objects: [fan] });
 
   assert.ok(result.stats.maxSpeed > 0.05,
     `near-wall fan flow collapsed to ${result.stats.maxSpeed} m/s`);
 });
 
 test('a corner-facing fan deflects flow along both adjoining walls', () => {
-  const base = createRoomScene();
-  const template = base.objects.find((object) => object.model === 'fan');
+  const base = emptyRoomScene();
+  const template = createRoomScene().objects.find((object) => object.model === 'fan');
   const fan = { ...template, position: { x: 0.82, y: 0, z: 0.82 }, rotation: { x: 0, y: -135, z: 0 } };
   const result = simulateRoomFields({ ...base, objects: [fan] });
   let xWallCells = 0;
@@ -126,8 +129,8 @@ test('a corner-facing fan deflects flow along both adjoining walls', () => {
 });
 
 test('a fan jet develops a measurable 3D wake behind an obstacle', () => {
-  const base = createRoomScene();
-  const template = base.objects.find((object) => object.model === 'fan');
+  const base = emptyRoomScene();
+  const template = createRoomScene().objects.find((object) => object.model === 'fan');
   const fan = { ...template, position: { x: 2.6, y: 0, z: 3.55 }, rotation: { x: 0, y: 180, z: 0 } };
   const obstacle = {
     id: 'wake-obstacle', primitive: 'box', model: 'box', name: 'Wake obstacle',
@@ -157,7 +160,7 @@ test('a fan jet develops a measurable 3D wake behind an obstacle', () => {
 test('the airflow field follows full object rotation, including vertical fan orientation', () => {
   const template = createRoomScene().objects.find((object) => object.model === 'fan');
   const fan = { ...template, position: { x: 2.6, y: 0, z: 2 }, rotation: { x: -90, y: 0, z: 0 } };
-  const result = simulateRoomFields({ ...sceneWithoutSources(), objects: [fan] });
+  const result = simulateRoomFields({ ...emptyRoomScene(), objects: [fan] });
   let verticalSpeed = 0;
   let fluidCells = 0;
   for (let j = 0; j < result.grid.ny; j += 1) {
@@ -182,7 +185,7 @@ test('the airflow field follows full object rotation, including vertical fan ori
 test('closed walls remain impermeable after pressure projection', () => {
   const template = createRoomScene().objects.find((object) => object.model === 'fan');
   const fan = { ...template, position: { x: 0.3, y: 0, z: 2 }, rotation: { x: 0, y: 90, z: 0 } };
-  const result = simulateRoomFields({ ...sceneWithoutSources(), objects: [fan] });
+  const result = simulateRoomFields({ ...emptyRoomScene(), objects: [fan] });
 
   assert.equal(result.stats.maxClosedWallNormalSpeed, 0);
   assert.ok(result.stats.rmsDivergence < 0.01);
@@ -194,7 +197,7 @@ test('box obstacles occupy 3D voxels while the surrounding air remains fluid', (
     position: { x: 2.6, y: 0.8, z: 2 }, rotation: { x: 0, y: 0, z: 0 },
     dimensions: { width: 0.6, height: 0.6, depth: 0.6 },
   };
-  const result = simulateRoomFields({ ...sceneWithoutSources(), objects: [obstacle] }, { steps: 1 });
+  const result = simulateRoomFields({ ...emptyRoomScene(), objects: [obstacle] }, { steps: 1 });
 
   assert.equal(result.fields.solid[fieldIndex(result.grid, 2.6, 1.125, 2)], 1);
   assert.equal(result.fields.solid[fieldIndex(result.grid, 1.6, 0.675, 2)], 0);
@@ -206,7 +209,7 @@ test('a heater creates a local bounded temperature rise in the 3D field', () => 
     position: { x: 2.6, y: 0.4, z: 2 }, rotation: { x: 0, y: 0, z: 0 },
     dimensions: { width: 0.4, height: 0.4, depth: 0.4 },
   };
-  const result = simulateRoomFields({ ...sceneWithoutSources(), objects: [heater] });
+  const result = simulateRoomFields({ ...emptyRoomScene(), objects: [heater] });
   const near = result.fields.temperature[fieldIndex(result.grid, 2.6, 0.9, 2)];
   const far = result.fields.temperature[fieldIndex(result.grid, 0.5, 2.2, 0.5)];
 
@@ -227,14 +230,14 @@ test('disabled heaters contribute no heat', () => {
     position: { x: 2.6, y: 0.4, z: 2 }, rotation: { x: 0, y: 0, z: 0 },
     dimensions: { width: 0.4, height: 0.4, depth: 0.4 },
   };
-  const scene = { ...sceneWithoutSources(), objects: [{ ...heater, enabled: false }] };
+  const scene = { ...emptyRoomScene(), objects: [{ ...heater, enabled: false }] };
   const result = simulateRoomFields(scene, { steps: 20 });
 
   assert.equal(result.stats.maxTemperature, result.ambientTemperature);
 });
 
 test('maximum room/grid work is bounded and all returned fields stay finite', () => {
-  const room = { ...sceneWithoutSources(), room: { width: 20, depth: 20, height: 6 }, objects: [] };
+  const room = { ...emptyRoomScene(), room: { width: 20, depth: 20, height: 6 }, objects: [] };
   const result = simulateRoomFields(room, {
     cellSize: 0.25, steps: 40, pressureIterations: 12, timeStep: 0.05,
     kinematicViscosity: 0.05, effectiveThermalDiffusivity: 0.05,
@@ -252,7 +255,7 @@ test('maximum room/grid work is bounded and all returned fields stay finite', ()
 });
 
 test('invalid physical coefficients are rejected before field integration', () => {
-  const base = sceneWithoutSources();
+  const base = emptyRoomScene();
   const invalidOptions = [
     { timeStep: Infinity }, { timeStep: -0.01 }, { timeStep: 0.051 },
     { cellSize: NaN }, { kinematicViscosity: Infinity }, { kinematicViscosity: -0.01 },
@@ -271,7 +274,7 @@ test('invalid physical coefficients are rejected before field integration', () =
 
 test('a completely solid room returns finite ambient statistics', () => {
   const scene = {
-    ...sceneWithoutSources(),
+    ...emptyRoomScene(),
     room: { width: 2, depth: 2, height: 2 },
     objects: [{
       id: 'full-room', primitive: 'box', model: 'box', name: 'Full room',

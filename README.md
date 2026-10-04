@@ -73,3 +73,7 @@ Before claiming predictive usefulness, measure one specific decision: for exampl
 - `src/simulation/daylight.js`, `sun-position.js`, and `room-light.js` — solar geometry and relative lamp estimates.
 - `src/scene/` — viewport, slices, volumes, and air-temperature surface mapping.
 - `tests/` and `browser-tests/` — numerical/model regressions and browser workflows.
+
+## Devices from main
+
+The starter room includes a router, ceiling fan with light, wall-mounted AC, window, and door. Wi-Fi has volume and slice views; its propagation model estimates distance loss and obstruction attenuation, not measured coverage. AC uses a default 1500 W cooling source scaled by its output setting; heating and cooling share the same power-normalized CPU/GPU source calculation.
