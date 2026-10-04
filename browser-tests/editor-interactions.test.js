@@ -273,6 +273,7 @@ test('a fan close to a wall keeps a visible resolved airflow field', async () =>
   await positionZ.fill('3.75');
   await positionZ.blur();
   await page.locator('#show-airflow').click();
+  await page.locator('#simulation-time').evaluate((input) => { input.value = '3'; input.dispatchEvent(new Event('input', { bubbles: true })); });
 
   await page.waitForFunction(() => {
     const canvas = document.querySelector('#room-canvas');

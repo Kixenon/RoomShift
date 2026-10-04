@@ -193,14 +193,14 @@ test('playback buffers pending solves and pause prevents another frame', async (
   worker.respond({ requestId: worker.requests[0].requestId, result: { durationSeconds: 3, grid: {}, fields: {}, stats: {} } });
   const deadline = performance.now() + 2000;
   while (worker.requests.length < 2 && performance.now() < deadline) await flushTimers();
-  assert.equal(worker.requests.at(-1).durationSeconds, 3.5);
+  assert.equal(worker.requests.at(-1).durationSeconds, 3.1);
   const request = worker.requests.at(-1);
   await new Promise((resolve) => setTimeout(resolve, 520));
   assert.equal(worker.requests.length, 2);
-  worker.respond({ requestId: request.requestId, progress: true, result: { durationSeconds: 3.25, grid: {}, fields: {}, stats: {} } });
+  worker.respond({ requestId: request.requestId, progress: true, result: { durationSeconds: 3.05, grid: {}, fields: {}, stats: {} } });
   assert.equal(controller.inFlight.requestId, request.requestId);
   controller.setPlaying(false);
-  worker.respond({ requestId: request.requestId, result: { durationSeconds: 3.5, grid: {}, fields: {}, stats: {} } });
+  worker.respond({ requestId: request.requestId, result: { durationSeconds: 3.1, grid: {}, fields: {}, stats: {} } });
   await new Promise((resolve) => setTimeout(resolve, 520));
   assert.equal(worker.requests.length, 2);
   assert.equal(controller.playing, false);
@@ -219,4 +219,32 @@ test('playback stops at the endpoint and when the mode changes', async (t) => {
   controller.playing = true;
   controller.emitState({ mode: 'temperature', loading: false, result: { durationSeconds: 120 } });
   assert.equal(controller.playing, false);
+});
+
+
+test('playback accepts fractional solver times and bypasses edit debounce', async (t) => {
+  const { controller, worker } = createHarness(t, 1000);
+  controller.setScene(scene('one'));
+  controller.setMode('airflow');
+  controller.setSimulationTime(3.3);
+  controller.setPlaying(true);
+  controller.pump();
+  worker.respond({ requestId: worker.requests[0].requestId, result: { durationSeconds: 3.3000000000000003, grid: {}, fields: {}, stats: {} } });
+  const deadline = performance.now() + 600;
+  while (worker.requests.length < 2 && performance.now() < deadline) await flushTimers();
+  assert.equal(worker.requests.at(-1).durationSeconds, 3.4);
+});
+
+
+test('physical edits restart ongoing playback at zero but object names preserve elapsed time', async (t) => {
+  const { controller } = createHarness(t);
+  controller.setScene(scene('one'));
+  controller.setMode('temperature');
+  controller.setSimulationTime(10);
+  controller.setScene({ ...scene('one'), objects: [{ ...scene('one').objects[0], name: 'Renamed' }] });
+  assert.equal(controller.durationSeconds, 10);
+  controller.setPlaying(true);
+  controller.setScene(scene('two'));
+  assert.equal(controller.durationSeconds, 0);
+  assert.equal(controller.playing, true);
 });
