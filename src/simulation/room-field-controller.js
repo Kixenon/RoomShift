@@ -39,7 +39,14 @@ export class RoomFieldController {
   }
 
   setScene(scene) {
+    const changed = this.scene && fieldSceneKey(this.scene, this.cellSize) !== fieldSceneKey(scene, this.cellSize);
+    const playing = this.playing;
     this.stopPlayback();
+    this.playing = playing;
+    if (changed) {
+      this.durationSeconds = 0;
+      this.nextFrameAt = performance.now() + 100;
+    }
     this.scene = scene;
     this.sliceHeight = Math.min(this.sliceHeight, scene.room.height);
     if (!this.mode || (this.mode === 'light' && this.displayStyles.light === 'preview')) return;
@@ -175,7 +182,7 @@ export class RoomFieldController {
     if (!playing && !this.playing) return;
     this.stopPlayback();
     this.playing = Boolean(playing) && ['airflow', 'temperature'].includes(this.mode);
-    this.nextFrameAt = performance.now() + 500;
+    this.nextFrameAt = performance.now() + 100;
     if (this.playing && this.durationSeconds >= 120) this.setSimulationTime(0);
     this.emitState({ mode: this.mode, loading: Boolean(this.pendingRequest || this.inFlight), result: this.result, displayStyle: this.displayStyle });
   }
@@ -185,11 +192,11 @@ export class RoomFieldController {
     this.playbackTimer = null;
     if (state.error || !['airflow', 'temperature'].includes(state.mode) || (this.durationSeconds >= 120 && !state.loading)) this.playing = false;
     this.onState({ ...state, playing: this.playing });
-    if (!this.playing || state.loading || state.result?.durationSeconds !== this.durationSeconds) return;
+    if (!this.playing || this.interactionActive || state.loading || !state.result || Math.abs(state.result.durationSeconds - this.durationSeconds) > 0.001) return;
     this.playbackTimer = setTimeout(() => {
       this.playbackTimer = null;
-      this.nextFrameAt = performance.now() + 500;
-      this.setSimulationTime(Math.min(120, this.durationSeconds + 0.5));
+      this.nextFrameAt = performance.now() + 100;
+      this.setSimulationTime(Math.min(120, Number((this.durationSeconds + 0.1).toFixed(2))));
     }, Math.max(0, this.nextFrameAt - performance.now()));
   }
 
@@ -236,6 +243,11 @@ export class RoomFieldController {
     if (!preserveResult) this.viewport.clearFields();
     this.emitState({ mode: this.mode, loading: true, result: this.result, error: null, stale: preserveResult, displayStyle: this.displayStyle });
     clearTimeout(this.timer);
+    if (this.playing) {
+      this.timer = null;
+      this.pump();
+      return;
+    }
     this.timer = setTimeout(() => {
       this.timer = null;
       this.pump();

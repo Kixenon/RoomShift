@@ -29,7 +29,7 @@ npm run validate:simulation
 4. Repeat at **Fine** detail. A result that changes substantially with resolution is unsuitable for deciding between layouts.
 5. Use the **Room ⋯** menu to save, load, delete, or reset layouts. Save named scenarios to revisit them. The current scene and up to twenty named scenarios persist in this browser. Saving the same name replaces that scenario. Unsupported or invalid saved data is ignored.
 
-Time is elapsed since the initial uniformly tempered, stationary air state with the current device/opening configuration. Every geometry, source, or room-physics change starts a fresh experiment. Scrubbing forward continues resident solver state; already computed points are cached. An earlier uncached point starts again from the same initial state. Air and Heat share the same solve. Display scales stay fixed across time and layouts; the temperature scale is adjustable.
+Time is elapsed since the initial uniformly tempered, stationary air state with the current device/opening configuration. Every geometry, source, or room-physics change resets elapsed time to zero, continuing playback if it was running. Scrubbing forward continues resident solver state; already computed points are cached. An earlier uncached point starts again from the same initial state. Air and Heat share the same solve. Display scales stay fixed across time and layouts; the temperature scale is adjustable.
 
 The first partial result appears before a long solve finishes. The timeline shows the visible simulated time and buffers while the next result is calculated.
 
@@ -77,4 +77,4 @@ Before claiming predictive usefulness, measure one specific decision: for exampl
 
 The starter room includes a router, ceiling fan with light, wall-mounted AC, window, and door. Wi-Fi has volume and slice views; its propagation model estimates distance loss and obstruction attenuation, not measured coverage. AC uses a default 1500 W cooling source scaled by its output setting; heating and cooling share the same power-normalized CPU/GPU source calculation.
 
-Simulation controls use icon popovers for detail and temperature scale in the playback row. Play advances in half-second simulated snapshots, waiting when the next solve is still running; Pause holds the requested time and Restart returns to zero. Playback stops on room edits, mode changes, errors, and at 120 seconds. Physics settings are under the detail icon.
+Simulation controls use icon popovers for detail and temperature scale in the playback row. Play advances in 0.1-second simulated snapshots at up to 10 updates per second, waiting when the next solve is still running; Pause holds the requested time and Restart returns to zero. Playback restarts at zero on room edits and stops on mode changes, errors, and at 120 seconds. Physics settings are under the detail icon.

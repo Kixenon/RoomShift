@@ -135,7 +135,7 @@ function renderFieldState({ mode, loading, result, error, stale, playing = false
   $('#simulation-settings').hidden = !physical;
   if (physical) {
     $('#simulation-time').value = String(fieldController.durationSeconds);
-    $('#simulation-time-value').textContent = `${result && !stale ? result.durationSeconds : fieldController.durationSeconds} s`;
+    $('#simulation-time-value').textContent = `${Number((result && !stale ? result.durationSeconds : fieldController.durationSeconds).toFixed(1))} s`;
     const play = $('#simulation-play');
     play.setAttribute('aria-pressed', String(playing));
     play.setAttribute('aria-label', playing ? 'Pause simulation' : 'Play simulation');
