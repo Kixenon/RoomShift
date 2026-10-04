@@ -760,7 +760,12 @@ this.renderer.localClippingEnabled = true;
     // light, which is what keeps daylight from appearing to fall from the roof.
     const reach = Math.max(this.roomScene?.room.width ?? 5, this.roomScene?.room.depth ?? 4) + 6;
     const { width = 5, depth = 4 } = this.roomScene?.room ?? {};
-    const roomCentre = new THREE.Vector3(width / 2, this.roomScene.room.height / 2, depth / 2);
+    // The sceneRoot room is built centred on the origin (objects are placed at
+    // their model position minus half the room), so the light and its target must
+    // be too. Using the model-space centre here offset the shadow frustum by half
+    // the room, leaving the far corners outside it: those regions fell back to
+    // fully lit and read as a hard rectangular patch that swept as the sun moved.
+    const roomCentre = new THREE.Vector3(0, this.roomScene.room.height / 2, 0);
     // Step just outside whichever wall the sun is arriving through, along the sun
     // vector, so the aperture sits between the light and the room interior.
     const margins = [
@@ -771,7 +776,7 @@ this.renderer.localClippingEnabled = true;
     const back = Math.max(...margins, 0.6);
     const sun = new THREE.Vector3(direction.x, Math.max(direction.y, 0.05), direction.z).normalize();
     this.keyLight.position.copy(roomCentre).addScaledVector(sun, back + reach * 0.25);
-    const shadowRadius = Math.max(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
+    const shadowRadius = Math.hypot(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
     Object.assign(this.keyLight.shadow.camera, {
       left: -shadowRadius,
       right: shadowRadius,
@@ -779,11 +784,9 @@ this.renderer.localClippingEnabled = true;
       bottom: -shadowRadius,
     });
     this.keyLight.shadow.camera.updateProjectionMatrix();
-    this.keyLight.target.position.set(
-      (this.roomScene?.room.width ?? 5) / 2,
-      0,
-      (this.roomScene?.room.depth ?? 4) / 2,
-    );
+    // Aim at the same point the light was placed from, so the direction is
+    // exactly the negative sun vector the rest of the model uses.
+    this.keyLight.target.position.copy(roomCentre);
     this.keyLight.target.updateMatrixWorld();
     this.keyLight.castShadow = state.sun.daylight > 0.02;
     this.keyLight.visible = state.sun.daylight > 0;

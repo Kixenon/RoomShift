@@ -90,8 +90,9 @@ test('the sun light is parked above the room and aims at its centre', () => {
 
   assert.ok(light.position.length() > 0, 'the light must not sit at the origin');
   assert.ok(light.position.y > 0, 'the light must be above the floor');
-  assert.ok(Math.abs(light.target.position.x - 5.2 / 2) < 1e-9, 'aimed at the room centre in x');
-  assert.ok(Math.abs(light.target.position.z - 4 / 2) < 1e-9, 'aimed at the room centre in z');
+  // The room is built centred on the origin, so its centre is (0, height / 2, 0).
+  assert.ok(Math.abs(light.target.position.x) < 1e-9, 'aimed at the room centre in x');
+  assert.ok(Math.abs(light.target.position.z) < 1e-9, 'aimed at the room centre in z');
 });
 
 test('at night the sun is hidden and the exposure opens up', () => {
