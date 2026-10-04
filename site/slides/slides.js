@@ -1,5 +1,4 @@
 import { gsap, SplitText, prefersReducedMotion } from '../motion.js';
-import { renderHeatmap, renderJetCheck } from '../charts.js';
 
 const deck = document.querySelector('[data-deck]');
 const stage = document.querySelector('[data-stage]');
@@ -37,14 +36,6 @@ function fit() {
 }
 window.addEventListener('resize', fit);
 fit();
-
-// ───────── Charts, built once ─────────
-const noChart = { play: () => {} };
-const heatmapHost = stage.querySelector('[data-deck-heatmap]');
-const jetHost = stage.querySelector('[data-deck-jet]');
-const heatmap = heatmapHost ? renderHeatmap(heatmapHost) : noChart;
-const jetChart = jetHost ? renderJetCheck(jetHost) : noChart;
-const chartPlayed = new Set();
 
 // ───────── Entrance animations ─────────
 const splits = new Map();
@@ -109,28 +100,6 @@ function enter(slide) {
       case 'fade':
         timeline.from(element, { opacity: 0, duration: 0.8 }, at);
         break;
-      case 'pipeline': {
-        const nodes = [...element.children];
-        gsap.set(nodes, { clearProps: 'opacity,transform,--link' });
-        timeline.from(nodes, { y: 50, opacity: 0, duration: 0.8, stagger: 0.22 }, at);
-        timeline.from(nodes.slice(1), { '--link': 0, duration: 0.5, ease: 'power2.inOut', stagger: 0.22 }, at + 0.25);
-        at += 0.4;
-        break;
-      }
-      case 'map': {
-        const items = [...element.querySelectorAll('[data-map-item]')];
-        gsap.set(items, { clearProps: 'opacity,transform' });
-        timeline.from(items, { scale: 0.7, opacity: 0, transformOrigin: '50% 50%', duration: 0.8, ease: 'back.out(1.7)', stagger: 0.2 }, at);
-        break;
-      }
-      case 'road': {
-        const line = element.querySelector('.road-line span');
-        const stops = [...element.querySelectorAll('.road-stop')];
-        gsap.set(stops, { clearProps: 'opacity,transform' });
-        timeline.fromTo(line, { scaleX: 0 }, { scaleX: 1, duration: 1.6, ease: 'power2.inOut' }, at);
-        timeline.from(stops, { y: 40, opacity: 0, duration: 0.8, stagger: 0.3 }, at + 0.2);
-        break;
-      }
       default:
         break;
     }
@@ -148,10 +117,6 @@ function enter(slide) {
     }, 0.5);
   }
 
-  const heatmapHost = slide.querySelector('[data-deck-heatmap]');
-  if (heatmapHost && !chartPlayed.has('heatmap')) { chartPlayed.add('heatmap'); timeline.call(heatmap.play, [], 0.6); }
-  const jetHost = slide.querySelector('[data-deck-jet]');
-  if (jetHost && !chartPlayed.has('jet')) { chartPlayed.add('jet'); timeline.call(jetChart.play, [], 0.7); }
   return timeline;
 }
 
@@ -159,7 +124,6 @@ function settle(slide) {
   for (const counter of slide.querySelectorAll('[data-deck-count]')) {
     counter.textContent = Number(counter.dataset.deckCount).toFixed(Number(counter.dataset.decimals ?? 0));
   }
-  heatmap.play(); jetChart.play();
 }
 
 // ───────── Slide-specific life ─────────
@@ -176,7 +140,7 @@ function playMedia(slide, on) {
 const cycle = {
   timer: 0,
   step: 0,
-  words: ['Just furniture.', 'Not air.', 'Not heat.', 'Not light.'],
+  words: ['Not air.', 'Not heat.', 'Not light.'],
   start(slide) {
     const host = slide.querySelector('[data-cycle]');
     if (!host) return;
