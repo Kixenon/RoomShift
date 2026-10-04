@@ -53,6 +53,9 @@ const INITIAL_OBJECTS = Object.freeze([
   { id: 'heater-1', primitive: 'device', model: 'heater', name: 'Panel heater', enabled: true, intensity: 1, position: { x: 2.6, y: 0.05, z: 0.13 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
   { id: 'air-conditioner-1', primitive: 'device', model: 'air-conditioner', name: 'Wall AC', wall: 'back', enabled: true, intensity: 1, position: { x: 2.6, y: 2.08, z: 3.89 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 0.86, height: 0.3, depth: 0.22 } },
   { id: 'ceiling-fan-1', primitive: 'device', model: 'ceiling-fan', name: 'Ceiling fan with light', enabled: true, intensity: 1, position: { x: 2.6, y: 2.38, z: 2 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.1, height: 0.32, depth: 1.1 } },
+  { id: 'router-1', primitive: 'device', model: 'router', name: 'Router', enabled: true, intensity: 1, position: { x: 4.8, y: 0.76, z: 2.44 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.28, height: 0.12, depth: 0.22 } },
+  { id: 'window-1', primitive: 'opening', model: 'window', name: 'Window 1', wall: 'back', open: false, flowDirection: 'exchange', flowRate: 0.35, position: { x: 1.25, y: 1, z: 3.97 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 1.4, height: 1, depth: 0.06 } },
+  { id: 'door-1', primitive: 'opening', model: 'door', name: 'Door 1', wall: 'front', open: false, flowDirection: 'exchange', flowRate: 0.35, position: { x: 4.55, y: 0, z: 0.03 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 2.1, depth: 0.06 } },
 ]);
 
 export function createRoomScene() {
@@ -60,8 +63,8 @@ export function createRoomScene() {
     room: { ...DEFAULT_ROOM },
     objects: INITIAL_OBJECTS.map((object) => structuredClone(object)),
     nextObjectId: 6,
-    nextWindowId: 1,
-    nextDoorId: 1,
+    nextWindowId: 2,
+    nextDoorId: 2,
   };
 }
 
