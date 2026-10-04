@@ -112,9 +112,9 @@ test('at midday the sun is up and the sky is bright', () => {
   assert.ok(state.sun.warmth < 0.2, 'a high sun should be close to neutral');
 });
 
-test('a closed window casts no patch', () => {
+test('a closed glass window still transmits direct sunlight', () => {
   const state = describeDaylight({ scene: sceneWithWindow('back', false), timeMinutes: minutes('12:30') });
-  assert.deepEqual(state.patches, []);
+  assert.equal(state.patches.length, 1);
 });
 
 test('a window only receives sun on the walls facing it', () => {

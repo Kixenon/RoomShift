@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import * as THREE from 'three';
+import { createRoomScene } from '../src/model/room-scene.js';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
@@ -14,6 +15,18 @@ let page;
 let baseUrl;
 let browserErrors = [];
 
+// Keep gizmo interactions independent of changes to the starter showcase.
+const editorScene = createRoomScene();
+const placements = { fan: [0.82, 3.15, 180], sofa: [4.18, 3.04, 0], desk: [4.18, 0.86, 0], table: [2.62, 2.12, 0], lamp: [1.2, 0.9, 0], heater: [0.55, 1.9, 0] };
+editorScene.objects = editorScene.objects.filter((object) => placements[object.model]).map((object) => {
+  const [x, z, yRotation] = placements[object.model];
+  return { ...object, position: { x, y: 0, z }, rotation: { x: 0, y: yRotation, z: 0 } };
+});
+editorScene.nextObjectId = 5;
+editorScene.nextWindowId = 1;
+editorScene.nextDoorId = 1;
+
+
 test.before(async () => {
   server = await createServer({
     configFile: false,
@@ -25,7 +38,7 @@ test.before(async () => {
   baseUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
 
   browser = await chromium.launch({
-    args: ['--no-sandbox'],
+    args: ['--no-sandbox', '--enable-unsafe-webgpu', ...(process.platform === 'darwin' ? ['--use-angle=metal'] : [])],
     executablePath: browserExecutable,
     headless: true,
   });
@@ -41,6 +54,7 @@ test.before(async () => {
 
 test.beforeEach(async () => {
   browserErrors = [];
+  await page.addInitScript((scene) => { localStorage.clear(); localStorage.setItem('roomshift.workspace', JSON.stringify({ version: 1, scene, scenarios: [] })); }, editorScene);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 577 });
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
@@ -217,9 +231,8 @@ test('air, heat, and light fields update automatically and after scene edits', a
   assert.ok(Number.isFinite(Number(await canvas.getAttribute('data-field-rms-divergence'))));
   assert.match(await page.locator('#field-legend-title').textContent(), /Airflow/);
   assert.equal(await page.locator('#show-airflow').getAttribute('aria-pressed'), 'true');
-  assert.ok(Number(await canvas.getAttribute('data-field-volume-voxels')) > 0, 'animated gas should use a 3D density volume');
-  assert.ok(Number(await canvas.getAttribute('data-gas-density-max')) > 0);
-  assert.ok(Number(await canvas.getAttribute('data-gas-occupied-voxels')) > 0);
+  assert.equal(await page.locator('#field-display-label').textContent(), 'Volume');
+  assert.equal(await canvas.getAttribute('data-gas-density-max'), null);
 
   await page.locator('#field-display-button').click();
   await page.locator('[data-display-style="volume"]').click();
@@ -265,8 +278,7 @@ test('a fan close to a wall keeps a visible resolved airflow field', async () =>
     const canvas = document.querySelector('#room-canvas');
     return canvas?.dataset.fieldMode === 'airflow'
       && Number(canvas.dataset.fieldMaxSpeed) > 0.05
-      && Number(canvas.dataset.gasDensityMax) > 0
-      && Number(canvas.dataset.gasOccupiedVoxels) > 0;
+      && Number(canvas.dataset.fieldDuration) === 3;
   });
   assert.ok(Number(await page.locator('#room-canvas').getAttribute('data-field-cells')) > 0);
 });

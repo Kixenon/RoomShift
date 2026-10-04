@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as THREE from 'three';
 import { addWindow, createRoomScene } from '../src/model/room-scene.js';
 import { createRoomFieldLayer, getAirflowColor, getLightColor, getTemperatureColor } from '../src/scene/room-field-layer-3d.js';
 import { simulateRoomFields } from '../src/simulation/room-fields-3d.js';
@@ -39,211 +40,23 @@ test('temperature maps the solved field onto infrared room surfaces', () => {
   assert.ok(surfaces?.isGroup);
   assert.equal(surfaces.children.length, 6);
   assert.equal(colors.itemSize, 4);
+  assert.equal(floor.material.transparent, false);
+  assert.equal(floor.material.side, THREE.FrontSide);
+  assert.equal(floor.material.depthWrite, true);
   assert.ok(Math.min(...colors.array.filter((_, index) => index % 4 === 3)) >= 0.23);
-  assert.ok(Math.max(...colors.array.filter((_, index) => index % 4 === 3)) <= 0.61);
+  assert.ok(Math.max(...colors.array.filter((_, index) => index % 4 === 3)) === 1);
   assert.notDeepEqual(Array.from(colors.array.slice(0, 3)), Array.from(colors.array.slice(-4, -1)));
   assert.equal(layer.userData.volumeVoxelCount, 0);
   assert.equal(volumeFor(layer), undefined);
 });
 
-test('airflow advects and diffuses a continuous 3D gas field', () => {
-  const count = 6 ** 3;
-  const maximumSpeed = Math.hypot(0.6, 0.4, 0.2);
-  const result = {
-    ...sampleFields,
-    grid: { width: 3, height: 3, depth: 3, nx: 6, ny: 6, nz: 6, dx: 0.5, dy: 0.5, dz: 0.5 },
-    fields: {
-      u: new Float32Array(count).fill(0.6),
-      v: new Float32Array(count).fill(0.4),
-      w: new Float32Array(count).fill(0.2),
-      temperature: new Float32Array(count).fill(20),
-      light: new Float32Array(count).fill(0.1),
-      solid: new Uint8Array(count),
-    },
-    stats: { maxSpeed: maximumSpeed, maxTemperature: 20, maxLight: 0.1 },
-  };
-  const layer = createRoomFieldLayer(result, 'airflow');
-  const gas = layer.children.find((child) => child.name === 'advected-room-gas');
-  const volume = gas.children.find((child) => child.name === 'advected-room-gas-volume');
-  const textureData = volume.material.uniforms.uGas.value.image.data;
-  const initialDensity = textureData.slice();
-  let maximumEncodedSpeed = 0;
-  for (let index = 1; index < textureData.length; index += 4) {
-    maximumEncodedSpeed = Math.max(maximumEncodedSpeed, textureData[index]);
-  }
-
-  assert.ok(gas?.isGroup);
-  assert.ok(volume?.isMesh);
-  assert.ok(layer.userData.gasVoxelCount > 0);
-  assert.ok(layer.userData.volumeVoxelCount > 0);
-  assert.ok(volume.userData.voxelSize <= 0.15);
-  const { width, height, depth } = volume.material.uniforms.uGas.value.image;
-  assert.deepEqual(volume.material.uniforms.uVoxelSize.value.toArray(), [
-    1 / width,
-    1 / height,
-    1 / depth,
-  ]);
-  assert.equal(maximumEncodedSpeed, 255);
-  assert.ok(typeof layer.userData.animate === 'function');
-  layer.userData.animate(1 + 1 / 30);
-  assert.notDeepEqual(Array.from(textureData), Array.from(initialDensity));
-  assert.ok(layer.userData.maxDensity > 0);
-  assert.ok(layer.userData.occupiedVoxels > 0);
-  assert.equal(layer.userData.airflowVisualization, 'advected-density');
-});
-
-test('gas animation caps work for the largest supported room', () => {
-  const grid = { width: 20, height: 6, depth: 20, nx: 40, ny: 24, nz: 40, dx: 0.5, dy: 0.25, dz: 0.5 };
-  const count = grid.nx * grid.ny * grid.nz;
-  const result = {
-    ...sampleFields,
-    grid,
-    fields: {
-      u: new Float32Array(count), v: new Float32Array(count), w: new Float32Array(count),
-      temperature: new Float32Array(count).fill(20), light: new Float32Array(count).fill(0.1),
-      solid: new Uint8Array(count),
-    },
-    stats: { maxSpeed: 0, maxTemperature: 20, maxLight: 0.1 },
-  };
-  const layer = createRoomFieldLayer(result, 'airflow', { room: { width: 20, depth: 20, height: 6 }, objects: [] });
-
-  assert.ok(layer.userData.gasVoxelCount <= 125_000);
-});
-
-test('standard 5 cm fields retain their 10 cm gas animation grid', () => {
-  const grid = { width: 5.2, height: 2.7, depth: 4, nx: 104, ny: 54, nz: 80, dx: 0.05, dy: 0.05, dz: 0.05 };
-  const count = grid.nx * grid.ny * grid.nz;
-  const result = {
-    ...sampleFields,
-    grid,
-    fields: {
-      u: new Float32Array(count), v: new Float32Array(count), w: new Float32Array(count),
-      temperature: new Float32Array(count).fill(20), light: new Float32Array(count).fill(0.1),
-      solid: new Uint8Array(count),
-    },
-    stats: { maxSpeed: 0, maxTemperature: 20, maxLight: 0.1 },
-  };
-
-  const layer = createRoomFieldLayer(result, 'airflow');
-
-  assert.equal(layer.userData.gasVoxelCount, 102_816);
-});
-
-test('heater heat is shown by temperature fields, not as a separate gas source', () => {
-  const roomScene = createRoomScene();
-  const heater = roomScene.objects.find((object) => object.model === 'heater');
-  const scene = { ...roomScene, objects: [heater] };
-  const layer = createRoomFieldLayer(sampleFields, 'airflow', scene);
-
-  assert.equal(layer.userData.gasSourceCounts.heater, undefined);
-});
-
-test('gas follows open-window outflow beyond the wall', () => {
-  const grid = { width: 2, height: 2, depth: 2, nx: 16, ny: 16, nz: 16, dx: 0.125, dy: 0.125, dz: 0.125 };
-  const count = grid.nx * grid.ny * grid.nz;
-  const outlets = new Uint8Array(count);
-  const windowFlow = new Float32Array(count);
-  for (let j = 2; j < 14; j += 1) {
-    for (let i = 2; i < 14; i += 1) {
-      const index = (j * grid.nz) * grid.nx + i;
-      outlets[index] = 16;
-      windowFlow[index] = -0.8;
-    }
-  }
-  const result = {
-    ...sampleFields,
-    grid,
-    fields: {
-      u: new Float32Array(count),
-      v: new Float32Array(count),
-      w: new Float32Array(count).fill(-0.8),
-      temperature: new Float32Array(count).fill(20),
-      light: new Float32Array(count).fill(0.1),
-      solid: new Uint8Array(count),
-      outlets,
-      windowFlow,
-    },
-    stats: { maxSpeed: 0.8, maxTemperature: 20, maxLight: 0.1 },
-  };
-  const roomScene = {
-    room: { width: 2, height: 2, depth: 2 },
-    objects: [
-      {
-        model: 'fan', enabled: true, intensity: 1,
-        position: { x: 1, y: 0, z: 1.7 },
-        rotation: { x: 0, y: 180, z: 0 },
-        dimensions: { width: 0.4, height: 1.5, depth: 0.4 },
-      },
-      {
-        model: 'window', wall: 'front', open: true, flowDirection: 'outlet', flowRate: 0.8,
-        position: { x: 1, y: 0.3, z: 0.03 },
-        dimensions: { width: 1.4, height: 1, depth: 0.06 },
-      },
-    ],
-  };
-  const layer = createRoomFieldLayer(result, 'airflow', roomScene);
-  for (let frame = 1; frame <= 150; frame += 1) layer.userData.animate(1 + frame / 30);
-
-  assert.ok(layer.userData.exteriorTracerVolumeM3 > 0);
-});
-
-test('an open exchange window transports the solved airflow tracer outside the room', () => {
-  const sample = createRoomScene();
-  const originalLayout = {
-    fan: [{ x: 0.82, y: 0, z: 3.15 }, 180],
-    sofa: [{ x: 4.18, y: 0, z: 3.04 }, 0],
-    desk: [{ x: 4.18, y: 0, z: 0.86 }, 0],
-    table: [{ x: 2.62, y: 0, z: 2.12 }, 0],
-    lamp: [{ x: 1.2, y: 0, z: 0.9 }, 0],
-    heater: [{ x: 0.55, y: 0, z: 1.9 }, 0],
-  };
-  const objects = sample.objects
-    .filter((object) => Object.hasOwn(originalLayout, object.model))
-    .map((object) => ({
-      ...object,
-      position: originalLayout[object.model][0],
-      rotation: { x: 0, y: originalLayout[object.model][1], z: 0 },
-    }));
-  const base = { ...sample, objects, nextWindowId: 1, nextDoorId: 1 };
-  const placed = addWindow(base, 'front');
-  const window = {
-    ...placed.object,
-    open: true,
-    position: { ...placed.object.position, x: 0.8, y: 0.4 },
-  };
-  const scene = {
-    ...placed.scene,
-    objects: placed.scene.objects.map((object) => object.id === window.id ? window : object),
-  };
-  const result = simulateRoomFields(scene, { steps: 120 });
-  let inflowFaces = 0;
-  let outflowFaces = 0;
-  for (let index = 0; index < result.fields.windowFlow.length; index += 1) {
-    if (!(result.fields.outlets[index] & 16)) continue;
-    if (result.fields.windowFlow[index] > 0) inflowFaces += 1;
-    if (result.fields.windowFlow[index] < 0) outflowFaces += 1;
-  }
-
-  const layer = createRoomFieldLayer(result, 'airflow', scene, { displayStyle: 'gas' });
-  for (let frame = 1; frame <= 45; frame += 1) layer.userData.animate(frame / 30);
-
-  assert.ok(inflowFaces > 0, 'the exchange window should admit outdoor air');
-  assert.ok(outflowFaces > 0, 'the exchange window should exhaust room air');
-  assert.ok(result.stats.boundaryFlowImbalancePercent < 1,
-    `exchange flow imbalance was ${result.stats.boundaryFlowImbalancePercent}%`);
-  assert.ok(layer.userData.exteriorTracerVolumeM3 > 0,
-    'the rendered tracer should cross the open window');
-
-  for (const flowRate of [0.8, 1.2]) {
-    const highFlowWindow = { ...window, flowRate };
-    const highFlowScene = {
-      ...scene,
-      objects: scene.objects.map((object) => object.id === window.id ? highFlowWindow : object),
-    };
-    const highFlow = simulateRoomFields(highFlowScene, { steps: 120 });
-    assert.ok(highFlow.stats.boundaryFlowImbalancePercent < 1,
-      `${flowRate} m/s exchange imbalance was ${highFlow.stats.boundaryFlowImbalancePercent}%`);
-  }
+test('airflow defaults to a speed volume with no animation work', () => {
+  const scene = createRoomScene();
+  const result = simulateRoomFields(scene, { steps: 2 });
+  const layer = createRoomFieldLayer(result, 'airflow', scene);
+  assert.equal(layer.userData.airflowVisualization, 'volume');
+  assert.ok(volumeFor(layer));
+  assert.equal(layer.userData.animate, undefined);
 });
 
 test('uniform temperature produces a uniform infrared surface map', () => {

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import {
-  createAirflowLayers,
   createFieldVolume,
   createScalarSliceLayer,
   createTemperatureObjectLayer,
@@ -40,7 +39,7 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
   layer.name = `room-field-${mode}`;
   layer.userData.fieldMode = mode;
   layer.userData.volumeVoxelCount = 0;
-  const displayStyle = options.displayStyle ?? (options.volumetric ? 'volume' : mode === 'airflow' ? 'gas' : mode === 'wifi' ? 'slice' : 'surfaces');
+  const displayStyle = options.displayStyle ?? (options.volumetric ? 'volume' : ['airflow', 'wifi'].includes(mode) ? 'volume' : 'surfaces');
   if (mode === 'temperature') {
     if (displayStyle === 'volume') {
       const volume = createFieldVolume(result, mode);
@@ -51,7 +50,7 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
     } else {
       layer.add(createTemperatureSurfaceLayer(result, roomScene));
     }
-    layer.add(createTemperatureObjectLayer(result, options.objectGroups));
+    if (displayStyle === 'surfaces') layer.add(createTemperatureObjectLayer(result, options.objectGroups));
   } else if (mode === 'airflow') {
     if (displayStyle === 'volume') {
       const volume = createFieldVolume(result, mode);
@@ -65,23 +64,6 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
       layer.userData.airflowVisualization = 'speed-slice';
       return layer;
     }
-    const airflow = createAirflowLayers(result, roomScene);
-    layer.add(airflow.volume);
-    layer.userData.volumeVoxelCount = airflow.gasVoxelCount;
-    layer.userData.gasVoxelCount = airflow.gasVoxelCount;
-    layer.userData.gasSourceCounts = airflow.sourceCounts;
-    layer.userData.airflowVisualization = 'advected-density';
-    layer.userData.maxDensity = airflow.volume.userData.maxDensity ?? 0;
-    layer.userData.occupiedVoxels = airflow.volume.userData.occupiedVoxels ?? 0;
-    layer.userData.tracerVolumeM3 = airflow.volume.userData.tracerVolumeM3 ?? 0;
-    layer.userData.exteriorTracerVolumeM3 = airflow.volume.userData.exteriorTracerVolumeM3 ?? 0;
-    layer.userData.animate = (time) => {
-      airflow.update(time);
-      layer.userData.maxDensity = airflow.volume.userData.maxDensity ?? 0;
-      layer.userData.occupiedVoxels = airflow.volume.userData.occupiedVoxels ?? 0;
-      layer.userData.tracerVolumeM3 = airflow.volume.userData.tracerVolumeM3 ?? 0;
-      layer.userData.exteriorTracerVolumeM3 = airflow.volume.userData.exteriorTracerVolumeM3 ?? 0;
-    };
   } else if (mode === 'wifi') {
     if (displayStyle === 'volume') {
       const volume = createFieldVolume(result, mode);

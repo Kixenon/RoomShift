@@ -139,7 +139,7 @@ export function sunPatches(scene, { direction, daylight }) {
   const floor = { minX: 0, maxX: scene.room.width, minY: 0, maxY: scene.room.depth };
 
   for (const object of scene.objects) {
-    if (!isOpeningObject(object) || object.open !== true) continue;
+    if (!isOpeningObject(object) || (object.model !== 'window' && object.open !== true)) continue;
     const normal = wallInwardNormal(object.wall);
     // The sun must be shining onto the outward face of this wall.
     const incidence = -(direction.x * normal.x + direction.z * normal.z);
@@ -200,7 +200,7 @@ export function describeDaylight({
   }
 
   const sun = solarPosition({ date, timeMinutes, ...rest });
-  const direction = sunDirection(sun.altitude, sun.azimuth);
+  const direction = sunDirection(sun.altitude, sun.azimuth - (scene.room.headingDegrees ?? 0));
 
   // Daylight ramps in around the horizon rather than switching at it, so dawn
   // and dusk pass through a warm low-sun phase.

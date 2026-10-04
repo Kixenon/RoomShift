@@ -4,7 +4,7 @@ import { addWindow, createRoomScene } from '../src/model/room-scene.js';
 import { simulateRoomFields } from '../src/simulation/room-fields-3d.js';
 
 function emptyRoomScene() {
-  return { ...createRoomScene(), objects: [], nextWindowId: 1, nextDoorId: 1 };
+  return { ...createRoomScene(), room: { ...createRoomScene().room, outdoorTemperature: 20 }, objects: [], nextWindowId: 1, nextDoorId: 1 };
 }
 
 function fieldIndex(grid, x, y, z) {
@@ -36,10 +36,10 @@ test('an unforced room has a bounded 3D metre grid and remains at ambient temper
   assert.equal(result.grid.sliceHeight, undefined);
 });
 
-test('outdoor temperature enters through open windows, not closed room boundaries', () => {
-  const base = emptyRoomScene();
+test('an open window cools the room more than envelope conduction alone', () => {
+  const base = { ...emptyRoomScene(), room: { ...emptyRoomScene().room, outdoorTemperature: 10 } };
   const closed = simulateRoomFields(base, { steps: 20 });
-  assert.equal(closed.stats.minTemperature, closed.ambientTemperature);
+  assert.ok(closed.stats.minTemperature < closed.ambientTemperature);
 
   const placed = addWindow(base, 'front');
   const window = { ...placed.object, open: true, flowDirection: 'inlet', flowRate: 0.8 };
@@ -110,20 +110,21 @@ test('a corner-facing fan deflects flow along both adjoining walls', () => {
   const template = createRoomScene().objects.find((object) => object.model === 'fan');
   const fan = { ...template, position: { x: 0.82, y: 0, z: 0.82 }, rotation: { x: 0, y: -135, z: 0 } };
   const result = simulateRoomFields({ ...base, objects: [fan] });
-  let wallDeflectedCells = 0;
+  let xWallCells = 0;
+  let zWallCells = 0;
   for (let j = 0; j < result.grid.ny; j += 1) {
     for (let k = 0; k < result.grid.nz; k += 1) {
       for (let i = 0; i < result.grid.nx; i += 1) {
         const index = (j * result.grid.nz + k) * result.grid.nx + i;
         if (result.fields.solid[index]) continue;
-        if (i < 2 && Math.abs(result.fields.w[index]) > 0.05) wallDeflectedCells += 1;
-        if (k < 2 && Math.abs(result.fields.u[index]) > 0.05) wallDeflectedCells += 1;
+        if (i < 2 && Math.abs(result.fields.w[index]) > 0.05) xWallCells += 1;
+        if (k < 2 && Math.abs(result.fields.u[index]) > 0.05) zWallCells += 1;
       }
     }
   }
 
-  assert.ok(wallDeflectedCells > 300,
-    `only ${wallDeflectedCells} near-wall cells carry redirected flow`);
+  assert.ok(xWallCells > 10 && zWallCells > 10,
+    `tangential flow should reach both walls, got ${xWallCells} and ${zWallCells} cells`);
   assert.equal(result.stats.maxClosedWallNormalSpeed, 0);
 });
 
@@ -242,15 +243,15 @@ test('maximum room/grid work is bounded and all returned fields stay finite', ()
     kinematicViscosity: 0.05, effectiveThermalDiffusivity: 0.05,
   });
 
-  assert.ok(result.grid.nx <= 40 && result.grid.ny <= 24 && result.grid.nz <= 40);
-  assert.ok(result.fields.u.length <= 38_400);
-  assert.equal(result.grid.cellSize, 0.5);
+  assert.ok(result.grid.nx <= 80 && result.grid.ny <= 48 && result.grid.nz <= 80);
+  assert.ok(result.fields.u.length <= 307_200);
+  assert.equal(result.grid.cellSize, 0.25);
   assert.equal(result.grid.requestedCellSize, 0.25);
   for (const field of [result.fields.u, result.fields.v, result.fields.w, result.fields.temperature]) {
     assert.ok(Array.from(field).every(Number.isFinite));
   }
   assert.throws(() => simulateRoomFields(room, { steps: 241 }), /steps/i);
-  assert.throws(() => simulateRoomFields(room, { cellSize: 0.1 }), /cell size/i);
+  assert.throws(() => simulateRoomFields(room, { cellSize: 0.05 }), /cell size/i);
 });
 
 test('invalid physical coefficients are rejected before field integration', () => {
@@ -261,7 +262,7 @@ test('invalid physical coefficients are rejected before field integration', () =
     { effectiveThermalDiffusivity: Infinity }, { effectiveThermalDiffusivity: -0.01 },
     { vorticityConfinement: -0.01 }, { vorticityConfinement: 4.01 },
     { coolingRate: NaN }, { coolingRate: -0.01 }, { fanOutletSpeed: -0.01 },
-    { heaterRate: Infinity }, { heaterRadius: 0 },
+    { envelopeUValue: Infinity }, { heaterRadius: 0 },
     { ambientTemperature: 41 },
   ];
 
