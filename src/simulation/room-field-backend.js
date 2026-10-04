@@ -1,9 +1,11 @@
 import { simulateRoomFieldsAsync } from './room-fields-3d.js';
 import { simulateRoomFieldsWebGpu } from './room-fields-webgpu.js';
 import { estimateRoomLightAsync } from './room-light.js';
+import { estimateWifiCoverage } from './wifi-coverage.js';
 
 export async function solveRoomFields(scene, mode, { isCancelled = () => false } = {}) {
   if (mode === 'light') return estimateRoomLightAsync(scene, {}, { isCancelled });
+  if (mode === 'wifi') return estimateWifiCoverage(scene, { isCancelled });
   if (mode !== 'airflow' && mode !== 'temperature') {
     throw new RangeError(`Unsupported room field mode: ${mode}`);
   }

@@ -49,6 +49,7 @@ const fieldControls = {
   airflow: $('#show-airflow'),
   temperature: $('#show-temperature'),
   light: $('#show-light'),
+  wifi: $('#show-wifi'),
   display: $('#field-display-control'),
   displayButton: $('#field-display-button'),
   displayLabel: $('#field-display-label'),
@@ -127,13 +128,15 @@ function renderFieldState({ mode, loading, result, error }) {
     airflow: fieldControls.airflow,
     temperature: fieldControls.temperature,
     light: fieldControls.light,
+    wifi: fieldControls.wifi,
   })) setPressed(button, mode === name);
   const availableStyles = {
     airflow: ['gas', 'volume', 'slice'],
     temperature: ['surfaces', 'volume', 'slice'],
     light: ['preview', 'map'],
+    wifi: ['slice', 'volume'],
   }[mode] ?? [];
-  const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
+  const styleLabels = { gas: 'Gas', volume: mode === 'airflow' ? 'Speed volume' : mode === 'wifi' ? '3D volume' : 'Volume', slice: 'Slice', surfaces: 'Surfaces', preview: 'Preview', map: 'Irradiance' };
   fieldControls.display.hidden = !mode;
   if (!mode) fieldControls.display.open = false;
   fieldControls.displayButton.setAttribute('aria-label', `Choose ${mode ?? 'field'} view`);
@@ -151,7 +154,7 @@ function renderFieldState({ mode, loading, result, error }) {
     option.textContent = styleLabels[style];
     return option;
   }));
-  const showSlice = (mode === 'airflow' || mode === 'temperature') && displayStyle === 'slice';
+  const showSlice = ['airflow', 'temperature', 'wifi'].includes(mode) && displayStyle === 'slice';
   fieldControls.sliceControl.hidden = !showSlice;
   if (fieldController?.scene) {
     fieldControls.sliceHeight.max = String(fieldController.scene.room.height);
@@ -198,6 +201,13 @@ function renderFieldState({ mode, loading, result, error }) {
       title: 'Estimated relative illumination',
       minimum: `${result.ambientLevel.toFixed(2)} normalized`,
       maximum: `${result.stats.maxLevel.toFixed(2)} normalized`,
+    };
+  } else if (mode === 'wifi') {
+    const heightLabel = displayStyle === 'slice' ? ` · ${fieldController.sliceHeight.toFixed(2)} m slice` : ' · 3D volume';
+    legend = {
+      title: result.stats.routerCount ? `Wi-Fi coverage${heightLabel} · ${result.stats.routerCount} router${result.stats.routerCount === 1 ? '' : 's'}` : 'Add a router to view coverage',
+      minimum: 'Weak · −75 dBm',
+      maximum: 'Strong · −35 dBm',
     };
   } else {
     legend = {
@@ -286,7 +296,7 @@ function renderProperties() {
   const isOpening = isOpeningObject(object);
   const isDevice = DEVICE_MODELS.includes(object?.model);
   const openingLabel = object?.model === 'door' ? 'Door' : 'Window';
-  const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative' };
+  const sourceLabels = { fan: 'Fan strength · relative', heater: 'Heater output · relative', lamp: 'Lamp brightness · relative', router: 'Transmit power · relative' };
   const sourceLabel = sourceLabels[object?.model];
   const intensity = object?.intensity ?? 1;
   $('#delete-object').disabled = !object;
@@ -451,6 +461,7 @@ $('#add-door').addEventListener('click', addRoomDoor);
 fieldControls.airflow.addEventListener('click', () => toggleFieldMode('airflow'));
 fieldControls.temperature.addEventListener('click', () => toggleFieldMode('temperature'));
 fieldControls.light.addEventListener('click', () => toggleFieldMode('light'));
+fieldControls.wifi.addEventListener('click', () => toggleFieldMode('wifi'));
 fieldControls.displayMenu.addEventListener('click', (event) => {
   const option = event.target.closest('[data-display-style]');
   if (!option) return;

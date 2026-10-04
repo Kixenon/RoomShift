@@ -7,7 +7,7 @@ export { rotationMatrixXYZ } from './room-transform.js';
 export const DEFAULT_ROOM = Object.freeze({ width: 5.2, depth: 4, height: 2.7, outdoorTemperature: 10 });
 
 export const DEFAULT_BOX_DIMENSIONS = Object.freeze({ width: 1, height: 1, depth: 1 });
-export const DEVICE_MODELS = Object.freeze(['fan', 'heater', 'lamp']);
+export const DEVICE_MODELS = Object.freeze(['fan', 'heater', 'lamp', 'router']);
 export const SOURCE_INTENSITY_LIMITS = Object.freeze({ min: 0, max: 2 });
 
 const preset = (label, icon, dimensions) => Object.freeze({
@@ -25,17 +25,18 @@ export const MODEL_PRESETS = Object.freeze({
   table: preset('Table', '▱', { width: 0.92, height: 0.38, depth: 0.62 }),
   lamp: preset('Lamp', '◉', { width: 0.32, height: 1.55, depth: 0.32 }),
   heater: preset('Heater', '▥', { width: 0.9, height: 0.56, depth: 0.18 }),
+  router: preset('Router', '⌁', { width: 0.28, height: 0.12, depth: 0.22 }),
   window: preset('Window', '▣', { width: 1.4, height: 1, depth: 0.06 }),
   door: preset('Door', '▯', { width: 0.9, height: 2.1, depth: 0.06 }),
 });
 
 const INITIAL_OBJECTS = Object.freeze([
-  { id: 'fan-1', primitive: 'device', model: 'fan', name: 'Pedestal fan', enabled: true, intensity: 1, position: { x: 0.82, y: 0, z: 3.15 }, rotation: { x: 0, y: 180, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
-  { id: 'sofa-2', primitive: 'box', model: 'sofa', name: 'Sofa', position: { x: 4.18, y: 0, z: 3.04 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.55, height: 0.78, depth: 0.84 } },
-  { id: 'desk-3', primitive: 'box', model: 'desk', name: 'Desk', position: { x: 4.18, y: 0, z: 0.86 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 1.18, height: 0.74, depth: 0.62 } },
-  { id: 'table-4', primitive: 'box', model: 'table', name: 'Coffee table', position: { x: 2.62, y: 0, z: 2.12 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.92, height: 0.38, depth: 0.62 } },
-  { id: 'lamp-1', primitive: 'device', model: 'lamp', name: 'Floor lamp', enabled: true, intensity: 1, position: { x: 1.2, y: 0, z: 0.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
-  { id: 'heater-1', primitive: 'device', model: 'heater', name: 'Panel heater', enabled: true, intensity: 1, position: { x: 0.55, y: 0, z: 1.9 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
+  { id: 'fan-1', primitive: 'device', model: 'fan', name: 'Pedestal fan', enabled: true, intensity: 1, position: { x: 3.6, y: 0, z: 3.2 }, rotation: { x: 0, y: -110, z: 0 }, dimensions: { width: 0.42, height: 1.35, depth: 0.42 } },
+  { id: 'sofa-2', primitive: 'box', model: 'sofa', name: 'Sofa', position: { x: 0.58, y: 0, z: 2 }, rotation: { x: 0, y: 90, z: 0 }, dimensions: { width: 1.55, height: 0.78, depth: 0.84 } },
+  { id: 'desk-3', primitive: 'box', model: 'desk', name: 'Desk', position: { x: 4.83, y: 0, z: 2 }, rotation: { x: 0, y: -90, z: 0 }, dimensions: { width: 1.18, height: 0.74, depth: 0.62 } },
+  { id: 'table-4', primitive: 'box', model: 'table', name: 'Coffee table', position: { x: 1.75, y: 0, z: 2 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.92, height: 0.38, depth: 0.62 } },
+  { id: 'lamp-1', primitive: 'device', model: 'lamp', name: 'Floor lamp', enabled: true, intensity: 1, position: { x: 1.35, y: 0, z: 3.15 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.32, height: 1.55, depth: 0.32 } },
+  { id: 'heater-1', primitive: 'device', model: 'heater', name: 'Panel heater', enabled: true, intensity: 1, position: { x: 2.6, y: 0.05, z: 0.13 }, rotation: { x: 0, y: 0, z: 0 }, dimensions: { width: 0.9, height: 0.56, depth: 0.18 } },
 ]);
 
 export function createRoomScene() {

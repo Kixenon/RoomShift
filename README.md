@@ -28,7 +28,7 @@ They default to Playwright's bundled Chromium. Set `ROOMSHIFT_BROWSER` to a brow
 ## Editor
 
 - Edit room width, depth, and height in meters.
-- Add objects, devices, windows, or doors from the asset rail. Devices have their own type and an on/off control; furniture models can be changed in the inspector.
+- Add objects, devices, windows, or doors from the asset rail. Devices have their own type and an on/off control; furniture models can be changed in the inspector. Add a router and choose **Wi-Fi coverage** to inspect estimated signal at a chosen height or through the 3D room.
 - Hover near an object to highlight it; click the object or its list item to select it. Drag the gizmo or edit position, size, and X/Y/Z rotation in the inspector.
 - Add a window or door opening, then drag it toward a wall; it snaps to the nearest wall. Openings can exchange air, act as an inlet, or act as an outlet. Open apertures cut through the wall and admit direct sunlight; closed windows and doors block it. Device and opening strengths are adjustable, and devices can be switched off in their properties. Drag the canvas to orbit the 3D room; use the bottom-right camera controls to toggle projection or choose a top-down or angled view. Orbiting remains enabled after choosing the top-down view.
 - Undo with **⌘Z / Ctrl+Z**; redo with **⌘⇧Z / Ctrl+Y**. Use the **i** button in the viewport toolbar for the full shortcut list. A gizmo drag is one undo step.
@@ -53,7 +53,8 @@ The editor uses Three.js for the room and visualizations, a Web Worker for field
 - Air's **Gas** view renders a continuously advected 3D passive-tracer volume over the final solved velocity field. The dye moves, but airflow velocity is not currently advanced during playback; it can settle into a stable plume. **Speed volume** and **Slice** show the solved speed field directly.
 - Heat advects and diffuses air temperature, relaxes it toward a 20 °C ambient default, applies heater sources, and couples temperature to buoyancy. Outdoor temperature enters only through open-window inflow. The infrared view maps nearby air temperature onto room and object surfaces; it does not calculate material-surface temperature. Heater intensity is an estimated temperature source, **not watts**.
 - **Light** is a real-time monochrome render with point lights at lamp bulbs and cast shadows. It is not lux-calibrated and does not model indirect light bounce, glass transmission, or measured lamp output.
-- An open window can bias flow toward intake or exhaust, or permit vertically balanced exchange. Fan speeds, thermal sources, and opening flow rates are adjustable estimates rather than calibrated device or opening models. The solver omits a calibrated turbulence closure, no-slip wall treatment, wall/material heat capacity, radiation, HVAC, and reference-case calibration. Do not use its output to claim real-world comfort, temperature, ventilation, lighting, or safety performance.
+- **Wi-Fi coverage** estimates 2.4 GHz signal from router position and relative transmit strength, with coarse distance falloff and furniture attenuation. It is a placement preview, not an RF survey: wall materials, antenna patterns, channel interference, and multipath are not modeled.
+- An open window can bias flow toward intake or exhaust, or permit vertically balanced exchange. Fan speeds, thermal sources, and opening flow rates are adjustable estimates rather than calibrated device or opening models. The solver omits a calibrated turbulence closure, no-slip wall treatment, wall/material heat capacity, radiation, HVAC, and reference-case calibration. Do not use its output to claim real-world comfort, temperature, ventilation, lighting, Wi-Fi coverage, or safety performance.
 
 The scene model is solver-independent (`src/model/room-scene.js`); rendering and field solving consume the same scene without mixing simulation state into object geometry. Scene persistence and schema migration are not implemented.
 
@@ -66,6 +67,7 @@ The scene model is solver-independent (`src/model/room-scene.js`); rendering and
 - `src/simulation/room-fields-3d.js` — bounded CPU preview and shared room geometry checks.
 - `src/simulation/sun-position.js` — solar altitude, azimuth, sunrise and sunset for the site.
 - `src/simulation/daylight.js` — maps a clock time and the scene to sun, sky, lamp, exposure and sun-patch state. Pure, with no three.js.
+- `src/simulation/wifi-coverage.js` — estimates router signal strength through the room for the Wi-Fi coverage view.
 - `src/simulation/room-light.js` — retained scalar light estimator; the editor's Light mode uses rendered shadows instead.
 - `src/simulation/room-field-worker.js` and `src/simulation/room-field-controller.js` — background solving and coalesced live updates.
 - `src/scene/room-field-layer-3d.js` and `src/scene/room-field-renderer.js` — 3D tracer advection, infrared surface mapping, and volumetric field rendering.

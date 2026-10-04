@@ -112,6 +112,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .field-gradient { height: 7px; border-radius: 5px; background: linear-gradient(90deg, #04061c, #0438f2, #00dcff, #24ee7a, #ffe000, #ff1715); }
 .field-gradient[data-mode="temperature"] { background: linear-gradient(90deg, #101b84 0%, #185bde 18%, #09b8e0 38%, #35d973 58%, #f0df37 76%, #ef6b28 90%, #fff4dd 100%); }
 .field-gradient[data-mode="light"] { background: linear-gradient(90deg, #111, #fff); }
+.field-gradient[data-mode="wifi"] { background: linear-gradient(90deg, #c0392b, #e1b12c 52%, #27ae60); }
 .field-gradient-labels { display: flex; justify-content: space-between; color: #87958e; font-variant-numeric: tabular-nums; }
 
 .inspector { min-width: 0; display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--line); background: #fff; }

@@ -82,7 +82,7 @@ export function validateScene(scene) {
       || object.dimensions.width <= 0 || object.dimensions.height <= 0 || object.dimensions.depth <= 0) {
       throw new TypeError(`Object ${object?.id ?? '(unknown)'} has invalid geometry.`);
     }
-    if (['fan', 'heater', 'lamp'].includes(object.model)
+    if (DEVICE_MODELS.includes(object.model)
       && object.intensity !== undefined
       && (!Number.isFinite(object.intensity) || object.intensity < 0 || object.intensity > 2)) {
       throw new RangeError(`Object ${object.id ?? '(unknown)'} source strength must be between 0 and 2.`);
