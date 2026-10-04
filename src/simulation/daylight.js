@@ -17,7 +17,7 @@ const mix = (a, b, t) => a + (b - a) * t;
 
 export const WALLS = Object.freeze(['back', 'front', 'left', 'right']);
 // Interior fill light. Kept well below the sun so daylight reads as the dominant
-// source and the lamp does not drown out the shafts coming through the windows.
+// source and the lamp does not drown out the daylight coming through the windows.
 export const DEFAULT_LAMP_POWER = 1400;
 // Mid-afternoon opens the preview with clear sun patches; lamp state is controlled
 // independently on each lamp.

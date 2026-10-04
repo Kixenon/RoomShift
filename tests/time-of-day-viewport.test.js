@@ -20,7 +20,6 @@ function harness(overrides = {}) {
     daylightState: null,
     lightingPreview: true,
     sunPatchMeshes: [],
-    sunShaftMeshes: [],
     keyLight: new THREE.DirectionalLight(0xffffff, 1),
     hemisphereLight: new THREE.HemisphereLight(0xffffff, 0xffffff, 1),
     scene,
@@ -33,8 +32,6 @@ function harness(overrides = {}) {
     clearDaylightDataset: RoomViewport.prototype.clearDaylightDataset,
     clearSunPatches: RoomViewport.prototype.clearSunPatches,
     rebuildSunPatches: RoomViewport.prototype.rebuildSunPatches,
-    rebuildSunShafts: RoomViewport.prototype.rebuildSunShafts,
-    clearSunShafts: RoomViewport.prototype.clearSunShafts,
     ...methods,
     ...rest,
   };
@@ -161,10 +158,8 @@ test('changing the time replaces the patches rather than stacking them', () => {
   setClock(viewport, 12 * 60);
 
   assert.equal(viewport.sunPatchMeshes.length, 1, 'exactly one live patch mesh per window');
-  // A sunward window also draws a live shaft, so the root holds one patch and
-  // one shaft. Recomputing the clock must replace them, never append more.
-  assert.equal(viewport.sunShaftMeshes.length, 1, 'exactly one live shaft mesh per window');
-  assert.equal(viewport.sceneRoot.children.length, viewport.sunPatchMeshes.length + viewport.sunShaftMeshes.length);
+  // Recomputing the clock must replace the patch, never append another.
+  assert.equal(viewport.sceneRoot.children.length, 1);
 });
 
 test('a window in shade drops its patch mesh', () => {
