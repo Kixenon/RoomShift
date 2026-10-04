@@ -3,6 +3,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
+import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
+import { objectParts } from '../model/object-parts.js';
+import { isOpeningObject } from '../model/openings.js';
+
+// Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
+// light preview used before there was a time of day, so an unchanged scene looks
+// the same at the times when the lamps are on.
+const LAMP_LIGHT_DISTANCE = 9;
 
 const COLORS = Object.freeze({
   fan: 0x6d9c85,
@@ -11,6 +19,9 @@ const COLORS = Object.freeze({
   table: 0xb69b73,
   lamp: 0x86a88f,
   heater: 0xaab2aa,
+  router: 0x536d83,
+  chair: 0x65756d,
+  airConditioner: 0xe7ebe7,
   metal: 0x75877d,
   shade: 0xe3dfd0,
   windowFrame: 0x68847b,
@@ -53,78 +64,24 @@ function createFan(group, dimensions) {
   cage.position.set(0, headY, headZ + 0.025);
   group.add(cage);
   cylinder(group, headRadius * 0.72, headRadius * 0.72, depth * 0.12, { x: 0, y: headY, z: headZ }, 0xd7e2db, 20).rotation.x = Math.PI / 2;
+  const rotor = new THREE.Group();
+  rotor.name = 'fan-rotor';
+  rotor.position.set(0, headY, headZ + 0.105);
   const bladeRadius = headRadius * 0.57;
   for (let index = 0; index < 3; index += 1) {
     const blade = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), material(COLORS.fan));
     blade.scale.set(headRadius * 0.17, bladeRadius * 0.52, 0.017);
-    blade.position.set(0, headY, headZ + 0.105);
     blade.rotation.z = index * (Math.PI * 2 / 3);
-    group.add(blade);
+    rotor.add(blade);
   }
   const hub = new THREE.Mesh(new THREE.SphereGeometry(headRadius * 0.14, 16, 12), material(0xf4f7f3));
-  hub.position.set(0, headY, headZ + 0.13);
-  group.add(hub);
+  hub.position.z = 0.025;
+  rotor.add(hub);
+  group.add(rotor);
 }
 
-function createSofa(group, dimensions) {
-  const { width: w, height: h, depth: d } = dimensions;
-  box(group, { width: w * 0.92, height: h * 0.53, depth: d * 0.87 }, { x: 0, y: -h * 0.13, z: 0 }, 0x718f79);
-  box(group, { width: w * 0.82, height: h * 0.18, depth: d * 0.77 }, { x: 0, y: -h * 0.04, z: d * 0.02 }, 0x9aaf91);
-  box(group, { width: w * 0.88, height: h * 0.34, depth: d * 0.2 }, { x: 0, y: h * 0.16, z: -d * 0.34 }, 0x799681);
-  for (const side of [-1, 1]) {
-    box(group, { width: w * 0.09, height: h * 0.52, depth: d * 0.85 }, { x: side * w * 0.43, y: -h * 0.1, z: 0 }, 0x688570);
-    box(group, { width: w * 0.19, height: h * 0.11, depth: d * 0.22 }, { x: side * w * 0.21, y: h * 0.1, z: -d * 0.2 }, 0xb7c5a8);
-    cylinder(group, 0.025, 0.025, h * 0.14, { x: side * w * 0.38, y: -h * 0.43, z: d * 0.31 }, 0x786b56, 8);
-  }
-}
-
-function createBed(group, dimensions) {
-  const { width, height, depth } = dimensions;
-  const frameHeight = height * 0.16;
-  const mattressHeight = height * 0.42;
-  const mattressY = -height / 2 + frameHeight + mattressHeight / 2;
-  box(group, { width: width * 0.94, height: frameHeight, depth: depth * 0.94 }, { x: 0, y: -height / 2 + frameHeight / 2, z: 0 }, 0x786b5c);
-  box(group, { width: width * 0.9, height: mattressHeight, depth: depth * 0.9 }, { x: 0, y: mattressY, z: 0 }, 0xe1dfd5);
-  box(group, { width: width * 0.94, height, depth: depth * 0.09 }, { x: 0, y: 0, z: -depth * 0.43 }, 0x8b7e70);
-  for (const side of [-1, 1]) {
-    box(group, { width: width * 0.36, height: mattressHeight * 0.28, depth: depth * 0.14 }, { x: side * width * 0.22, y: mattressY + mattressHeight * 0.38, z: -depth * 0.3 }, 0xf4f2ea);
-  }
-}
-
-function createDesk(group, dimensions) {
-  const { width: w, height: h, depth: d } = dimensions;
-  const topH = Math.min(0.08, h * 0.12);
-  box(group, { width: w, height: topH, depth: d }, { x: 0, y: h / 2 - topH / 2, z: 0 }, COLORS.desk);
-  const legH = h - topH;
-  for (const x of [-1, 1]) {
-    for (const z of [-1, 1]) {
-      box(group, { width: Math.min(0.055, w * 0.07), height: legH, depth: Math.min(0.055, d * 0.1) }, { x: x * (w / 2 - 0.05), y: -topH / 2, z: z * (d / 2 - 0.05) }, 0x8f8069);
-    }
-  }
-  box(group, { width: w * 0.28, height: h * 0.06, depth: d * 0.22 }, { x: -w * 0.08, y: h * 0.17, z: -d * 0.12 }, 0x8a9c91);
-}
-
-function createTable(group, dimensions) {
-  const { width: w, height: h, depth: d } = dimensions;
-  const topH = Math.min(0.075, h * 0.22);
-  box(group, { width: w, height: topH, depth: d }, { x: 0, y: h / 2 - topH / 2, z: 0 }, COLORS.table);
-  const legH = Math.max(0.08, h - topH);
-  for (const x of [-1, 1]) {
-    for (const z of [-1, 1]) {
-      cylinder(group, 0.023, 0.03, legH, { x: x * w * 0.4, y: -topH / 2, z: z * d * 0.37 }, 0x8d7a61, 8);
-    }
-  }
-}
-
-function createLamp(group, dimensions) {
-  const { width, height, depth } = dimensions;
-  const radius = Math.min(width, depth) * 0.45;
-  cylinder(group, radius * 0.78, radius, 0.06, { x: 0, y: -height / 2 + 0.03, z: 0 }, COLORS.metal);
-  cylinder(group, 0.018, 0.023, height * 0.79, { x: 0, y: -height * 0.12, z: 0 }, COLORS.metal, 10);
-  const shade = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.12, width * 0.24, height * 0.17, 20, 1, true), material(COLORS.shade, { side: THREE.DoubleSide }));
-  shade.position.set(0, height * 0.31, 0);
-  group.add(shade);
-  cylinder(group, width * 0.1, width * 0.1, 0.035, { x: 0, y: height * 0.22, z: 0 }, 0xe8d89d, 16);
+function createFurniture(group, dimensions, model) {
+  for (const part of objectParts(model, dimensions)) box(group, part.dimensions, part.position, part.color);
 }
 
 function createHeater(group, dimensions) {
@@ -140,26 +97,103 @@ function createHeater(group, dimensions) {
   }
 }
 
-function createWindow(group, dimensions, open) {
+function createRouter(group, dimensions) {
+  const { width, height, depth } = dimensions;
+  box(group, { width, height: height * 0.68, depth }, { x: 0, y: -height * 0.12, z: 0 }, COLORS.router);
+  for (const x of [-1, 1]) {
+    cylinder(group, 0.009, 0.012, height * 1.55, {
+      x: x * width * 0.32,
+      y: height * 0.96,
+      z: -depth * 0.3,
+    }, 0x3d5266, 10);
+  }
+  for (let index = 0; index < 3; index += 1) {
+    const led = new THREE.Mesh(
+      new THREE.SphereGeometry(0.012, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0x86d9a5, emissive: 0x225e38, roughness: 0.5 }),
+    );
+    led.position.set((index - 1) * width * 0.18, -height * 0.12, depth / 2 + 0.003);
+    group.add(led);
+  }
+}
+
+function createAirConditioner(group, dimensions) {
+  const { width: w, height: h, depth: d } = dimensions;
+  box(group, { width: w, height: h, depth: d }, { x: 0, y: 0, z: 0 }, COLORS.airConditioner);
+  box(group, { width: w * 0.78, height: h * 0.34, depth: 0.012 }, { x: 0, y: -h * 0.2, z: d / 2 + 0.008 }, 0xb8c3bd);
+  for (let index = 0; index < 5; index += 1) {
+    box(group, { width: w * 0.72, height: 0.012, depth: 0.018 }, {
+      x: 0,
+      y: -h * 0.31 + index * h * 0.055,
+      z: d / 2 + 0.02,
+    }, 0x71847a);
+  }
+  const status = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0xa7ddbe, emissive: 0x275c3a, roughness: 0.48 }),
+  );
+  status.position.set(w * 0.39, h * 0.3, d / 2 + 0.01);
+  group.add(status);
+}
+
+function createCeilingFan(group, dimensions) {
+  const { width, height } = dimensions;
+  box(group, { width: width * 0.22, height: 0.035, depth: width * 0.22 }, { x: 0, y: height * 0.43, z: 0 }, 0x77847e);
+  cylinder(group, 0.026, 0.026, height * 0.48, { x: 0, y: height * 0.18, z: 0 }, 0x89968e, 10);
+
+  const rotor = new THREE.Group();
+  rotor.name = 'fan-rotor';
+  rotor.userData.rotationAxis = 'y';
+  rotor.position.y = -height * 0.04;
+  cylinder(rotor, width * 0.11, width * 0.15, height * 0.25, { x: 0, y: 0, z: 0 }, 0x738178);
+  for (let index = 0; index < 4; index += 1) {
+    const angle = index * Math.PI / 2;
+    const blade = box(rotor, { width: width * 0.42, height: 0.025, depth: width * 0.12 }, {
+      x: Math.cos(angle) * width * 0.28,
+      y: 0.015,
+      z: -Math.sin(angle) * width * 0.28,
+    }, COLORS.fan);
+    blade.rotation.y = angle;
+  }
+  const diffuser = new THREE.Mesh(
+    new THREE.SphereGeometry(width * 0.13, 16, 10),
+    material(0xffe4a5, { emissive: 0x75531c, emissiveIntensity: 0.32, roughness: 0.4 }),
+  );
+  diffuser.scale.y = 0.48;
+  diffuser.position.y = -height * 0.24;
+  rotor.add(diffuser);
+  group.add(rotor);
+}
+
+function createOpening(group, dimensions, open, model) {
   const { width, height, depth } = dimensions;
   const frame = 0.045;
   const rail = (size, position) => box(group, size, position, COLORS.windowFrame);
   rail({ width: frame, height, depth }, { x: -width / 2 + frame / 2, y: 0, z: 0 });
   rail({ width: frame, height, depth }, { x: width / 2 - frame / 2, y: 0, z: 0 });
-  rail({ width, height: frame, depth }, { x: 0, y: -height / 2 + frame / 2, z: 0 });
   rail({ width, height: frame, depth }, { x: 0, y: height / 2 - frame / 2, z: 0 });
-  rail({ width: frame * 0.55, height: height - frame * 2, depth }, { x: 0, y: 0, z: 0 });
+  if (model === 'window') {
+    rail({ width, height: frame, depth }, { x: 0, y: -height / 2 + frame / 2, z: 0 });
+    rail({ width: frame * 0.55, height: height - frame * 2, depth }, { x: 0, y: 0, z: 0 });
+  }
   if (!open) {
-    box(group, { width: width - frame * 2, height: height - frame * 2, depth: 0.012 }, { x: 0, y: 0, z: 0 }, COLORS.windowGlass, {
-      transparent: true,
-      opacity: 0.34,
-      roughness: 0.18,
-      depthWrite: false,
-    }).castShadow = false;
+    if (model === 'door') {
+      box(group, { width: width - frame * 2, height: height - frame, depth: depth * 0.65 }, { x: 0, y: -frame / 2, z: 0 }, 0x9a795c);
+      const handle = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), material(0xc5a86e, { metalness: 0.55, roughness: 0.34 }));
+      handle.position.set(width * 0.34, -0.02, depth * 0.4);
+      group.add(handle);
+    } else {
+      box(group, { width: width - frame * 2, height: height - frame * 2, depth: 0.012 }, { x: 0, y: 0, z: 0 }, COLORS.windowGlass, {
+        transparent: true,
+        opacity: 0.34,
+        roughness: 0.18,
+        depthWrite: false,
+      }).castShadow = false;
+    }
   }
 }
 
-const BUILDERS = Object.freeze({ fan: createFan, sofa: createSofa, bed: createBed, desk: createDesk, table: createTable, lamp: createLamp, heater: createHeater });
+const BUILDERS = Object.freeze({ fan: createFan, 'ceiling-fan': createCeilingFan, 'air-conditioner': createAirConditioner, router: createRouter, chair: (group, dimensions) => createFurniture(group, dimensions, 'chair'), heater: createHeater, ...Object.fromEntries(['sofa', 'bed', 'desk', 'table', 'lamp'].map((model) => [model, (group, dimensions) => createFurniture(group, dimensions, model)])) });
 
 function disposeTree(root) {
   root.traverse((child) => {
@@ -181,7 +215,7 @@ function createWallGeometry(width, height, windows, wall, room) {
   shape.lineTo(width / 2, height);
   shape.lineTo(-width / 2, height);
   shape.closePath();
-  for (const window of windows.filter((item) => item.wall === wall)) {
+  for (const window of windows.filter((item) => item.wall === wall && (item.open || item.model === 'window'))) {
     const center = wall === 'front'
       ? window.position.x - room.width / 2
       : wall === 'back'
@@ -203,20 +237,37 @@ function createWallGeometry(width, height, windows, wall, room) {
   return new THREE.ShapeGeometry(shape);
 }
 
+const wallLayouts = (room) => [
+  { side: 'front', span: room.width, position: [0, 0, -room.depth / 2], rotation: [0, 0, 0] },
+  { side: 'back', span: room.width, position: [0, 0, room.depth / 2], rotation: [0, Math.PI, 0] },
+  { side: 'left', span: room.depth, position: [-room.width / 2, 0, 0], rotation: [0, Math.PI / 2, 0] },
+  { side: 'right', span: room.depth, position: [room.width / 2, 0, 0], rotation: [0, -Math.PI / 2, 0] },
+];
+
 export class RoomViewport {
-  constructor(container, { onSelect = () => {}, onTransform = () => {}, onDragChange = () => {} } = {}) {
+  constructor(container, {
+    onSelect = () => {},
+    onTransform = () => {},
+    onDragChange = () => {},
+    onPlacementError = () => {},
+    onCameraViewChange = () => {},
+  } = {}) {
     this.container = container;
     this.onSelect = onSelect;
     this.onTransform = onTransform;
     this.onDragChange = onDragChange;
+    this.onCameraViewChange = onCameraViewChange;
+    this.onPlacementError = onPlacementError;
     this.roomScene = null;
     this.selectedId = null;
     this.groups = new Map();
+    this.fanRotors = new Map();
     this.fieldLayer = null;
     this.lightingPreview = false;
     this.lightingLights = [];
+    this.timeMinutes = DEFAULT_TIME_MINUTES;
+    this.daylightState = null;
     this.pointerStart = null;
-    this.isTopView = false;
     this.projection = 'perspective';
     this.orthoFrustumHeight = 8;
     this.transformMode = 'translate';
@@ -237,7 +288,7 @@ export class RoomViewport {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.domElement.id = 'room-canvas';
     this.renderer.domElement.setAttribute('aria-label', 'Three-dimensional room. Click an object to select it.');
     this.renderer.domElement.dataset.projection = this.projection;
@@ -245,8 +296,12 @@ export class RoomViewport {
 
     this.hemisphereLight = new THREE.HemisphereLight(0xeaf3ed, 0x97a38f, 2.1);
     this.keyLight = new THREE.DirectionalLight(0xfff7e9, 2.6);
+    this.keyLight.shadow.mapSize.set(2048, 2048);
+    this.keyLight.shadow.camera.near = 0.1;
+    this.keyLight.shadow.camera.far = 50;
+    this.keyLight.shadow.bias = -0.0002;
     this.keyLight.position.set(-4, 8, 6);
-    this.scene.add(this.hemisphereLight, this.keyLight);
+    this.scene.add(this.hemisphereLight, this.keyLight, this.keyLight.target);
     this.setupControls(this.camera, new THREE.Vector3(0, 1.1, 0));
 
     this.selectionBox = null;
@@ -298,8 +353,12 @@ export class RoomViewport {
     this.orbit.minDistance = 2.5;
     this.orbit.maxDistance = 40;
     this.orbit.maxPolarAngle = Math.PI * 0.48;
-    this.orbit.enableRotate = !this.isTopView;
-    this.orbit.enablePan = !this.isTopView;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    this.orbit.addEventListener('change', () => {
+      const direction = this.camera.position.clone().sub(this.orbit.target).normalize();
+      this.onCameraViewChange(direction.y > 0.98 ? 'top' : '3d');
+    });
     this.orbit.update();
 
     this.transform = new TransformControls(this.camera, this.renderer.domElement);
@@ -322,10 +381,11 @@ export class RoomViewport {
     const up = this.camera.up.clone();
     if (projection === 'orthographic') {
       const distance = position.distanceTo(target);
-      this.orthoFrustumHeight = this.isTopView
-        ? Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.3
-        : Math.max(2, 2 * distance * Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2)));
+      const direction = position.clone().sub(target).normalize();
       const aspect = Math.max(1, this.container.clientWidth) / Math.max(1, this.container.clientHeight);
+      this.orthoFrustumHeight = direction.y > 0.98
+        ? Math.max(this.roomScene.room.depth, this.roomScene.room.width / aspect) * 1.12
+        : Math.max(2, 2 * distance * Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2)));
       this.orthographicCamera.left = -this.orthoFrustumHeight * aspect / 2;
       this.orthographicCamera.right = this.orthoFrustumHeight * aspect / 2;
       this.orthographicCamera.top = this.orthoFrustumHeight / 2;
@@ -351,46 +411,93 @@ export class RoomViewport {
     const { width, depth, height } = this.roomScene.room;
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(width, depth),
-      material(0xe8e7dc, { roughness: 0.93 }),
+      material(0xcab18f, { roughness: 0.9 }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.012;
     floor.receiveShadow = true;
     this.sceneRoot.add(floor);
 
-    const gridPoints = [];
-    for (let x = -width / 2; x <= width / 2 + 0.001; x += 0.5) {
-      gridPoints.push(new THREE.Vector3(x, 0.006, -depth / 2), new THREE.Vector3(x, 0.006, depth / 2));
+    const floorSeams = [];
+    const plankDepth = 0.24;
+    const plankLength = 1.15;
+    const rows = Math.ceil(depth / plankDepth);
+    for (let row = 1; row < rows; row += 1) {
+      const z = -depth / 2 + row * plankDepth;
+      floorSeams.push(new THREE.Vector3(-width / 2, 0.006, z), new THREE.Vector3(width / 2, 0.006, z));
+      const offset = row % 2 ? plankLength / 2 : 0;
+      for (let x = -width / 2 + offset; x < width / 2; x += plankLength) {
+        if (x <= -width / 2 || x >= width / 2) continue;
+        floorSeams.push(
+          new THREE.Vector3(x, 0.006, z - plankDepth / 2),
+          new THREE.Vector3(x, 0.006, z + plankDepth / 2),
+        );
+      }
     }
-    for (let z = -depth / 2; z <= depth / 2 + 0.001; z += 0.5) {
-      gridPoints.push(new THREE.Vector3(-width / 2, 0.006, z), new THREE.Vector3(width / 2, 0.006, z));
-    }
-    const gridGeometry = new THREE.BufferGeometry().setFromPoints(gridPoints);
-    const grid = new THREE.LineSegments(gridGeometry, new THREE.LineBasicMaterial({ color: 0x9aa99c, transparent: true, opacity: 0.23 }));
-    this.sceneRoot.add(grid);
+    const floorGeometry = new THREE.BufferGeometry().setFromPoints(floorSeams);
+    const floorLines = new THREE.LineSegments(floorGeometry, new THREE.LineBasicMaterial({ color: 0x8c6b49, transparent: true, opacity: 0.2 }));
+    floorLines.name = 'wood-floor-seams';
+    this.sceneRoot.add(floorLines);
 
-    const wallMaterial = material(0xf9fbf6, { transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false });
-    const windows = this.roomScene.objects.filter((object) => object.model === 'window');
-    const walls = [
-      { side: 'front', span: width, position: [0, 0, -depth / 2], rotation: [0, 0, 0] },
-      { side: 'back', span: width, position: [0, 0, depth / 2], rotation: [0, Math.PI, 0] },
-      { side: 'left', span: depth, position: [-width / 2, 0, 0], rotation: [0, Math.PI / 2, 0] },
-      { side: 'right', span: depth, position: [width / 2, 0, 0], rotation: [0, -Math.PI / 2, 0] },
-    ];
-    for (const wall of walls) {
-      const mesh = new THREE.Mesh(createWallGeometry(wall.span, height, windows, wall.side, this.roomScene.room), wallMaterial.clone());
-      mesh.position.set(...wall.position);
-      mesh.rotation.set(...wall.rotation);
-      mesh.castShadow = false;
-      mesh.receiveShadow = true;
-      this.sceneRoot.add(mesh);
+    const trimHeight = 0.065;
+    const trimDepth = 0.025;
+    for (const side of [-1, 1]) {
+      box(this.sceneRoot, { width, height: trimHeight, depth: trimDepth }, {
+        x: 0, y: trimHeight / 2, z: side * (depth / 2 - trimDepth / 2),
+      }, 0xe8dfcf);
+      box(this.sceneRoot, { width: trimDepth, height: trimHeight, depth }, {
+        x: side * (width / 2 - trimDepth / 2), y: trimHeight / 2, z: 0,
+      }, 0xe8dfcf);
     }
+
+    for (const wall of wallLayouts(this.roomScene.room)) this.createWall(wall);
+    const ceiling = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, colorWrite: false, depthWrite: false }),
+    );
+    ceiling.name = 'daylight-ceiling-occluder';
+    ceiling.rotation.x = -Math.PI / 2;
+    ceiling.position.y = height;
+    ceiling.castShadow = true;
+    ceiling.raycast = () => {};
+    this.sceneRoot.add(ceiling);
     const outline = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(width, height, depth)),
       new THREE.LineBasicMaterial({ color: 0x8fa198, transparent: true, opacity: 0.75 }),
     );
     outline.position.y = height / 2;
     this.sceneRoot.add(outline);
+  }
+
+  createWall(wall) {
+    const { width, height, depth } = this.roomScene.room;
+    const span = wall.side === 'left' || wall.side === 'right' ? depth : width;
+    const openings = this.roomScene.objects.filter(isOpeningObject);
+    const mesh = new THREE.Mesh(
+      createWallGeometry(span, height, openings, wall.side, this.roomScene.room),
+      material(0xf4efe5, { transparent: true, opacity: 0.27, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    mesh.name = `room-wall-${wall.side}`;
+    mesh.position.set(...wall.position);
+    mesh.rotation.set(...wall.rotation);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    this.sceneRoot.add(mesh);
+    if (this.lightingPreview) {
+      this.applyLightingToMaterial(mesh.material);
+    }
+  }
+
+  rebuildWalls(sides) {
+    for (const side of new Set(sides)) {
+      const previous = this.sceneRoot.getObjectByName(`room-wall-${side}`);
+      if (previous) {
+        this.sceneRoot.remove(previous);
+        disposeTree(previous);
+      }
+      const wall = wallLayouts(this.roomScene.room).find((item) => item.side === side);
+      if (wall) this.createWall(wall);
+    }
   }
 
   createObjectGroup(object) {
@@ -400,10 +507,20 @@ export class RoomViewport {
     group.userData.primitive = object.primitive;
     group.userData.model = object.model;
     const builder = BUILDERS[object.model];
-    if (object.model === 'window') createWindow(group, object.dimensions, object.open);
+    if (isOpeningObject(object)) createOpening(group, object.dimensions, object.open, object.model);
     else if (builder) builder(group, object.dimensions);
     else box(group, object.dimensions, { x: 0, y: 0, z: 0 }, COLORS.metal);
     group.userData.open = object.open;
+    if (object.model === 'fan' || object.model === 'ceiling-fan') {
+      const rotor = group.getObjectByName('fan-rotor');
+      rotor.userData.enabled = object.enabled !== false && (object.intensity ?? 1) > 0;
+      rotor.traverse((child) => {
+        if (!child.material?.color) return;
+        child.material.userData.enabledColor ??= child.material.color.clone();
+        child.material.color.copy(child.material.userData.enabledColor).multiplyScalar(rotor.userData.enabled ? 1 : 0.34);
+      });
+      this.fanRotors.set(object.id, rotor);
+    }
     this.applyObjectTransform(group, object);
     this.sceneRoot.add(group);
     this.groups.set(object.id, group);
@@ -424,6 +541,7 @@ export class RoomViewport {
   }
 
   setScene(roomScene, selectedId = this.selectedId) {
+    const initialScene = !this.roomScene;
     const showLighting = this.lightingPreview;
     this.clearFields();
     this.clearHover();
@@ -438,34 +556,39 @@ export class RoomViewport {
       disposeTree(child);
     }
     this.groups.clear();
+    this.fanRotors.clear();
     this.roomScene = roomScene;
     this.buildRoom();
     for (const object of roomScene.objects) this.createObjectGroup(object);
     this.select(selectedId);
-    this.fitRoom(false);
-    if (showLighting) this.setLightingPreview(true);
+    if (initialScene) this.fitRoom();
+    if (showLighting) this.setLightingPreview(true, true);
   }
 
-  setFields(result, mode) {
+  setFields(result, mode, options = {}) {
     this.clearFields();
-    if (mode === 'light') {
+    if (mode === 'light' && options.displayStyle !== 'map') {
       this.setLightingPreview(true);
       this.fieldLayer = null;
     } else {
-      this.fieldLayer = createRoomFieldLayer(result, mode);
+      this.setLightingPreview(false);
+      this.fieldLayer = createRoomFieldLayer(result, mode, this.roomScene, { ...options, objectGroups: this.groups });
       this.sceneRoot.add(this.fieldLayer);
     }
     this.renderer.domElement.dataset.fieldMode = mode;
     this.renderer.domElement.dataset.fieldCells = String(result.grid.nx * result.grid.ny * result.grid.nz);
     this.renderer.domElement.dataset.fieldBackend = result.backend ?? 'cpu-preview';
+    this.renderer.domElement.dataset.fieldGpuFallbackReason = result.gpuFallbackReason ?? '';
     this.renderer.domElement.dataset.fieldCellSize = String(result.grid.cellSize ?? Math.max(result.grid.dx, result.grid.dy, result.grid.dz));
+    this.renderer.domElement.dataset.fieldDuration = String(result.durationSeconds ?? 0);
     this.renderer.domElement.dataset.fieldMaxSpeed = String(result.stats.maxSpeed ?? 0);
     this.renderer.domElement.dataset.fieldRmsDivergence = String(result.stats.rmsDivergence ?? 0);
+    this.renderer.domElement.dataset.fieldBoundaryFlowImbalance = String(result.stats.boundaryFlowImbalancePercent ?? 0);
+    this.renderer.domElement.dataset.fieldNetBoundaryFlow = String(result.stats.netBoundaryFlowM3s ?? 0);
+    this.renderer.domElement.dataset.fieldMinTemperature = String(result.stats.minTemperature ?? result.ambientTemperature ?? 0);
+    this.renderer.domElement.dataset.fieldMeanTemperature = String(result.stats.meanTemperature ?? result.ambientTemperature ?? 0);
     this.renderer.domElement.dataset.fieldMaxTemperature = String(result.stats.maxTemperature ?? result.stats.maxLevel ?? 0);
     this.renderer.domElement.dataset.fieldVolumeVoxels = String(this.fieldLayer?.userData.volumeVoxelCount ?? 0);
-    if (mode === 'airflow' && this.fieldLayer) {
-      this.renderer.domElement.dataset.streamlineVertices = String(this.fieldLayer.userData.streamlineVertexCount);
-    }
     this.renderer.domElement.dataset.fieldRevision = String(Number(this.renderer.domElement.dataset.fieldRevision ?? 0) + 1);
   }
 
@@ -476,57 +599,64 @@ export class RoomViewport {
       this.fieldLayer = null;
     }
     this.setLightingPreview(false);
+    delete this.renderer.domElement.dataset.fieldDuration;
     delete this.renderer.domElement.dataset.fieldMode;
     delete this.renderer.domElement.dataset.fieldCells;
     delete this.renderer.domElement.dataset.fieldBackend;
+    delete this.renderer.domElement.dataset.fieldGpuFallbackReason;
     delete this.renderer.domElement.dataset.fieldCellSize;
     delete this.renderer.domElement.dataset.fieldMaxSpeed;
     delete this.renderer.domElement.dataset.fieldRmsDivergence;
+    delete this.renderer.domElement.dataset.fieldBoundaryFlowImbalance;
+    delete this.renderer.domElement.dataset.fieldNetBoundaryFlow;
+    delete this.renderer.domElement.dataset.fieldMinTemperature;
+    delete this.renderer.domElement.dataset.fieldMeanTemperature;
     delete this.renderer.domElement.dataset.fieldMaxTemperature;
     delete this.renderer.domElement.dataset.fieldVolumeVoxels;
-    delete this.renderer.domElement.dataset.streamlineVertices;
+    delete this.renderer.domElement.dataset.gasVoxels;
+    delete this.renderer.domElement.dataset.gasSourceCounts;
+    delete this.renderer.domElement.dataset.gasDensityMax;
+    delete this.renderer.domElement.dataset.gasOccupiedVoxels;
+    delete this.renderer.domElement.dataset.tracerVolumeM3;
+    delete this.renderer.domElement.dataset.exteriorTracerVolumeM3;
   }
 
-  setLightingPreview(enabled) {
-    if (enabled === this.lightingPreview) return;
+  setLightingPreview(enabled, force = false) {
+    if (enabled === this.lightingPreview && !force) return;
     this.lightingPreview = enabled;
-    this.hemisphereLight.intensity = enabled ? 0.34 : 2.1;
-    this.keyLight.intensity = enabled ? 0.08 : 2.6;
-    this.renderer.toneMappingExposure = enabled ? 0.92 : 1.04;
-    this.scene.background.set(enabled ? 0xf3f3f1 : 0xf6f8f6);
     for (const light of this.lightingLights) {
       this.scene.remove(light);
       light.dispose?.();
     }
     this.lightingLights = [];
 
+    if (!enabled) {
+      // Restore the neutral studio lighting the editor shows outside the preview.
+      this.hemisphereLight.intensity = 2.1;
+      this.keyLight.intensity = 2.6;
+      this.keyLight.color.setHex(0xfff7e9);
+      this.keyLight.castShadow = false;
+      this.keyLight.visible = true;
+      this.keyLight.position.set(-4, 8, 6);
+      this.keyLight.target.position.set(0, 0, 0);
+      this.hemisphereLight.color.setHex(0xeaf3ed);
+      this.renderer.toneMappingExposure = 1.04;
+      this.scene.background.set(0xf6f8f6);
+    }
+
     this.sceneRoot.traverse((child) => {
       const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const item of materials) {
-        if (!item?.color) continue;
-        item.userData.roomShiftColor ??= item.color.clone();
-        item.userData.roomShiftOpacity ??= item.opacity;
-        if (enabled) {
-          const { r, g, b } = item.userData.roomShiftColor;
-          const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          item.color.setRGB(luminance, luminance, luminance);
-          if (item.transparent && item.userData.roomShiftOpacity <= 0.25) item.opacity = 0.38;
-        } else {
-          item.color.copy(item.userData.roomShiftColor);
-          item.opacity = item.userData.roomShiftOpacity;
-        }
-        item.needsUpdate = true;
-      }
+      for (const item of materials) this.applyLightingToMaterial(item, enabled);
     });
 
     if (enabled) {
-      for (const object of this.roomScene.objects.filter((item) => item.model === 'lamp')) {
+      for (const object of this.roomScene.objects.filter((item) => ['lamp', 'ceiling-fan'].includes(item.model) && item.enabled !== false)) {
         const group = this.groups.get(object.id);
         if (!group) continue;
-        const source = new THREE.PointLight(0xffffff, 1, 9, 2);
-        source.power = 4500;
+        const source = new THREE.PointLight(0xffffff, 1, LAMP_LIGHT_DISTANCE, 2);
+        source.power = DEFAULT_LAMP_POWER * (object.model === 'lamp' ? object.intensity ?? 1 : 0.75);
         source.castShadow = true;
-        source.position.set(0, object.dimensions.height * 0.22, 0);
+        source.position.set(0, object.model === 'lamp' ? object.dimensions.height * 0.22 : -object.dimensions.height * 0.24, 0);
         group.localToWorld(source.position);
         source.shadow.mapSize.set(1024, 1024);
         source.shadow.camera.near = 0.05;
@@ -539,11 +669,109 @@ export class RoomViewport {
         this.lightingLights.push(source);
       }
     }
-    this.renderer.domElement.dataset.lightingPreview = String(enabled);
     if (enabled) {
+      // Daylight replaces the fixed preview lighting, so derive it from the
+      // current scene and clock rather than hard-coding a look.
+      this.setTimeOfDay({});
       this.renderer.domElement.dataset.fieldMode = 'light';
       this.renderer.domElement.dataset.fieldVolumeVoxels = '0';
+    } else {
+      this.clearDaylightDataset();
     }
+    this.renderer.domElement.dataset.lightingPreview = String(enabled);
+  }
+
+  /**
+   * Recompute the daylight state and push it into the scene. Safe to call at any
+   * time; it is a no-op for rendering while the light preview is off, but the
+   * state is kept so the inspector can show it.
+   */
+  setTimeOfDay({ timeMinutes } = {}) {
+    if (timeMinutes !== undefined) this.timeMinutes = timeMinutes;
+    if (!this.roomScene) return null;
+    this.daylightState = describeDaylight({
+      scene: this.roomScene,
+      timeMinutes: this.timeMinutes,
+      ...(this.roomScene.room.daylightDate ? { date: Object.fromEntries(['year', 'month', 'day'].map((key, index) => [key, Number(this.roomScene.room.daylightDate.split('-')[index])])) } : {}),
+    });
+    if (this.lightingPreview) this.applyDaylight();
+    return this.daylightState;
+  }
+
+  applyDaylight() {
+    const state = this.daylightState;
+    if (!state) return;
+
+    const { colour, intensity, direction } = state.sun;
+    this.keyLight.color.setRGB(colour.r, colour.g, colour.b);
+    this.keyLight.intensity = intensity;
+    // Park the sun far enough out that its shadow camera covers the room.
+    const reach = Math.max(this.roomScene?.room.width ?? 5, this.roomScene?.room.depth ?? 4) + 6;
+    this.keyLight.position.set(direction.x * reach, direction.y * reach, direction.z * reach);
+    const shadowRadius = Math.max(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
+    Object.assign(this.keyLight.shadow.camera, {
+      left: -shadowRadius,
+      right: shadowRadius,
+      top: shadowRadius,
+      bottom: -shadowRadius,
+    });
+    this.keyLight.shadow.camera.updateProjectionMatrix();
+    this.keyLight.target.position.set(0, 0, 0);
+    this.keyLight.target.updateMatrixWorld();
+    this.keyLight.castShadow = direction.y > 0 && state.sun.daylight > 0.02;
+    this.keyLight.visible = direction.y > 0 && state.sun.daylight > 0;
+
+    // Keep only a small neutral fill for readability. Exterior light comes from
+    // the shadow-casting sun, which the room shell blocks except at open apertures.
+    this.hemisphereLight.color.setHex(0xeaf3ed);
+    this.hemisphereLight.intensity = 0.06;
+
+    this.scene.background.setRGB(state.background.r, state.background.g, state.background.b);
+    this.renderer.toneMappingExposure = state.exposure;
+
+    for (const light of this.lightingLights) {
+      const fixture = this.roomScene.objects.find((object) => object.id === light.userData.objectId);
+      const brightness = fixture?.model === 'lamp' ? fixture.intensity ?? 1 : 0.75;
+      light.power = (fixture?.enabled !== false ? DEFAULT_LAMP_POWER * brightness : 0);
+    }
+    this.updateDaylightDataset();
+  }
+
+  /** Publish the current daylight so tests and the DOM can read it. */
+  updateDaylightDataset() {
+    const state = this.daylightState;
+    if (!state || !this.lightingPreview) return;
+    const data = this.renderer.domElement.dataset;
+    data.sunAltitude = String(Number(state.sun.altitude.toFixed(1)));
+    data.sunAzimuth = String(Number(state.sun.azimuth.toFixed(1)));
+    data.clockTime = state.clock;
+    data.lampsOn = String(this.roomScene.objects.some((object) => ['lamp', 'ceiling-fan'].includes(object.model) && object.enabled !== false));
+    data.sunPatches = String(state.patches.length);
+  }
+
+  clearDaylightDataset() {
+    const data = this.renderer.domElement.dataset;
+    delete data.sunAltitude;
+    delete data.sunAzimuth;
+    delete data.clockTime;
+    delete data.lampsOn;
+    delete data.sunPatches;
+  }
+
+  applyLightingToMaterial(item, enabled = this.lightingPreview) {
+    if (!item?.color) return;
+    item.userData.roomShiftColor ??= item.color.clone();
+    item.userData.roomShiftOpacity ??= item.opacity;
+    if (enabled) {
+      const { r, g, b } = item.userData.roomShiftColor;
+      const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      item.color.setRGB(luminance, luminance, luminance);
+      if (item.transparent && item.userData.roomShiftOpacity <= 0.25) item.opacity = 0.38;
+    } else {
+      item.color.copy(item.userData.roomShiftColor);
+      item.opacity = item.userData.roomShiftOpacity;
+    }
+    item.needsUpdate = true;
   }
 
   updateLightingLightPositions() {
@@ -551,7 +779,7 @@ export class RoomViewport {
       const object = this.roomScene.objects.find((item) => item.id === light.userData.objectId);
       const group = this.groups.get(light.userData.objectId);
       if (!object || !group) continue;
-      light.position.set(0, object.dimensions.height * 0.22, 0);
+      light.position.set(0, object.model === 'lamp' ? object.dimensions.height * 0.22 : -object.dimensions.height * 0.24, 0);
       group.localToWorld(light.position);
     }
   }
@@ -584,31 +812,46 @@ export class RoomViewport {
     }
   }
 
-  setView(view) {
-    this.isTopView = view === 'top';
-    this.orbit.enableRotate = !this.isTopView;
-    this.orbit.enablePan = !this.isTopView;
-    this.renderer.domElement.dataset.cameraView = this.isTopView ? 'top' : '3d';
-    this.orbit.target.set(0, this.roomScene.room.height / 2, 0);
+  snapToTop() {
+    const { width, depth, height } = this.roomScene.room;
+    this.orbit.target.set(0, height / 2, 0);
+    this.orbit.enabled = true;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    const aspect = Math.max(1, this.container.clientWidth) / Math.max(1, this.container.clientHeight);
+    const viewHeight = Math.max(depth, width / aspect) * 1.2;
+    const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(this.perspectiveCamera.fov / 2));
+    const perspectiveDistance = Math.max(
+      Math.max(width, depth) * 1.6,
+      viewHeight / (2 * tanHalfFov),
+    );
     if (this.camera.isOrthographicCamera) {
-      this.orthoFrustumHeight = Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.45;
+      this.orthoFrustumHeight = 2 * perspectiveDistance * tanHalfFov;
       this.resize();
     }
-    const distance = Math.max(this.roomScene.room.width, this.roomScene.room.depth) * 1.35;
-    if (this.isTopView) {
-      this.camera.up.set(0, 0, -1);
-      this.camera.position.set(0, this.roomScene.room.height + distance, 0.001);
-    } else {
-      this.camera.up.set(0, 1, 0);
-      this.camera.position.set(distance * 0.88, distance * 0.7, distance * 0.96);
-    }
+    const distance = this.camera.isPerspectiveCamera ? perspectiveDistance : Math.max(width, depth) * 1.35;
+    const tilt = 0.04;
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.set(0, height / 2 + distance * Math.cos(tilt), distance * Math.sin(tilt));
     this.camera.lookAt(this.orbit.target);
     this.orbit.update();
   }
 
-  fitRoom(resetView = true) {
-    if (resetView) this.isTopView = false;
-    this.setView(this.isTopView ? 'top' : '3d');
+  fitRoom() {
+    const { width, depth, height } = this.roomScene.room;
+    this.orbit.target.set(0, height / 2, 0);
+    this.orbit.enabled = true;
+    this.orbit.enableRotate = true;
+    this.orbit.enablePan = true;
+    const distance = Math.max(width, depth) * 1.35;
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.set(distance * 0.88, distance * 0.7, distance * 0.96);
+    if (this.camera.isOrthographicCamera) {
+      this.orthoFrustumHeight = Math.max(width, depth) * 1.45;
+      this.resize();
+    }
+    this.camera.lookAt(this.orbit.target);
+    this.orbit.update();
   }
 
   handlePointerUp(event) {
@@ -690,24 +933,34 @@ export class RoomViewport {
     let updated;
     try {
       updated = this.onTransform(objectId, position, rotation);
-    } catch {
+    } catch (error) {
+      this.onPlacementError(error.message);
+      if (this.selectionBox) this.selectionBox.material.color.set(0xd04e42);
       this.applyObjectTransform(group, source);
       this.selectionBox?.update();
       return;
     }
     if (!updated) {
+      this.onPlacementError('This placement is invalid.');
+      if (this.selectionBox) this.selectionBox.material.color.set(0xd04e42);
       this.applyObjectTransform(group, source);
       this.selectionBox?.update();
       return;
     }
     this.roomScene = updated.scene;
+    if (isOpeningObject(source)) this.rebuildWalls([source.wall, updated.object.wall]);
+    this.onPlacementError('');
+    if (this.selectionBox) this.selectionBox.material.color.set(0x23836c);
     this.applyObjectTransform(group, updated.object);
     if (this.lightingPreview) this.updateLightingLightPositions();
     this.selectionBox?.update();
   }
 
   updateFieldVolumeDepthTest() {
-    const volume = this.fieldLayer?.children?.find((child) => child.userData?.boundsHalfSize);
+    let volume;
+    this.fieldLayer?.traverse((child) => {
+      if (!volume && child.userData?.boundsHalfSize) volume = child;
+    });
     if (!volume) return;
     const { boundsCenter, boundsHalfSize } = volume.userData;
     const position = this.camera.position;
@@ -723,7 +976,16 @@ export class RoomViewport {
   animate(time = 0) {
     this.frameRequest = requestAnimationFrame(this.animate);
     this.orbit.update();
-    this.fieldLayer?.userData.animate?.(this.prefersReducedMotion ? 0 : time / 1000);
+    const seconds = time / 1000;
+    const delta = this.lastAnimationTime === undefined ? 0 : THREE.MathUtils.clamp(seconds - this.lastAnimationTime, 0, 0.05);
+    this.lastAnimationTime = seconds;
+    if (!this.prefersReducedMotion) {
+      for (const rotor of this.fanRotors.values()) {
+        if (!rotor.userData.enabled) continue;
+        if (rotor.userData.rotationAxis === 'y') rotor.rotation.y += delta * 9;
+        else rotor.rotation.z += delta * 19;
+      }
+    }
     this.selectionBox?.update();
     this.hoverBox?.update();
     this.updateFieldVolumeDepthTest();

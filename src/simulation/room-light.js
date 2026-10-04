@@ -1,4 +1,5 @@
 import { rotationMatrixXYZ } from '../model/room-scene.js';
+import { roomObstacles } from '../model/object-parts.js';
 import { createSimulationGrid, DEFAULT_CELL_SIZE, MAX_SIMULATION_CELLS } from './room-grid.js';
 import { buildSolidMask } from './room-fields-3d.js';
 
@@ -74,11 +75,11 @@ function isOccluded(source, target, blocker) {
   return far > 1e-5 && near < 1 - 1e-5;
 }
 
-export function estimateRoomLight(scene, options = {}) {
+function createLightState(scene, options) {
   const { settings, lamps } = validate(scene, options);
   const grid = createSimulationGrid(scene.room, settings.cellSize);
   const light = new Float32Array(grid.nx * grid.ny * grid.nz).fill(settings.ambientLevel);
-  const sources = lamps.map((lamp) => {
+  const sources = lamps.filter((lamp) => lamp.enabled !== false).map((lamp) => {
     const matrix = rotationMatrixXYZ(lamp.rotation);
     const localBulb = { x: 0, y: lamp.dimensions.height * 0.22, z: 0 };
     return {
@@ -88,10 +89,11 @@ export function estimateRoomLight(scene, options = {}) {
         z: lamp.position.z + matrix[2][1] * localBulb.y,
       },
       direction: [-matrix[0][1], -matrix[1][1], -matrix[2][1]],
+      intensity: lamp.intensity ?? 1,
       id: lamp.id,
     };
   });
-  const blockers = scene.objects.map((object) => ({
+  const blockers = roomObstacles(scene, { includeFans: true }).map((object) => ({
     id: object.id,
     center: { x: object.position.x, y: object.position.y + object.dimensions.height / 2, z: object.position.z },
     halfExtents: {
@@ -101,34 +103,38 @@ export function estimateRoomLight(scene, options = {}) {
     },
     inverseRotation: rotationMatrixXYZ(object.rotation),
   }));
-  let total = 0;
-  let maximum = settings.ambientLevel;
+  const occluders = sources.map((source) => blockers.filter((blocker) => blocker.id !== source.id));
+  return { scene, settings, grid, light, sources, occluders, total: 0, maximum: settings.ambientLevel };
+}
 
-  for (let j = 0; j < grid.ny; j += 1) {
-    for (let k = 0; k < grid.nz; k += 1) {
-      for (let i = 0; i < grid.nx; i += 1) {
-        const index = (j * grid.nz + k) * grid.nx + i;
-        const point = { x: (i + 0.5) * grid.dx, y: (j + 0.5) * grid.dy, z: (k + 0.5) * grid.dz };
-        let illumination = settings.ambientLevel;
-        for (const source of sources) {
-          const dx = point.x - source.position.x;
-          const dy = point.y - source.position.y;
-          const dz = point.z - source.position.z;
-          const distanceSquared = dx ** 2 + dy ** 2 + dz ** 2;
-          const distance = Math.sqrt(distanceSquared);
-          if (distance < 1e-6) continue;
-          if (blockers.some((blocker) => blocker.id !== source.id && isOccluded(source.position, point, blocker))) continue;
-          const cosine = Math.max(0, (dx * source.direction[0] + dy * source.direction[1] + dz * source.direction[2]) / distance);
-          const irradiance = settings.lampStrength * cosine ** 2 / (distanceSquared + 0.25);
-          illumination += irradiance / (0.5 + irradiance);
-        }
-        light[index] = clamp(illumination, 0, 1);
-        total += light[index];
-        maximum = Math.max(maximum, light[index]);
-      }
-    }
+function calculateLightCell(state, index) {
+  const { settings, grid, light, sources, occluders } = state;
+  const plane = grid.nx * grid.nz;
+  const j = Math.floor(index / plane);
+  const k = Math.floor(index / grid.nx) % grid.nz;
+  const i = index % grid.nx;
+  const point = { x: (i + 0.5) * grid.dx, y: (j + 0.5) * grid.dy, z: (k + 0.5) * grid.dz };
+  let illumination = settings.ambientLevel;
+  for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
+    const source = sources[sourceIndex];
+    const dx = point.x - source.position.x;
+    const dy = point.y - source.position.y;
+    const dz = point.z - source.position.z;
+    const distanceSquared = dx ** 2 + dy ** 2 + dz ** 2;
+    const distance = Math.sqrt(distanceSquared);
+    if (distance < 1e-6) continue;
+    if (occluders[sourceIndex].some((blocker) => isOccluded(source.position, point, blocker))) continue;
+    const cosine = Math.max(0, (dx * source.direction[0] + dy * source.direction[1] + dz * source.direction[2]) / distance);
+    const irradiance = settings.lampStrength * source.intensity * cosine ** 2 / (distanceSquared + 0.25);
+    illumination += irradiance / (0.5 + irradiance);
   }
+  const value = light[index] = clamp(illumination, 0, 1);
+  state.total += value;
+  state.maximum = Math.max(state.maximum, value);
+}
 
+function finishLightEstimate(state) {
+  const { scene, settings, grid, light, sources, total, maximum } = state;
   return {
     grid,
     fields: { light, solid: buildSolidMask(scene, grid) },
@@ -142,9 +148,26 @@ export function estimateRoomLight(scene, options = {}) {
       maximumGridCells: MAX_SIMULATION_CELLS,
     }),
     stats: {
-      sourceCount: lamps.length,
+      sourceCount: sources.length,
       meanLevel: Number((total / light.length).toFixed(3)),
       maxLevel: Number(maximum.toFixed(3)),
     },
   };
+}
+
+export function estimateRoomLight(scene, options = {}) {
+  const state = createLightState(scene, options);
+  for (let index = 0; index < state.light.length; index += 1) calculateLightCell(state, index);
+  return finishLightEstimate(state);
+}
+
+export async function estimateRoomLightAsync(scene, options = {}, { isCancelled = () => false, chunkSize = 2048 } = {}) {
+  const state = createLightState(scene, options);
+  for (let start = 0; start < state.light.length; start += chunkSize) {
+    if (isCancelled()) return null;
+    const end = Math.min(start + chunkSize, state.light.length);
+    for (let index = start; index < end; index += 1) calculateLightCell(state, index);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return isCancelled() ? null : finishLightEstimate(state);
 }

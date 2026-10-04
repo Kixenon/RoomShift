@@ -4,7 +4,6 @@ export function createEditorState(scene = createRoomScene()) {
   return {
     scene,
     selectedId: null,
-    view: '3d',
     transformMode: 'translate',
   };
 }
@@ -14,11 +13,6 @@ export function selectObject(state, objectId) {
     throw new RangeError(`Unknown object: ${objectId}`);
   }
   return { ...state, selectedId: objectId };
-}
-
-export function setView(state, view) {
-  if (view !== '3d' && view !== 'top') throw new RangeError(`Unsupported view: ${view}`);
-  return { ...state, view };
 }
 
 export function setTransformMode(state, transformMode) {

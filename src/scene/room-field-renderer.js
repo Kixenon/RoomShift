@@ -1,7 +1,20 @@
 import * as THREE from 'three';
+import { rotationMatrixXYZ } from '../model/room-scene.js';
+import { isOpeningObject } from '../model/openings.js';
+import { temperatureDisplayRange } from '../simulation/room-field-display.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const indexOf = (i, j, k, grid) => (j * grid.nz + k) * grid.nx + i;
+const airflowDisplayRange = (result) => result.displayRanges?.speedMaximum ?? 2.5;
+
+function normalizeTemperature(value, result) {
+  const { minimum, maximum } = temperatureDisplayRange(result);
+  return clamp((value - minimum) / (maximum - minimum), 0, 1) ** 0.82;
+}
+
+function normalizeWifi(value) {
+  return clamp((value + 75) / 40, 0, 1);
+}
 
 export function getAirflowColor(speed, maximumSpeed) {
   const intensity = clamp(Number.isFinite(speed) ? speed / Math.max(0.001, maximumSpeed) : 0, 0, 1);
@@ -17,6 +30,16 @@ export function getTemperatureColor(temperature, ambientTemperature, maximumTemp
 export function getLightColor(intensity) {
   const level = clamp(Number.isFinite(intensity) ? intensity : 0, 0, 1);
   return new THREE.Color().setHSL(0.12 - level * 0.055, 0.3 + level * 0.58, 0.24 + level * 0.48);
+}
+
+export function getWifiColor(signalDbm) {
+  const level = normalizeWifi(signalDbm);
+  const weak = new THREE.Color(0xc0392b);
+  const moderate = new THREE.Color(0xe1b12c);
+  const strong = new THREE.Color(0x27ae60);
+  return level < 0.52
+    ? weak.lerp(moderate, level / 0.52)
+    : moderate.lerp(strong, (level - 0.52) / 0.48);
 }
 
 function sampleField(field, x, y, z, grid, solid, fallback = 0) {
@@ -46,31 +69,10 @@ function sampleField(field, x, y, z, grid, solid, fallback = 0) {
   return value;
 }
 
-function sampleVelocity(result, point) {
-  const { grid, fields } = result;
-  return new THREE.Vector3(
-    sampleField(fields.u, point.x, point.y, point.z, grid, fields.solid),
-    sampleField(fields.v, point.x, point.y, point.z, grid, fields.solid),
-    sampleField(fields.w, point.x, point.y, point.z, grid, fields.solid),
-  );
-}
-
-function sampleScalar(result, mode, point) {
-  const { grid, fields } = result;
-  if (mode === 'airflow') {
-    return sampleVelocity(result, point).length();
-  }
-  if (mode === 'temperature') {
-    return sampleField(fields.temperature, point.x, point.y, point.z, grid, fields.solid, result.ambientTemperature);
-  }
-  return sampleField(fields.light, point.x, point.y, point.z, grid, fields.solid, result.ambientLevel);
-}
-
 function normalizeScalar(result, mode, value) {
-  if (mode === 'airflow') return clamp(value / Math.max(result.stats.maxSpeed, 0.001), 0, 1);
-  if (mode === 'temperature') {
-    return clamp((value - result.ambientTemperature) / Math.max(result.stats.maxTemperature - result.ambientTemperature, 0.05), 0, 1);
-  }
+  if (mode === 'airflow') return clamp(value / airflowDisplayRange(result), 0, 1);
+  if (mode === 'temperature') return normalizeTemperature(value, result);
+  if (mode === 'wifi') return normalizeWifi(value);
   return clamp((value - result.ambientLevel) / Math.max((result.stats.maxLevel ?? result.stats.maxLight) - result.ambientLevel, 0.05), 0, 1);
 }
 
@@ -81,9 +83,16 @@ function createFieldTexture(result, mode) {
   for (let index = 0; index < voxelCount; index += 1) {
     const value = mode === 'airflow'
       ? Math.hypot(fields.u[index], fields.v[index], fields.w[index])
-      : mode === 'temperature' ? fields.temperature[index] : fields.light[index];
+      : mode === 'temperature' ? fields.temperature[index] : mode === 'wifi' ? fields.wifi[index] : fields.light[index];
     data[index * 4] = Math.round(normalizeScalar(result, mode, value) * 255);
     data[index * 4 + 1] = fields.solid?.[index] ? 255 : 0;
+    if (mode === 'temperature') {
+      const { minimum, maximum } = temperatureDisplayRange(result);
+      const span = Math.max(0.5, value < result.ambientTemperature
+        ? result.ambientTemperature - minimum
+        : maximum - result.ambientTemperature);
+      data[index * 4 + 2] = Math.round(clamp(Math.abs(value - result.ambientTemperature) / span, 0, 1) * 255);
+    }
   }
 
   const texture = new THREE.Data3DTexture(data, grid.nx, grid.nz, grid.ny);
@@ -111,8 +120,8 @@ export function createFieldVolume(result, mode) {
       uField: { value: texture },
       uVolumeSize: { value: new THREE.Vector3(grid.width, grid.height, grid.depth) },
       uStepLength: { value: stepLength },
-      uOpacity: { value: mode === 'airflow' ? 1.2 : 1.55 },
-      uFieldMode: { value: mode === 'airflow' ? 0 : mode === 'temperature' ? 1 : 2 },
+      uOpacity: { value: mode === 'airflow' ? 1.2 : mode === 'temperature' ? 1.5 : 2.1 },
+      uFieldMode: { value: mode === 'airflow' ? 0 : mode === 'temperature' ? 1 : mode === 'wifi' ? 3 : 2 },
     },
     side: THREE.DoubleSide,
     transparent: true,
@@ -144,29 +153,33 @@ export function createFieldVolume(result, mode) {
 
       vec3 palette(float value) {
         if (uFieldMode == 1) {
-          vec3 cold = vec3(0.015, 0.035, 0.22);
-          vec3 cyan = vec3(0.0, 0.65, 1.0);
-          vec3 yellow = vec3(1.0, 0.88, 0.03);
-          vec3 red = vec3(1.0, 0.12, 0.015);
-          if (value < 0.28) return mix(cold, cyan, value / 0.28);
-          if (value < 0.58) return mix(cyan, yellow, (value - 0.28) / 0.3);
-          if (value < 0.84) return mix(yellow, red, (value - 0.58) / 0.26);
-          return mix(red, vec3(1.0), (value - 0.84) / 0.16);
+          vec3 navy = vec3(0.0052, 0.0116, 0.2307);
+          vec3 blue = vec3(0.0091, 0.1046, 0.7370);
+          vec3 cyan = vec3(0.0027, 0.4780, 0.7480);
+          vec3 green = vec3(0.0350, 0.6940, 0.1710);
+          vec3 yellow = vec3(0.8710, 0.7450, 0.0380);
+          vec3 orange = vec3(0.8670, 0.1450, 0.0210);
+          if (value < 0.18) return mix(navy, blue, value / 0.18);
+          if (value < 0.38) return mix(blue, cyan, (value - 0.18) / 0.20);
+          if (value < 0.58) return mix(cyan, green, (value - 0.38) / 0.20);
+          if (value < 0.76) return mix(green, yellow, (value - 0.58) / 0.18);
+          if (value < 0.9) return mix(yellow, orange, (value - 0.76) / 0.14);
+          return mix(orange, vec3(1.0, 0.905, 0.723), (value - 0.9) / 0.1);
+        }
+        if (uFieldMode == 3) {
+          vec3 weak = vec3(0.527, 0.047, 0.024);
+          vec3 moderate = vec3(0.753, 0.434, 0.025);
+          vec3 strong = vec3(0.020, 0.423, 0.117);
+          if (value < 0.52) return mix(weak, moderate, value / 0.52);
+          return mix(moderate, strong, (value - 0.52) / 0.48);
         }
         vec3 navy = vec3(0.015, 0.025, 0.11);
         vec3 blue = vec3(0.02, 0.22, 0.95);
         vec3 cyan = vec3(0.0, 0.86, 1.0);
-        vec3 green = vec3(0.12, 0.92, 0.46);
-        vec3 yellow = vec3(1.0, 0.78, 0.05);
-        vec3 red = vec3(1.0, 0.08, 0.018);
-        if (uFieldMode == 2) {
-          navy = vec3(0.08, 0.025, 0.2);
-          blue = vec3(0.28, 0.09, 0.85);
-          cyan = vec3(0.96, 0.08, 0.66);
-          green = vec3(1.0, 0.31, 0.18);
-          yellow = vec3(1.0, 0.82, 0.28);
-          red = vec3(1.0, 0.98, 0.77);
-        }
+      vec3 green = vec3(0.12, 0.92, 0.46);
+      vec3 yellow = vec3(1.0, 0.78, 0.05);
+      vec3 red = vec3(1.0, 0.08, 0.018);
+        if (uFieldMode == 2) return vec3(value);
         if (value < 0.25) return mix(navy, blue, value * 4.0);
         if (value < 0.5) return mix(blue, cyan, (value - 0.25) * 4.0);
         if (value < 0.72) return mix(cyan, green, (value - 0.5) * 4.545);
@@ -209,8 +222,10 @@ export function createFieldVolume(result, mode) {
           vec3 roomCoordinate = point / uVolumeSize + 0.5;
           vec3 textureCoordinate = vec3(roomCoordinate.x, roomCoordinate.z, roomCoordinate.y);
           vec4 field = texture(uField, textureCoordinate);
-          float density = smoothstep(0.035, 0.72, field.r);
-          if (uFieldMode == 1) { density = pow(density, 0.7); }
+          float density = 0.012 * smoothstep(0.002, 0.035, field.r)
+            + 0.28 * smoothstep(0.04, 0.22, field.r);
+          if (uFieldMode == 1) { density = 0.015 + 0.65 * smoothstep(0.002, 0.08, field.b); }
+          if (uFieldMode == 3) { density = 0.018 + 0.24 * smoothstep(0.0, 0.14, field.r); }
           density *= 1.0 - step(0.5, field.g);
           float alpha = 1.0 - exp(-density * 2.35 * stepLength * uOpacity);
           float contribution = (1.0 - accumulated.a) * alpha;
@@ -235,262 +250,220 @@ export function createFieldVolume(result, mode) {
   return volume;
 }
 
-function insideRoom(point, grid) {
-  return point.x >= 0 && point.x <= grid.width
-    && point.y >= 0 && point.y <= grid.height
-    && point.z >= 0 && point.z <= grid.depth;
-}
+export function createScalarSliceLayer(result, mode, height) {
+  const { grid, fields } = result;
+  const geometry = new THREE.PlaneGeometry(grid.width, grid.depth, grid.nx - 1, grid.nz - 1);
+  const positions = geometry.attributes.position;
+  const colors = new Float32Array(positions.count * 4);
+  const point = new THREE.Vector3();
+  const color = new THREE.Color();
 
-function isFluidPoint(point, grid, solid) {
-  if (!insideRoom(point, grid)) return false;
-  const i = Math.min(grid.nx - 1, Math.floor(point.x / grid.dx));
-  const j = Math.min(grid.ny - 1, Math.floor(point.y / grid.dy));
-  const k = Math.min(grid.nz - 1, Math.floor(point.z / grid.dz));
-  return !solid[indexOf(i, j, k, grid)];
-}
-
-function findStreamlineSeeds(result, maximumSeeds = 64) {
-  const { grid, fields, stats } = result;
-  const strides = [
-    Math.max(1, Math.ceil(grid.nx / 18)),
-    Math.max(1, Math.ceil(grid.ny / 8)),
-    Math.max(1, Math.ceil(grid.nz / 18)),
-  ];
-  const threshold = Math.max(0.002, stats.maxSpeed * 0.09);
-  const candidates = [];
-  for (let j = 0; j < grid.ny; j += strides[1]) {
-    for (let k = 0; k < grid.nz; k += strides[2]) {
-      for (let i = 0; i < grid.nx; i += strides[0]) {
-        const index = indexOf(i, j, k, grid);
-        if (fields.solid[index]) continue;
-        const speed = Math.hypot(fields.u[index], fields.v[index], fields.w[index]);
-        if (speed < threshold) continue;
-        candidates.push({
-          speed,
-          point: new THREE.Vector3((i + 0.5) * grid.dx, (j + 0.5) * grid.dy, (k + 0.5) * grid.dz),
-        });
-      }
+  for (let index = 0; index < positions.count; index += 1) {
+    point.fromBufferAttribute(positions, index);
+    const x = point.x + grid.width / 2;
+    const z = grid.depth / 2 - point.y;
+    if (mode === 'airflow') {
+      const speed = Math.hypot(
+        sampleField(fields.u, x, height, z, grid, fields.solid),
+        sampleField(fields.v, x, height, z, grid, fields.solid),
+        sampleField(fields.w, x, height, z, grid, fields.solid),
+      );
+      getAirflowColor(speed, airflowDisplayRange(result)).toArray(colors, index * 4);
+    } else if (mode === 'wifi') {
+      const signal = sampleField(fields.wifi, x, height, z, grid, fields.solid, -100);
+      getWifiColor(signal).toArray(colors, index * 4);
+    } else {
+      const temperature = sampleField(fields.temperature, x, height, z, grid, fields.solid, result.ambientTemperature);
+      infraredColor(temperature, result, color).toArray(colors, index * 4);
     }
+    colors[index * 4 + 3] = 0.82;
   }
-  candidates.sort((a, b) => b.speed - a.speed);
-  const minimumDistance = Math.max(0.2, Math.min(grid.dx, grid.dy, grid.dz) * 1.2);
-  const minimumDistanceSquared = minimumDistance ** 2;
-  const seeds = [];
-  for (const candidate of candidates) {
-    if (seeds.every((seed) => seed.point.distanceToSquared(candidate.point) >= minimumDistanceSquared)) {
-      seeds.push(candidate);
-      if (seeds.length === maximumSeeds) break;
-    }
-  }
-  return seeds;
-}
 
-function traceStreamline(result, seed) {
-  const { grid, fields, stats } = result;
-  const stepSize = Math.min(grid.dx, grid.dy, grid.dz) * 0.3;
-  const minimumSpeed = Math.max(0.002, stats.maxSpeed * 0.015);
-  const maximumSteps = Math.min(240, Math.ceil(Math.hypot(grid.width, grid.height, grid.depth) * 2.2 / stepSize));
-  const path = [{ position: seed.point.clone(), speed: seed.speed }];
-  let position = seed.point.clone();
-
-  for (let step = 0; step < maximumSteps; step += 1) {
-    const velocity = sampleVelocity(result, position);
-    if (velocity.length() < minimumSpeed) break;
-    const midpoint = position.clone().addScaledVector(velocity.normalize(), stepSize * 0.5);
-    const middleVelocity = sampleVelocity(result, midpoint);
-    const speed = middleVelocity.length();
-    if (speed < minimumSpeed) break;
-    const next = position.clone().addScaledVector(middleVelocity.normalize(), stepSize);
-    if (!isFluidPoint(next, grid, fields.solid)) break;
-    path.push({ position: next.clone(), speed });
-    position = next;
-    if (path.length > 12 && position.distanceToSquared(seed.point) < stepSize ** 2) break;
-  }
-  return path;
-}
-
-function createStreamlineGeometry(paths, maximumSpeed) {
-  const positionValues = [];
-  const progressValues = [];
-  const speedValues = [];
-  const indices = [];
-  const halfWidth = 0.018;
-  let vertexIndex = 0;
-  for (const path of paths) {
-    if (path.length < 2) continue;
-    const distances = [0];
-    for (let i = 1; i < path.length; i += 1) {
-      distances.push(distances[i - 1] + path[i].position.distanceTo(path[i - 1].position));
-    }
-    const totalDistance = Math.max(distances.at(-1), 0.001);
-    for (let i = 1; i < path.length; i += 1) {
-      const start = path[i - 1].position;
-      const end = path[i].position;
-      const direction = end.clone().sub(start).normalize();
-      const reference = Math.abs(direction.y) > 0.92
-        ? new THREE.Vector3(1, 0, 0)
-        : new THREE.Vector3(0, 1, 0);
-      const side = new THREE.Vector3().crossVectors(direction, reference).normalize().multiplyScalar(halfWidth);
-      const vertices = [
-        start.clone().add(side),
-        start.clone().sub(side),
-        end.clone().add(side),
-        end.clone().sub(side),
-      ];
-      for (const point of vertices) positionValues.push(point.x, point.y, point.z);
-      const startProgress = distances[i - 1] / totalDistance;
-      const endProgress = distances[i] / totalDistance;
-      const startSpeed = path[i - 1].speed / maximumSpeed;
-      const endSpeed = path[i].speed / maximumSpeed;
-      progressValues.push(startProgress, startProgress, endProgress, endProgress);
-      speedValues.push(startSpeed, startSpeed, endSpeed, endSpeed);
-      indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2, vertexIndex + 2, vertexIndex + 1, vertexIndex + 3);
-      vertexIndex += 4;
-    }
-  }
-  if (positionValues.length === 0) return null;
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positionValues, 3));
-  geometry.setAttribute('aProgress', new THREE.Float32BufferAttribute(progressValues, 1));
-  geometry.setAttribute('aSpeed', new THREE.Float32BufferAttribute(speedValues, 1));
-  geometry.setIndex(indices);
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function createStreamlineMaterial() {
-  return new THREE.ShaderMaterial({
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    vertexColors: true,
     transparent: true,
     depthWrite: false,
-    depthTest: true,
-    blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
     toneMapped: false,
-    uniforms: { uTime: { value: 0 }, uOpacity: { value: 0.9 } },
-    vertexShader: `
-      attribute float aProgress;
-      attribute float aSpeed;
-      varying float vProgress;
-      varying float vSpeed;
-      void main() {
-        vProgress = aProgress;
-        vSpeed = clamp(aSpeed, 0.0, 1.0);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform float uTime;
-      uniform float uOpacity;
-      varying float vProgress;
-      varying float vSpeed;
-      void main() {
-        float head = fract(vProgress - uTime * 0.32);
-        float pulse = pow(max(0.0, 1.0 - abs(head - 0.5) * 5.0), 3.0);
-        vec3 cool = vec3(0.02, 0.38, 0.62);
-        vec3 warm = vec3(0.82, 0.2, 0.04);
-        vec3 color = mix(cool, warm, vSpeed);
-        color = mix(color, vec3(0.42, 0.82, 0.96), pulse * 0.5);
-        float alpha = (0.48 + pulse * 0.35) * uOpacity;
-        gl_FragColor = vec4(color, alpha);
-      }
-    `,
-  });
-}
-
-function samplePath(path, progress, target) {
-  const scaled = clamp(progress, 0, 1) * (path.length - 1);
-  const index = Math.min(path.length - 2, Math.floor(scaled));
-  return target.copy(path[index].position).lerp(path[index + 1].position, scaled - index);
-}
-
-function createTracerLayer(paths) {
-  const particles = [];
-  for (const path of paths) {
-    if (path.length < 2) continue;
-    for (let index = 0; index < 2; index += 1) {
-      particles.push({ path, phase: index * 0.5 });
-    }
+  }));
+  mesh.name = `field-slice-${mode}`;
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = clamp(height, 0, grid.height);
+  mesh.renderOrder = 1;
+  if (mode !== 'airflow') return mesh;
+  const layer = new THREE.Group();
+  layer.name = mesh.name;
+  layer.add(mesh);
+  const spacing = Math.max(0.4, grid.width / 12, grid.depth / 12);
+  for (let x = spacing / 2; x < grid.width; x += spacing) for (let z = spacing / 2; z < grid.depth; z += spacing) {
+    const id = (Math.min(grid.ny - 1, Math.floor(height / grid.dy)) * grid.nz + Math.min(grid.nz - 1, Math.floor(z / grid.dz))) * grid.nx + Math.min(grid.nx - 1, Math.floor(x / grid.dx));
+    if (fields.solid[id]) continue;
+    const velocity = new THREE.Vector3(...['u', 'v', 'w'].map((key) => sampleField(fields[key], x, height, z, grid, fields.solid)));
+    const speed = velocity.length();
+    if (speed < 0.02) continue;
+    const length = Math.min(spacing * 0.65, 0.05 + speed * 0.15);
+    const arrow = new THREE.ArrowHelper(velocity.normalize(), new THREE.Vector3(x - grid.width / 2, height + 0.015, z - grid.depth / 2), length, 0xffffff, length * 0.35, length * 0.2);
+    layer.add(arrow);
   }
-  if (particles.length === 0) return null;
-  const positions = new Float32Array(particles.length * 3);
-  const lifeValues = new Float32Array(particles.length);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('aLife', new THREE.BufferAttribute(lifeValues, 1));
-  const material = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    blending: THREE.NormalBlending,
-    toneMapped: false,
-    uniforms: { uSize: { value: 9 } },
-    vertexShader: `
-      uniform float uSize;
-      attribute float aLife;
-      varying float vLife;
-      void main() {
-        vLife = aLife;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = uSize;
-      }
-    `,
-    fragmentShader: `
-      varying float vLife;
-      void main() {
-        float radius = length(gl_PointCoord - vec2(0.5));
-        float alpha = (1.0 - smoothstep(0.18, 0.5, radius)) * vLife;
-        if (alpha < 0.02) discard;
-        gl_FragColor = vec4(0.06, 0.58, 0.82, alpha);
-      }
-    `,
-  });
-  const layer = new THREE.Points(geometry, material);
-  layer.name = 'airflow-tracers';
-  layer.userData.particles = particles;
-  layer.renderOrder = 3;
-  layer.frustumCulled = false;
   return layer;
 }
 
-export function createAirflowLayers(result) {
-  const seeds = findStreamlineSeeds(result);
-  const paths = seeds.map((seed) => traceStreamline(result, seed)).filter((path) => path.length > 1);
-  for (const path of paths) {
-    for (const point of path) {
-      point.position.x -= result.grid.width / 2;
-      point.position.z -= result.grid.depth / 2;
-    }
-  }
-  const geometry = createStreamlineGeometry(paths, Math.max(result.stats.maxSpeed, 0.001));
-  const streamlines = geometry ? new THREE.Mesh(geometry, createStreamlineMaterial()) : null;
-  if (streamlines) {
-    streamlines.name = 'airflow-streamlines';
-    streamlines.renderOrder = 2;
-  }
-  const tracers = createTracerLayer(paths);
-  const particlePosition = new THREE.Vector3();
-  const update = (time) => {
-    if (streamlines) streamlines.material.uniforms.uTime.value = time;
-    if (!tracers) return;
-    const positions = tracers.geometry.attributes.position;
-    const lifeValues = tracers.geometry.attributes.aLife;
-    const particlePaths = tracers.userData.particles;
-    const progress = ((time * 0.24) % 1 + 1) % 1;
-    for (let index = 0; index < particlePaths.length; index += 1) {
-      const particle = particlePaths[index];
-      const phase = (progress + particle.phase) % 1;
-      samplePath(particle.path, phase, particlePosition);
-      positions.setXYZ(index, particlePosition.x, particlePosition.y, particlePosition.z);
-      lifeValues.setX(index, smoothstep01(phase / 0.12) * (1 - smoothstep01((phase - 0.82) / 0.18)));
-    }
-    positions.needsUpdate = true;
-    lifeValues.needsUpdate = true;
-  };
-  update(0);
-  return { streamlines, tracers, update };
+const INFRARED_STOPS = [
+  [0, 0x101b84],
+  [0.18, 0x185bde],
+  [0.38, 0x09b8e0],
+  [0.58, 0x35d973],
+  [0.76, 0xf0df37],
+  [0.9, 0xef6b28],
+  [1, 0xfff4dd],
+].map(([position, color]) => ({ position, color: new THREE.Color(color) }));
+
+function infraredColor(value, result, target) {
+  const normalized = normalizeTemperature(value, result);
+  const upperIndex = INFRARED_STOPS.findIndex((stop) => stop.position >= normalized);
+  const upper = INFRARED_STOPS[Math.max(1, upperIndex)];
+  const lower = INFRARED_STOPS[Math.max(0, upperIndex - 1)];
+  return target.copy(lower.color).lerp(upper.color, (normalized - lower.position) / (upper.position - lower.position));
 }
 
-function smoothstep01(value) {
-  const t = clamp(value, 0, 1);
-  return t * t * (3 - 2 * t);
+function createInfraredPlane(result, scene, wall) {
+  const { grid } = result;
+  const floor = wall === 'floor';
+  const ceiling = wall === 'ceiling';
+  const horizontal = floor || ceiling;
+  const alongX = horizontal || wall === 'front' || wall === 'back';
+  const span = alongX ? grid.width : grid.depth;
+  const segmentsX = alongX ? grid.nx - 1 : grid.nz - 1;
+  const segmentsY = horizontal ? grid.nz - 1 : grid.ny - 1;
+  const geometry = new THREE.PlaneGeometry(span, horizontal ? grid.depth : grid.height, segmentsX, segmentsY);
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: false,
+    alphaTest: 0.5,
+    depthWrite: true,
+    side: THREE.FrontSide,
+    toneMapped: false,
+  }));
+  mesh.name = `infrared-${wall}`;
+  if (horizontal) {
+    mesh.rotation.x = floor ? -Math.PI / 2 : Math.PI / 2;
+    mesh.position.y = floor ? 0.012 : grid.height - 0.012;
+  } else {
+    mesh.position.y = grid.height / 2;
+    if (wall === 'front') mesh.position.z = -grid.depth / 2 + 0.008;
+    if (wall === 'back') {
+      mesh.position.z = grid.depth / 2 - 0.008;
+      mesh.rotation.y = Math.PI;
+    }
+    if (wall === 'left') {
+      mesh.position.x = -grid.width / 2 + 0.008;
+      mesh.rotation.y = Math.PI / 2;
+    }
+    if (wall === 'right') {
+      mesh.position.x = grid.width / 2 - 0.008;
+      mesh.rotation.y = -Math.PI / 2;
+    }
+  }
+  mesh.updateMatrixWorld(true);
+  const point = new THREE.Vector3();
+  const color = new THREE.Color();
+  const colors = new Float32Array(geometry.attributes.position.count * 4);
+  const openings = scene?.objects?.filter((object) => isOpeningObject(object) && object.open && object.wall === wall) ?? [];
+  const positions = geometry.attributes.position;
+  for (let index = 0; index < positions.count; index += 1) {
+    point.fromBufferAttribute(positions, index).applyMatrix4(mesh.matrixWorld);
+    const x = point.x + grid.width / 2;
+    const y = floor ? Math.max(0.04, grid.dy * 0.55)
+      : ceiling ? Math.min(grid.height - 0.04, grid.height - grid.dy * 0.55) : point.y;
+    const z = point.z + grid.depth / 2;
+    const temperature = sampleField(result.fields.temperature, x, y, z, grid, result.fields.solid, result.ambientTemperature);
+    infraredColor(temperature, result, color).toArray(colors, index * 4);
+    const along = wall === 'left' || wall === 'right' ? z : x;
+    const insideOpening = openings.some((window) => {
+      const center = wall === 'left' || wall === 'right' ? window.position.z : window.position.x;
+      return Math.abs(along - center) <= window.dimensions.width / 2
+        && point.y >= window.position.y && point.y <= window.position.y + window.dimensions.height;
+    });
+    colors[index * 4 + 3] = insideOpening ? 0 : 1;
+  }
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+  mesh.renderOrder = 1;
+  return mesh;
+}
+
+export function createTemperatureSurfaceLayer(result, roomScene) {
+  const layer = new THREE.Group();
+  layer.name = 'infrared-temperature-surfaces';
+  for (const wall of ['floor', 'ceiling', 'front', 'back', 'left', 'right']) {
+    layer.add(createInfraredPlane(result, roomScene, wall));
+  }
+  return layer;
+}
+
+export function createTemperatureObjectLayer(result, objectGroups = new Map()) {
+  const layer = new THREE.Group();
+  layer.name = 'infrared-object-surfaces';
+  if (!objectGroups?.size) return layer;
+  const { grid } = result;
+  const offset = Math.max(0.05, Math.min(grid.dx, grid.dy, grid.dz) * 0.62);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    transparent: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const point = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const color = new THREE.Color();
+  const normalMatrix = new THREE.Matrix3();
+
+  for (const [id, source] of objectGroups) {
+    source.updateWorldMatrix(true, true);
+    const overlay = source.clone(true);
+    overlay.name = `infrared-object-${id}`;
+    const sourceMeshes = [];
+    const overlayMeshes = [];
+    source.traverse((child) => { if (child.isMesh) sourceMeshes.push(child); });
+    overlay.traverse((child) => { if (child.isMesh) overlayMeshes.push(child); });
+
+    for (let meshIndex = 0; meshIndex < sourceMeshes.length; meshIndex += 1) {
+      const sourceMesh = sourceMeshes[meshIndex];
+      const overlayMesh = overlayMeshes[meshIndex];
+      const geometry = sourceMesh.geometry.clone();
+      const vertices = geometry.attributes.position;
+      const normals = geometry.attributes.normal;
+      const colors = new Float32Array(vertices.count * 4);
+      normalMatrix.getNormalMatrix(sourceMesh.matrixWorld);
+      for (let vertex = 0; vertex < vertices.count; vertex += 1) {
+        point.fromBufferAttribute(vertices, vertex).applyMatrix4(sourceMesh.matrixWorld);
+        if (normals) {
+          normal.fromBufferAttribute(normals, vertex).applyMatrix3(normalMatrix).normalize();
+          point.addScaledVector(normal, offset);
+        }
+        const temperature = sampleField(
+          result.fields.temperature,
+          point.x + grid.width / 2,
+          point.y,
+          point.z + grid.depth / 2,
+          grid,
+          result.fields.solid,
+          result.ambientTemperature,
+        );
+        infraredColor(temperature, result, color).toArray(colors, vertex * 4);
+        colors[vertex * 4 + 3] = 1;
+      }
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+      overlayMesh.geometry = geometry;
+      overlayMesh.material = material;
+      overlayMesh.renderOrder = 3;
+    }
+    layer.add(overlay);
+  }
+  return layer;
 }

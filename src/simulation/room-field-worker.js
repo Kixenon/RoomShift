@@ -1,6 +1,6 @@
-import { simulateRoomFields } from './room-fields-3d.js';
-import { simulateRoomFieldsWebGpu } from './room-fields-webgpu.js';
+import { RoomFieldSolver } from './room-field-backend.js';
 
+const solver = new RoomFieldSolver();
 const active = new Set();
 const cancelled = new Set();
 
@@ -13,26 +13,32 @@ self.addEventListener('message', (event) => {
   void solve(message);
 });
 
-async function solve({ requestId, mode, scene }) {
+async function solve({ requestId, mode, scene, durationSeconds, cellSize }) {
   active.add(requestId);
   try {
-    if (!['airflow', 'temperature'].includes(mode)) {
+    if (!['airflow', 'temperature', 'light', 'wifi'].includes(mode)) {
       throw new RangeError(`Unsupported room field mode: ${mode}`);
     }
-    let result = await simulateRoomFieldsWebGpu(scene, { isCancelled: () => cancelled.has(requestId) });
-    if (!result && !cancelled.has(requestId)) result = simulateRoomFields(scene);
+    const result = await solver.solve(scene, mode, {
+      durationSeconds, cellSize, isCancelled: () => cancelled.has(requestId),
+      onProgress: (result) => postResult(requestId, result, true),
+    });
     if (cancelled.has(requestId)) {
       self.postMessage({ requestId, cancelled: true });
       return;
     }
-    const transfer = Object.values(result.fields)
-      .filter((field) => ArrayBuffer.isView(field))
-      .map((field) => field.buffer);
-    self.postMessage({ requestId, result }, transfer);
+    postResult(requestId, result);
   } catch (error) {
     self.postMessage({ requestId, error: { name: error.name, message: error.message } });
   } finally {
     active.delete(requestId);
     cancelled.delete(requestId);
   }
+}
+
+function postResult(requestId, result, progress = false) {
+  // Cached snapshots and resident solver state retain their buffers.
+  const copy = structuredClone(result);
+  const transfer = Object.values(copy.fields).filter(ArrayBuffer.isView).map((field) => field.buffer);
+  self.postMessage({ requestId, result: copy, progress }, transfer);
 }

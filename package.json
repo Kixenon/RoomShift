@@ -8,9 +8,10 @@
     "site": "vite --host 127.0.0.1 --port 4173 --open /site/",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
-    "test": "node --test tests/",
-    "test:browser": "node --test browser-tests/",
-    "test:all": "node --test"
+    "test": "node --test 'tests/*.test.js'",
+    "test:browser": "node --test 'browser-tests/*.test.js'",
+    "test:all": "node --test",
+    "validate:simulation": "node scripts/validate-simulation.mjs"
   },
   "dependencies": {
     "gsap": "^3.15.0",

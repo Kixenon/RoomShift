@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
+import { addWindow, createRoomScene } from '../src/model/room-scene.js';
 import { createRoomFieldLayer, getAirflowColor, getLightColor, getTemperatureColor } from '../src/scene/room-field-layer-3d.js';
+import { simulateRoomFields } from '../src/simulation/room-fields-3d.js';
 
 const sampleFields = {
   grid: { width: 2, height: 2, depth: 2, nx: 2, ny: 2, nz: 2, dx: 1, dy: 1, dz: 1 },
@@ -29,59 +31,35 @@ test('field palettes distinguish levels and clamp values', () => {
   assert.equal(getLightColor(2).getHex(), getLightColor(1).getHex());
 });
 
-test('scalar fields map the complete 3D grid into a volumetric texture', () => {
+test('temperature maps the solved field onto infrared room surfaces', () => {
   const layer = createRoomFieldLayer(sampleFields, 'temperature');
-  const volume = volumeFor(layer);
-  const texture = volume.material.uniforms.uField.value;
+  const surfaces = layer.children.find((child) => child.name === 'infrared-temperature-surfaces');
+  const floor = surfaces.children.find((child) => child.name === 'infrared-floor');
+  const colors = floor.geometry.attributes.color;
 
-  assert.ok(volume.isMesh);
-  // three.js r186 dropped the `isBoxGeometry` type flag; `type` is the stable check.
-  assert.equal(volume.geometry.type, 'BoxGeometry');
-  assert.deepEqual([texture.image.width, texture.image.height, texture.image.depth], [2, 2, 2]);
-  assert.equal(texture.image.data[0], 0);
-  assert.equal(texture.image.data[7 * 4], 255);
-  assert.equal(layer.userData.volumeVoxelCount, 8);
-  assert.ok(layer.children.every((child) => !child.userData.fieldSlice));
-  assert.equal(volume.material.transparent, true);
-  assert.equal(volume.material.depthWrite, false);
+  assert.ok(surfaces?.isGroup);
+  assert.equal(surfaces.children.length, 6);
+  assert.equal(colors.itemSize, 4);
+  assert.equal(floor.material.transparent, false);
+  assert.equal(floor.material.side, THREE.FrontSide);
+  assert.equal(floor.material.depthWrite, true);
+  assert.ok(Math.min(...colors.array.filter((_, index) => index % 4 === 3)) >= 0.23);
+  assert.ok(Math.max(...colors.array.filter((_, index) => index % 4 === 3)) === 1);
+  assert.notDeepEqual(Array.from(colors.array.slice(0, 3)), Array.from(colors.array.slice(-4, -1)));
+  assert.equal(layer.userData.volumeVoxelCount, 0);
+  assert.equal(volumeFor(layer), undefined);
 });
 
-test('airflow combines the 3D velocity volume with animated spatial streamlines and tracers', () => {
-  const count = 6 ** 3;
-  const maximumSpeed = Math.hypot(0.6, 0.4, 0.2);
-  const result = {
-    ...sampleFields,
-    grid: { width: 3, height: 3, depth: 3, nx: 6, ny: 6, nz: 6, dx: 0.5, dy: 0.5, dz: 0.5 },
-    fields: {
-      u: new Float32Array(count).fill(0.6),
-      v: new Float32Array(count).fill(0.4),
-      w: new Float32Array(count).fill(0.2),
-      temperature: new Float32Array(count).fill(20),
-      light: new Float32Array(count).fill(0.1),
-      solid: new Uint8Array(count),
-    },
-    stats: { maxSpeed: maximumSpeed, maxTemperature: 20, maxLight: 0.1 },
-  };
-  const layer = createRoomFieldLayer(result, 'airflow');
-  const streamlines = layer.children.find((child) => child.name === 'airflow-streamlines');
-  const tracers = layer.children.find((child) => child.name === 'airflow-tracers');
-  const initialPositions = tracers.geometry.getAttribute('position').array.slice();
-  const bounds = new THREE.Box3().setFromObject(streamlines);
-
-  assert.ok(volumeFor(layer)?.isMesh);
-  assert.ok(streamlines?.isMesh);
-  assert.ok(streamlines.geometry.index.count > streamlines.geometry.attributes.position.count);
-  assert.ok(bounds.min.x < bounds.max.x && bounds.min.y < bounds.max.y && bounds.min.z < bounds.max.z);
-  assert.ok(bounds.min.x >= -1.53 && bounds.max.x <= 1.53);
-  assert.ok(bounds.min.z >= -1.53 && bounds.max.z <= 1.53);
-  assert.ok(tracers?.isPoints);
-  assert.ok(typeof layer.userData.animate === 'function');
-  layer.userData.animate(1);
-  assert.notDeepEqual(Array.from(tracers.geometry.getAttribute('position').array), Array.from(initialPositions));
-  assert.ok(layer.children.every((child) => child.name !== 'airflow-vectors'));
+test('airflow defaults to a speed volume with no animation work', () => {
+  const scene = createRoomScene();
+  const result = simulateRoomFields(scene, { steps: 2 });
+  const layer = createRoomFieldLayer(result, 'airflow', scene);
+  assert.equal(layer.userData.airflowVisualization, 'volume');
+  assert.ok(volumeFor(layer));
+  assert.equal(layer.userData.animate, undefined);
 });
 
-test('uniform fields produce an empty volume texture instead of tinting the room', () => {
+test('uniform temperature produces a uniform infrared surface map', () => {
   const result = {
     ...sampleFields,
     fields: {
@@ -93,13 +71,14 @@ test('uniform fields produce an empty volume texture instead of tinting the room
     stats: { maxSpeed: 0, maxTemperature: 20, maxLight: 0.05, maxLevel: 0.05 },
   };
   const layer = createRoomFieldLayer(result, 'temperature');
-  const texture = volumeFor(layer).material.uniforms.uField.value;
+  const floor = layer.children[0].children.find((child) => child.name === 'infrared-floor');
+  const colors = floor.geometry.attributes.color.array;
 
-  assert.ok(Array.from(texture.image.data).every((value, index) => index % 4 !== 0 || value === 0));
+  assert.ok(Array.from(colors).every((value, index) => index % 4 === 3 || value === colors[index % 4]));
 });
 
 test('light uses the same full 3D representation and retains solid-object masking', () => {
-  const layer = createRoomFieldLayer(sampleFields, 'light');
+  const layer = createRoomFieldLayer(sampleFields, 'light', undefined, { displayStyle: 'map' });
   const volume = volumeFor(layer);
   const data = volume.material.uniforms.uField.value.image.data;
 
