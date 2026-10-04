@@ -149,6 +149,9 @@ test('device power is controlled in its properties and stays independent of time
 
   await page.locator('[data-select-object="lamp-1"]').click();
   await page.locator('[data-device-enabled]').uncheck();
+  await page.locator('[data-select-object="ceiling-fan-1"]').click();
+  await page.locator('[data-device-enabled]').uncheck();
+  await page.locator('[data-select-object="lamp-1"]').click();
   assert.equal((await canvasState()).lampsOn, 'false');
   await setClock(22 * 60);
   assert.equal((await canvasState()).lampsOn, 'false', 'night does not switch devices on');
@@ -162,11 +165,10 @@ test('device power is controlled in its properties and stays independent of time
 test('a closed glass window still admits sunlight', async () => {
   await page.locator('#show-light').click();
   await setClock(10 * 60);
-  assert.equal((await canvasState()).patches, 0, 'the default scene has no windows');
-
-  await page.locator('#add-window').click();
-  await page.locator('[data-window-wall]').selectOption('back');
-  assert.equal(await page.locator('[data-window-open]').isChecked(), true, 'new openings start open');
+  assert.equal((await canvasState()).patches, 1, 'the starter glass window admits sunlight');
+  await page.locator('[data-select-object="window-1"]').click();
+  assert.equal(await page.locator('[data-window-open]').isChecked(), false);
+  await page.locator('[data-window-open]').check();
   await page.waitForTimeout(500);
   assert.equal((await canvasState()).patches, 1, 'an open sunward window should throw a patch');
 
@@ -177,6 +179,8 @@ test('a closed glass window still admits sunlight', async () => {
 
 test('a shaded wall casts no patch at the same moment', async () => {
   await page.locator('#show-light').click();
+  await page.locator('[data-select-object="window-1"]').click();
+  await page.locator('#delete-object').click();
   // 10:00 puts the sun in the east-south-east, so the north wall is in shade.
   await setClock(10 * 60);
   await page.locator('#add-window').click();

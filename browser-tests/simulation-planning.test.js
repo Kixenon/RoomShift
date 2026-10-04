@@ -104,3 +104,40 @@ test('CPU and WebGPU match for driven air and subzero window inflow', async (t) 
     assert.equal(cases[1].gpuMin, -10);
   } finally { await page.close(); }
 });
+
+
+test('compact controls support keyboard detail selection, buffered playback, and Wi-Fi', async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  try {
+    await page.goto(url);
+    await page.locator('#show-temperature').click();
+    await settled(page, 3);
+    assert.equal(await page.locator('#simulation-status').isVisible(), false);
+    assert.equal(await page.locator('#initial-temperature').isVisible(), false);
+    await page.locator('#resolution-control summary').focus();
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await page.locator('[data-resolution="0.25"]').evaluate((button) => button === document.activeElement), true);
+    await page.keyboard.press('Enter');
+    await settled(page, 3);
+    assert.equal(await page.locator('[data-resolution="0.25"]').getAttribute('aria-checked'), 'true');
+    await page.locator('#simulation-play').click();
+    await page.waitForFunction(() => Number(document.querySelector('#room-canvas').dataset.fieldDuration) >= 4);
+    await page.locator('#simulation-play').click();
+    const stoppedAt = await page.locator('#simulation-time').inputValue();
+    await page.waitForTimeout(700);
+    assert.equal(await page.locator('#simulation-time').inputValue(), stoppedAt);
+    assert.equal(await page.locator('#simulation-play').getAttribute('aria-pressed'), 'false');
+    await page.locator('#simulation-restart').click();
+    await settled(page, 0);
+    await page.locator('#probe-control summary').click();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#probe-control').evaluate((menu) => menu.open), false);
+    await page.locator('#show-wifi').click();
+    await page.waitForFunction(() => document.querySelector('#room-canvas').dataset.fieldMode === 'wifi' && document.querySelector('#field-loading').hidden);
+    assert.equal(await page.locator('#field-display-label').textContent(), 'Volume');
+    assert.equal(await page.locator('#simulation-settings').isVisible(), false);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});

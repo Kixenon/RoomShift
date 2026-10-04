@@ -26,13 +26,13 @@ npm run validate:simulation
 1. Set the room dimensions, initial air temperature, outdoor temperature, and envelope heat-transfer coefficient (W/m² K).
 2. Place furniture and devices. Heaters have a power setting in watts; device strength and on/off controls remain independent.
 3. Press **Set baseline**, then change the layout. The baseline remains a separate snapshot.
-4. Select **Air** or **Heat**. Set an **elapsed time** from 0 to 120 seconds. Expand **Measurement point** to enable its purple marker; its speed, air temperature, and changes from baseline are reported numerically.
+4. Select **Air** or **Heat**. Set an **elapsed time** from 0 to 120 seconds. Open the target icon to enable its measurement marker; its speed, air temperature, and changes from baseline are reported numerically.
 5. Repeat at **Fine** detail. A result that changes substantially with resolution is unsuitable for deciding between layouts.
 6. Use the **Room ⋯** menu to save, load, delete, or reset layouts and manage a baseline. Save named scenarios to revisit them. The current scene, baseline, and up to twenty named scenarios persist in this browser. Saving the same name replaces that scenario. Unsupported or invalid saved data is ignored.
 
 Time is elapsed since the initial uniformly tempered, stationary air state with the current device/opening configuration. Every geometry, source, or room-physics change starts a fresh experiment. Scrubbing forward continues resident solver state; already computed points are cached. An earlier uncached point starts again from the same initial state. Air and Heat share the same solve. Display scales stay fixed across time and layouts; the temperature scale is adjustable.
 
-The first partial result appears before a long solve finishes. The inspector explicitly shows the time represented by the visible result, room mean temperature, and whether a requested point is still being calculated. Baseline comparisons use the same time and resolution; comparisons across different room/grid dimensions are refused. A point inside an obstacle is reported as obstructed rather than as still air.
+The first partial result appears before a long solve finishes. The timeline shows simulated time; the readings icon reveals mean temperature, solve progress, and comparisons. Baseline comparisons use the same time and resolution; comparisons across different room/grid dimensions are refused. A point inside an obstacle is reported as obstructed rather than as still air.
 
 **Air** defaults to a speed volume; a static speed slice with direction arrows is also available. The animated Gas view was removed: its dye playback did not evolve the airflow solution or measure ventilation, and consumed substantial rendering work.
 
@@ -77,3 +77,5 @@ Before claiming predictive usefulness, measure one specific decision: for exampl
 ## Devices from main
 
 The starter room includes a router, ceiling fan with light, wall-mounted AC, window, and door. Wi-Fi has volume and slice views; its propagation model estimates distance loss and obstruction attenuation, not measured coverage. AC uses a default 1500 W cooling source scaled by its output setting; heating and cooling share the same power-normalized CPU/GPU source calculation.
+
+Simulation controls use icon popovers for detail, temperature scale, measurement point, and readings. Play advances in half-second simulated snapshots, waiting when the next solve is still running; Pause holds the requested time and Restart returns to zero. Playback stops on room edits, mode changes, errors, and at 120 seconds. Physics settings are under the detail icon.

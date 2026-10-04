@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { addWindow, createRoomScene } from '../src/model/room-scene.js';
 import { objectParts } from '../src/model/object-parts.js';
-import { buildGrid, buildHeatRate, buildSolidMask, buildWindowBoundary, createRoomFieldsSession, simulateRoomFields } from '../src/simulation/room-fields-3d.js';
+import { buildFanAccelerationField, buildGrid, buildHeatRate, buildSolidMask, buildWindowBoundary, createRoomFieldsSession, simulateRoomFields } from '../src/simulation/room-fields-3d.js';
 import { RoomFieldSolver } from '../src/simulation/room-field-backend.js';
 import { compareRoomFields, sampleRoomFields } from '../src/simulation/room-field-analysis.js';
 import { readWorkspace, writeWorkspace } from '../src/model/scenarios.js';
@@ -100,4 +100,32 @@ test('halving the time step does not erase the fan jet through repeated averagin
   const speed = (timeStep) => sampleRoomFields(simulateRoomFields(scene, { timeStep, steps: Math.round(3 / timeStep) }), point).speed;
   const coarse = speed(0.05), fine = speed(0.025);
   assert.ok(Math.abs(coarse - fine) / fine < 0.06, `${coarse} vs ${fine}`);
+});
+
+
+test('merged ceiling fan and AC drive the shared physical solver', () => {
+  const scene = empty();
+  const ceiling = { ...createRoomScene().objects.find((object) => object.model === 'ceiling-fan'), position: { x: 1, y: 1.68, z: 1 } };
+  const ac = { ...createRoomScene().objects.find((object) => object.model === 'air-conditioner'), position: { x: 1, y: 1.5, z: 1.8 }, powerWatts: 1000 };
+  scene.objects = [ceiling, ac];
+  const grid = buildGrid(scene.room, 0.25), solid = buildSolidMask(scene, grid);
+  const force = buildFanAccelerationField(scene, grid, solid);
+  assert.ok(force.some((value, index) => index % 4 === 1 && value < 0));
+  const watts = buildHeatRate(scene, grid, solid).reduce((sum, value) => sum + value * grid.dx * grid.dy * grid.dz * 1.204 * 1006, 0);
+  assert.ok(Math.abs(watts + 1000) < 0.01);
+});
+
+test('merged Wi-Fi mode responds to routers and supports both display styles', async () => {
+  const solver = new RoomFieldSolver({ gpu: null });
+  try {
+    const scene = empty();
+    const off = await solver.solve(scene, 'wifi');
+    assert.equal(off.stats.routerCount, 0);
+    scene.objects = [{ ...createRoomScene().objects.find((object) => object.model === 'router'), position: { x: 1, y: 1, z: 1 } }];
+    const on = await solver.solve(scene, 'wifi');
+    assert.equal(on.stats.routerCount, 1);
+    assert.ok(on.stats.maxWifiDbm > off.stats.maxWifiDbm);
+    const { createRoomFieldLayer } = await import('../src/scene/room-field-layer-3d.js');
+    for (const displayStyle of ['slice', 'volume']) assert.ok(createRoomFieldLayer(on, 'wifi', scene, { displayStyle }).children.length);
+  } finally { solver.dispose(); }
 });

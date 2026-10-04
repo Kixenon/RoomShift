@@ -132,12 +132,21 @@ timeControls.slider.addEventListener('input', () => {
   viewport.setTimeOfDay({ timeMinutes: Number(timeControls.slider.value) });
   renderTimeOfDay();
 });
-function renderFieldState({ mode, loading, result, error, stale }) {
+function renderFieldState({ mode, loading, result, error, stale, playing = false }) {
   const physical = ['airflow', 'temperature'].includes(mode);
   $('#simulation-settings').hidden = !physical;
   viewport?.setProbe(physical && $('#probe-control').open ? fieldController.probe : null);
   if (physical) {
-    $('#simulation-time-value').textContent = `${fieldController.durationSeconds} s`;
+    $('#simulation-time').value = String(fieldController.durationSeconds);
+    $('#simulation-time-value').textContent = `${result && !stale ? result.durationSeconds : fieldController.durationSeconds} s`;
+    const play = $('#simulation-play');
+    play.setAttribute('aria-pressed', String(playing));
+    play.setAttribute('aria-label', playing ? 'Pause simulation' : 'Play simulation');
+    play.title = playing && loading ? 'Buffering · click to pause' : playing ? 'Pause simulation' : 'Play simulation';
+    play.classList.toggle('is-buffering', playing && loading);
+    play.innerHTML = playing ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 10 7-10 7Z"/></svg>';
+    $('#scale-control').hidden = mode !== 'temperature';
+    for (const option of document.querySelectorAll('[data-resolution]')) option.setAttribute('aria-checked', String(Number(option.dataset.resolution) === fieldController.cellSize));
     $('#simulation-status').textContent = error ? `Unavailable: ${error.message ?? error}`
       : !result ? 'Calculating…'
       : `${stale ? 'Previous result · ' : ''}Showing ${result.durationSeconds.toFixed(1)} s${loading ? ` · calculating ${fieldController.durationSeconds} s` : ''} · ${result.stats.meanTemperature.toFixed(2)} °C mean${result.stats.boundaryFlowImbalancePercent > 1 ? ` · flow balance error ${result.stats.boundaryFlowImbalancePercent.toFixed(1)}%` : ''}`;
@@ -246,6 +255,7 @@ function renderFieldState({ mode, loading, result, error, stale }) {
     };
   }
   fieldControls.legendTitle.textContent = legend.title;
+  fieldControls.legend.title = legend.title;
   fieldControls.legendMin.textContent = legend.minimum;
   fieldControls.legendMax.textContent = legend.maximum;
 }
@@ -443,7 +453,7 @@ function syncPropertyInputs(object) {
 
 function refreshScene() {
   viewport.setScene(roomScene, selectedId);
-  viewport.setProbe($('#probe-control').open && fieldController?.mode && fieldController.mode !== 'light' ? fieldController.probe : null);
+  viewport.setProbe($('#probe-control').open && ['airflow', 'temperature'].includes(fieldController?.mode) ? fieldController.probe : null);
   renderInspector();
   persistWorkspace();
 }
@@ -715,12 +725,14 @@ viewportInfo.addEventListener('focusout', (event) => {
   if (!viewportInfo.contains(event.relatedTarget) && !viewportInfo.matches(':hover')) setShortcutHelpOpen(false);
 });
 document.addEventListener('pointerdown', (event) => {
+  for (const menu of document.querySelectorAll('.simulation-popover')) if (!menu.contains(event.target)) menu.open = false;
   if (!$('#scenario-storage').contains(event.target)) $('#scenario-storage').open = false;
   if (!cameraViewPicker.contains(event.target)) cameraViewPicker.open = false;
   if (!viewportInfo.contains(event.target) && !viewportInfo.matches(':hover')) setShortcutHelpOpen(false);
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
+    for (const menu of document.querySelectorAll('.simulation-popover')) menu.open = false;
     $('#scenario-storage').open = false;
     cameraViewPicker.open = false;
     setShortcutHelpOpen(false);
@@ -775,10 +787,19 @@ function renderScenarios() {
 }
 
 $('#simulation-time').addEventListener('input', (event) => {
+  fieldController.setPlaying(false);
   fieldController.setSimulationTime(Number(event.target.value));
   $('#simulation-time-value').textContent = `${fieldController.durationSeconds} s`;
 });
-$('#simulation-resolution').addEventListener('change', (event) => fieldController.setResolution(Number(event.target.value)));
+$('#resolution-control').addEventListener('click', (event) => {
+  const option = event.target.closest('[data-resolution]');
+  if (!option) return;
+  fieldController.setPlaying(false);
+  fieldController.setResolution(Number(option.dataset.resolution));
+  $('#resolution-control').open = false;
+});
+$('#simulation-play').addEventListener('click', () => fieldController.setPlaying(!fieldController.playing));
+$('#simulation-restart').addEventListener('click', () => { fieldController.setPlaying(false); fieldController.setSimulationTime(0); });
 for (const axis of ['x', 'y', 'z']) $('#probe-' + axis).addEventListener('change', () => {
   const point = Object.fromEntries(['x', 'y', 'z'].map((axis) => [axis, Number($('#probe-' + axis).value)]));
   if (!Object.values(point).every(Number.isFinite) || point.x < 0 || point.x > roomScene.room.width || point.y < 0 || point.y > roomScene.room.height || point.z < 0 || point.z > roomScene.room.depth) {
@@ -853,4 +874,27 @@ $('#reset-room').addEventListener('click', () => {
 
 $('#scenario-storage').addEventListener('click', (event) => {
   if (event.target.closest('button:not(:disabled)')) $('#scenario-storage').open = false;
+});
+
+for (const menu of document.querySelectorAll('.simulation-popover')) menu.addEventListener('toggle', () => {
+  menu.querySelector('summary').setAttribute('aria-expanded', String(menu.open));
+});
+
+for (const menu of document.querySelectorAll('.field-display-control')) menu.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && menu.open) {
+    menu.open = false;
+    menu.querySelector('summary').focus();
+    event.stopPropagation();
+    return;
+  }
+  if (!event.target.matches('summary, [role="menuitem"], [role="menuitemradio"]')) return;
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  const options = [...menu.querySelectorAll('[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)')];
+  if (!options.length) return;
+  event.preventDefault();
+  menu.open = true;
+  const current = options.indexOf(document.activeElement);
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
+    : event.key === 'ArrowDown' ? (current + 1) % options.length : (current - 1 + options.length) % options.length;
+  options[next].focus();
 });
