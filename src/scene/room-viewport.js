@@ -10,6 +10,16 @@ import { isOpeningObject } from '../model/openings.js';
 // light preview used before there was a time of day, so an unchanged scene looks
 // the same at the times when the lamps are on.
 const LAMP_LIGHT_DISTANCE = 9;
+// Clips a shaft to the inside of the room so it never bleeds through a wall or
+// the floor. Mirrors the bounds the shell geometry already describes.
+const ROOM_PLANES = (room) => [
+  new THREE.Plane(new THREE.Vector3(1, 0, 0), room.width / 2 + 0.001),
+  new THREE.Plane(new THREE.Vector3(-1, 0, 0), room.width / 2 + 0.001),
+  new THREE.Plane(new THREE.Vector3(0, 0, 1), room.depth / 2 + 0.001),
+  new THREE.Plane(new THREE.Vector3(0, 0, -1), room.depth / 2 + 0.001),
+  new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.001),
+  new THREE.Plane(new THREE.Vector3(0, -1, 0), room.height),
+];
 
 const COLORS = Object.freeze({
   fan: 0x6d9c85,
@@ -253,6 +263,7 @@ export class RoomViewport {
     this.timeMinutes = DEFAULT_TIME_MINUTES;
     this.daylightState = null;
     this.sunPatchMeshes = [];
+    this.sunShaftMeshes = [];
     this.pointerStart = null;
     this.projection = 'perspective';
     this.orthoFrustumHeight = 8;
@@ -273,8 +284,16 @@ export class RoomViewport {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.04;
+    // Required for material.clippingPlanes to take effect; without it three.js
+// silently ignores them and the sun shafts draw straight through the floor.
+this.renderer.localClippingEnabled = true;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // PCFSoftShadowMap filters across neighbouring texels instead of testing a single
+    // sample, so the sun gets a penumbra rather than a hard one-pixel edge where
+    // lit floor meets shadowed floor. VSM honours shadow.radius for a wider blur,
+    // but it leaked light across the whole room here and washed the direct sun
+    // out entirely, so the softer-but-wrong look was not worth trading for.
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.domElement.id = 'room-canvas';
     this.renderer.domElement.setAttribute('aria-label', 'Three-dimensional room. Click an object to select it.');
     this.renderer.domElement.dataset.projection = this.projection;
@@ -286,6 +305,7 @@ export class RoomViewport {
     this.keyLight.shadow.camera.near = 0.1;
     this.keyLight.shadow.camera.far = 50;
     this.keyLight.shadow.bias = -0.0002;
+    this.keyLight.shadow.normalBias = 0.03;
     this.keyLight.position.set(-4, 8, 6);
     this.scene.add(this.hemisphereLight, this.keyLight);
     this.setupControls(this.camera, new THREE.Vector3(0, 1.1, 0));
@@ -423,11 +443,11 @@ export class RoomViewport {
     ceiling.name = 'daylight-ceiling-occluder';
     ceiling.rotation.x = -Math.PI / 2;
     ceiling.position.y = height;
-    // The ceiling is the last piece of the shell that still has to stop the sun.
-    // The walls below already carry real apertures for every open window and door,
-    // so daylight arrives through those openings; letting the roof cast as well
-    // would seal the room a second time and leave the furniture unlit.
-    ceiling.castShadow = false;
+    // The roof is part of the shell and has to keep blocking the sun, otherwise
+    // daylight lands on the room as if it came through the roof. Direct sun
+    // reaches the interior only through the apertures in the walls below, and
+    // rebuildSunShafts draws the visible beam for each one.
+    ceiling.castShadow = true;
     ceiling.raycast = () => {};
     this.sceneRoot.add(ceiling);
     const outline = new THREE.LineSegments(
@@ -604,6 +624,7 @@ export class RoomViewport {
 
     if (!enabled) {
       // Restore the neutral studio lighting the editor shows outside the preview.
+      this.clearSunShafts();
       this.hemisphereLight.intensity = 2.1;
       this.keyLight.intensity = 2.6;
       this.keyLight.color.setHex(0xfff7e9);
@@ -675,9 +696,27 @@ export class RoomViewport {
     const { colour, intensity, direction } = state.sun;
     this.keyLight.color.setRGB(colour.r, colour.g, colour.b);
     this.keyLight.intensity = intensity;
-    // Park the sun far enough out that its shadow camera covers the room.
+    // The room shell blocks the sun, so direct light can only arrive through the
+    // apertures in the walls. Lighting the sun from a point far outside the room
+    // would have every interior surface sit behind the shell in the shadow map,
+    // leaving furniture uniformly dark and casting nothing. Placing the light just
+    // outside each sun-facing wall, along the real sun vector, lets the aperture
+    // do the shaping: sun enters the opening, and anything it touches casts a
+    // shadow inside the room. Walls the sun is not shining into contribute no
+    // light, which is what keeps daylight from appearing to fall from the roof.
     const reach = Math.max(this.roomScene?.room.width ?? 5, this.roomScene?.room.depth ?? 4) + 6;
-    this.keyLight.position.set(direction.x * reach, Math.max(direction.y, 0.05) * reach, direction.z * reach);
+    const { width = 5, depth = 4 } = this.roomScene?.room ?? {};
+    const roomCentre = new THREE.Vector3(width / 2, this.roomScene.room.height / 2, depth / 2);
+    // Step just outside whichever wall the sun is arriving through, along the sun
+    // vector, so the aperture sits between the light and the room interior.
+    const margins = [
+      ...(direction.x !== 0 ? [width / 2 + 0.6] : []),
+      ...(direction.z !== 0 ? [depth / 2 + 0.6] : []),
+    ];
+    // Distance from the room centre back out to just past the sun-facing wall.
+    const back = Math.max(...margins, 0.6);
+    const sun = new THREE.Vector3(direction.x, Math.max(direction.y, 0.05), direction.z).normalize();
+    this.keyLight.position.copy(roomCentre).addScaledVector(sun, back + reach * 0.25);
     const shadowRadius = Math.max(this.roomScene.room.width, this.roomScene.room.depth) / 2 + this.roomScene.room.height;
     Object.assign(this.keyLight.shadow.camera, {
       left: -shadowRadius,
@@ -710,6 +749,7 @@ export class RoomViewport {
       light.power = (lamp?.enabled !== false ? DEFAULT_LAMP_POWER : 0) * (lamp?.intensity ?? 1);
     }
     this.rebuildSunPatches();
+    this.rebuildSunShafts();
     this.updateDaylightDataset();
   }
 
@@ -732,6 +772,127 @@ export class RoomViewport {
     delete data.clockTime;
     delete data.lampsOn;
     delete data.sunPatches;
+  }
+
+  /**
+   * Draw the visible beam of daylight entering through each open window or door.
+   * The shell blocks the sun everywhere else, so without this the shafts are the
+   * only cue that light is entering the room at all.
+   *
+   * A beam is built from nested shells that taper toward its axis, rather than a
+   * single hollow box. Additive blending sums the shells a view ray crosses, so
+   * the overlapping core reads brightest and the outer shells feather to almost
+   * nothing: the cross-section fades the way scattered light does instead of
+   * ending at a hard silhouette. Along the beam the vertices dim to zero, so the
+   * far end dissolves into the room rather than stopping at a cut edge.
+   */
+  rebuildSunShafts() {
+    this.clearSunShafts();
+    const state = this.daylightState;
+    if (!state || !this.lightingPreview) return;
+    const { width, depth, height } = this.roomScene.room;
+    const { direction, colour, daylight } = state.sun;
+    if (daylight <= 0.02 || direction.y <= 1e-4) return;
+
+    // Direction the light travels, from the sun into the room.
+    const travel = new THREE.Vector3(-direction.x, -direction.y, -direction.z);
+    const clipping = ROOM_PLANES(this.roomScene.room);
+    const openings = this.roomScene.objects.filter((object) => isOpeningObject(object) && object.open !== false);
+    // Brighter when the sun is high and strong, and eased off in the preview so
+    // the additive beams layer without blowing the room out.
+    const strength = THREE.MathUtils.clamp(daylight, 0, 1);
+    const tint = new THREE.Color(colour.r, colour.g, colour.b);
+    // Nested shells feather the beam across its width; slicing the length lets
+    // the brightness fall off smoothly instead of along one long facet.
+    const SHELLS = 4;
+    const SEGMENTS = 6;
+    const base = 0.11 * (0.4 + strength);
+
+    for (const opening of openings) {
+      const inward = { front: [0, 1], back: [0, -1], left: [1, 0], right: [-1, 0] }[opening.wall];
+      if (!inward) continue;
+      // Skip openings the sun is not shining into.
+      if (travel.x * inward[0] + travel.z * inward[1] <= 0.02) continue;
+
+      const alongX = opening.wall === 'back' || opening.wall === 'front';
+      const plane = opening.wall === 'front' ? -depth / 2
+        : opening.wall === 'back' ? depth / 2
+          : opening.wall === 'left' ? -width / 2 : width / 2;
+      const centre = alongX ? opening.position.x - width / 2 : opening.position.z - depth / 2;
+      const half = opening.dimensions.width / 2;
+      const y0 = opening.position.y;
+      const y1 = y0 + opening.dimensions.height;
+      const corners = [[centre - half, y0], [centre + half, y0], [centre + half, y1], [centre - half, y1]]
+        .map(([s, y]) => (alongX ? new THREE.Vector3(s, y, plane) : new THREE.Vector3(plane, y, s)));
+      const length = Math.max(width, depth, height) * 3;
+      const far = corners.map((corner) => corner.clone().addScaledVector(travel, length));
+      const openingCentre = corners.reduce((sum, corner) => sum.add(corner), new THREE.Vector3()).multiplyScalar(1 / corners.length);
+      const farCentre = openingCentre.clone().addScaledVector(travel, length);
+
+      const positions = [];
+      const colors = [];
+      const push = (point, scale) => {
+        positions.push(point.x, point.y, point.z);
+        colors.push(tint.r * scale, tint.g * scale, tint.b * scale);
+      };
+
+      for (let shell = 0; shell < SHELLS; shell += 1) {
+        const spread = 1 - (shell / SHELLS) * 0.72;
+        const shellStrength = 0.12 + 0.88 * (shell / (SHELLS - 1));
+        const nearRing = corners.map((corner) => openingCentre.clone().lerp(corner, spread));
+        const farRing = far.map((corner) => farCentre.clone().lerp(corner, spread));
+        // Brightest at the aperture and dissolving with distance, so the beam
+        // fades out instead of ending in a hard edge.
+        const shade = (t) => shellStrength * base * (1 - t) ** 2;
+
+        for (let edge = 0; edge < 4; edge += 1) {
+          const next = (edge + 1) % 4;
+          for (let step = 0; step < SEGMENTS; step += 1) {
+            const t0 = step / SEGMENTS;
+            const t1 = (step + 1) / SEGMENTS;
+            const a0 = nearRing[edge].clone().lerp(farRing[edge], t0);
+            const b0 = nearRing[next].clone().lerp(farRing[next], t0);
+            const a1 = nearRing[edge].clone().lerp(farRing[edge], t1);
+            const b1 = nearRing[next].clone().lerp(farRing[next], t1);
+            const s0 = shade(t0);
+            const s1 = shade(t1);
+            push(a0, s0);
+            push(b0, s0);
+            push(a1, s1);
+            push(b0, s0);
+            push(b1, s1);
+            push(a1, s1);
+          }
+        }
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      const shaft = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        clippingPlanes: clipping,
+        toneMapped: false,
+      }));
+      shaft.renderOrder = 1;
+      shaft.name = `sun-shaft-${opening.id}`;
+      shaft.raycast = () => {};
+      this.sceneRoot.add(shaft);
+      this.sunShaftMeshes.push(shaft);
+    }
+  }
+
+  clearSunShafts() {
+    for (const mesh of this.sunShaftMeshes) {
+      this.sceneRoot.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+    this.sunShaftMeshes = [];
   }
 
   clearSunPatches() {
