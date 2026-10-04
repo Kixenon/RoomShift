@@ -2,7 +2,9 @@ hackathon project
 
 # RoomShift
 
-A 3D room editor for exploring how layout changes affect airflow, temperature, lighting, and Wi-Fi coverage.
+Test changes to a room before making them in real life.
+
+Supports airflow, temperature, lighting, and Wi-Fi coverage simulations.
 
 ## Run
 
@@ -21,5 +23,3 @@ npm run build
 npx playwright install chromium
 npm run test:browser
 ```
-
-Simulations are approximate and uncalibrated. Surface colors show nearby air temperature, not material temperature.
