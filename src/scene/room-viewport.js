@@ -1,29 +1,20 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
-import { indirectLux, lightContext, skyLux, windowRadiance } from '../simulation/room-light.js';
+import { indirectLux, lightContext, windowRadiance } from '../simulation/room-light.js';
 import { isOpeningObject } from '../model/openings.js';
 
-// RectAreaLight needs its LTC look-up textures registered once before any window
-// light renders; without this the window lights contribute nothing.
-let rectAreaLightsReady = false;
-function ensureRectAreaLights() {
-  if (rectAreaLightsReady) return;
-  RectAreaLightUniformsLib.init();
-  rectAreaLightsReady = true;
-}
-
 // Hand-tuned bridge from the radiosity model's radiance (nits-like) to a Three.js
-// area-light power in lumens. Chosen so a bright open window reads about like the
+// light power in lumens. Chosen so a bright open window reads about like the
 // lamps and does not blow out the tone-mapped preview; not a photometric value.
 const WINDOW_LIGHT_GAIN = 0.06;
-// Interior illuminance (lux-like) that maps to full sky fill, so the room is lit
-// from its windows and their inter-reflection even when no direct sun reaches it.
-const SKY_FILL_REFERENCE_LUX = 800;
+// Inter-reflected illuminance (lux-like) that maps to full ambient fill. Only the
+// bounce drives this; the sky through the openings is a directional window light
+// that casts shadows, so it must not also become flat, shadow-free ambient.
+const BOUNCE_FILL_REFERENCE_LUX = 800;
 
 // Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
 // light preview used before there was a time of day, so an unchanged scene looks
@@ -280,6 +271,7 @@ export class RoomViewport {
     this.lightingPreview = false;
     this.lightingLights = [];
     this.windowLights = [];
+    this.windowLightTargets = [];
     this.radiosityContext = null;
     this.timeMinutes = DEFAULT_TIME_MINUTES;
     this.daylightState = null;
@@ -637,12 +629,13 @@ this.renderer.localClippingEnabled = true;
     if (enabled === this.lightingPreview) return;
     this.lightingPreview = enabled;
     this.clearSunPatches();
-    for (const light of [...this.lightingLights, ...this.windowLights]) {
+    for (const light of [...this.lightingLights, ...this.windowLights, ...this.windowLightTargets]) {
       this.scene.remove(light);
       light.dispose?.();
     }
     this.lightingLights = [];
     this.windowLights = [];
+    this.windowLightTargets = [];
 
     if (!enabled) {
       // Restore the neutral studio lighting the editor shows outside the preview.
@@ -683,13 +676,14 @@ this.renderer.localClippingEnabled = true;
         this.lightingLights.push(source);
       }
 
-      // An area light at each aperture stands in for the sky it admits. The
-      // radiosity model decides how bright each one is (applyDaylight); this only
-      // builds and orients them. RectAreaLight is the right shape for a window —
-      // a rectangle of diffuse emission — and, needing no shadow map, it behaves
-      // as a soft fill that keeps the room lit from its openings.
-      ensureRectAreaLights();
-      const { width: roomWidth, depth: roomDepth } = this.roomScene.room;
+      // A single shadow-casting spot at each aperture stands in for the sky it
+      // admits. The radiosity model decides how bright each one is
+      // (applyDaylight); this only builds and aims them. A spot can cast shadows
+      // (a RectAreaLight cannot), so furniture in front of a window now blocks
+      // the window light — otherwise the room's openings lit everything with no
+      // shadow term at all. The wide cone and heavy penumbra keep it soft.
+      const { width: roomWidth, depth: roomDepth, height: roomHeight } = this.roomScene.room;
+      const reach = Math.max(roomWidth, roomDepth, roomHeight) * 2.4;
       for (const object of this.roomScene.objects.filter(isOpeningObject)) {
         const inward = { front: [0, 0, 1], back: [0, 0, -1], left: [1, 0, 0], right: [-1, 0, 0] }[object.wall];
         if (!inward) continue;
@@ -704,12 +698,20 @@ this.renderer.localClippingEnabled = true;
           alongX ? plane : across,
         );
         const into = new THREE.Vector3(inward[0], 0, inward[2]);
-        const light = new THREE.RectAreaLight(0xffffff, 0, object.dimensions.width, object.dimensions.height);
-        light.position.copy(centre).addScaledVector(into, 0.02);
-        light.lookAt(centre.clone().add(into));
-        light.userData.openingId = object.id;
-        this.scene.add(light);
-        this.windowLights.push(light);
+        const source = new THREE.SpotLight(0xffffff, 0, 0, Math.PI / 2.3, 0.85, 2);
+        source.position.copy(centre).addScaledVector(into, 0.05);
+        source.target.position.copy(centre).addScaledVector(into, reach);
+        source.castShadow = true;
+        source.shadow.mapSize.set(1024, 1024);
+        source.shadow.camera.near = 0.05;
+        source.shadow.camera.far = reach + 2;
+        source.shadow.bias = -0.0004;
+        source.shadow.normalBias = 0.03;
+        source.shadow.radius = 3;
+        source.userData.openingId = object.id;
+        this.scene.add(source, source.target);
+        this.windowLights.push(source);
+        this.windowLightTargets.push(source.target);
       }
     }
     if (enabled) {
@@ -785,17 +787,18 @@ this.renderer.localClippingEnabled = true;
     this.keyLight.castShadow = state.sun.daylight > 0.02;
     this.keyLight.visible = state.sun.daylight > 0;
 
-    // The radiosity model supplies the fill: the sky seen through each opening
-    // plus the light that bounced off the surfaces it lit. This is what drives
-    // the room brightening by day through its windows rather than a fixed
-    // constant, and it keeps furniture legible when the sun is not reaching it.
+    // The radiosity model supplies the fill. Only the inter-reflected (bounce)
+    // term becomes flat ambient here — it is diffuse by nature — and it is kept
+    // small so it mutes the shadows of the sun and the window lights rather than
+    // flattening them. The sky through each opening is a shadow-casting window
+    // light instead, so it shades the room directionally.
     const context = lightContext(this.roomScene, state);
     this.radiosityContext = context;
     const { width: fillWidth, depth: fillDepth } = this.roomScene.room;
     const sample = { x: fillWidth / 2, y: 0.75, z: fillDepth / 2 };
-    const ambient = skyLux(context, sample) + indirectLux(context, sample);
+    const bounce = indirectLux(context, sample);
     this.hemisphereLight.color.setHex(0xeaf3ed);
-    this.hemisphereLight.intensity = 0.35 + 2.2 * THREE.MathUtils.clamp(ambient / SKY_FILL_REFERENCE_LUX, 0, 1);
+    this.hemisphereLight.intensity = 0.25 + 0.9 * THREE.MathUtils.clamp(bounce / BOUNCE_FILL_REFERENCE_LUX, 0, 1);
     for (const light of this.windowLights ?? []) {
       const opening = context.windows.find((window) => window.object.id === light.userData.openingId);
       if (!opening) {
