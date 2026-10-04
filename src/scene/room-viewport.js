@@ -1,10 +1,29 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { mountViewportCanvas } from './mount-canvas.js';
 import { createRoomFieldLayer } from './room-field-layer-3d.js';
 import { DEFAULT_LAMP_POWER, DEFAULT_TIME_MINUTES, describeDaylight } from '../simulation/daylight.js';
+import { indirectLux, lightContext, skyLux, windowRadiance } from '../simulation/room-light.js';
 import { isOpeningObject } from '../model/openings.js';
+
+// RectAreaLight needs its LTC look-up textures registered once before any window
+// light renders; without this the window lights contribute nothing.
+let rectAreaLightsReady = false;
+function ensureRectAreaLights() {
+  if (rectAreaLightsReady) return;
+  RectAreaLightUniformsLib.init();
+  rectAreaLightsReady = true;
+}
+
+// Hand-tuned bridge from the radiosity model's radiance (nits-like) to a Three.js
+// area-light power in lumens. Chosen so a bright open window reads about like the
+// lamps and does not blow out the tone-mapped preview; not a photometric value.
+const WINDOW_LIGHT_GAIN = 0.06;
+// Interior illuminance (lux-like) that maps to full sky fill, so the room is lit
+// from its windows and their inter-reflection even when no direct sun reaches it.
+const SKY_FILL_REFERENCE_LUX = 800;
 
 // Nominal power for the point lights at lamp bulbs, in lumens. Matches what the
 // light preview used before there was a time of day, so an unchanged scene looks
@@ -260,6 +279,8 @@ export class RoomViewport {
     this.fieldLayer = null;
     this.lightingPreview = false;
     this.lightingLights = [];
+    this.windowLights = [];
+    this.radiosityContext = null;
     this.timeMinutes = DEFAULT_TIME_MINUTES;
     this.daylightState = null;
     this.sunPatchMeshes = [];
@@ -616,11 +637,12 @@ this.renderer.localClippingEnabled = true;
     if (enabled === this.lightingPreview) return;
     this.lightingPreview = enabled;
     this.clearSunPatches();
-    for (const light of this.lightingLights) {
+    for (const light of [...this.lightingLights, ...this.windowLights]) {
       this.scene.remove(light);
       light.dispose?.();
     }
     this.lightingLights = [];
+    this.windowLights = [];
 
     if (!enabled) {
       // Restore the neutral studio lighting the editor shows outside the preview.
@@ -659,6 +681,35 @@ this.renderer.localClippingEnabled = true;
         source.userData.objectId = object.id;
         this.scene.add(source);
         this.lightingLights.push(source);
+      }
+
+      // An area light at each aperture stands in for the sky it admits. The
+      // radiosity model decides how bright each one is (applyDaylight); this only
+      // builds and orients them. RectAreaLight is the right shape for a window —
+      // a rectangle of diffuse emission — and, needing no shadow map, it behaves
+      // as a soft fill that keeps the room lit from its openings.
+      ensureRectAreaLights();
+      const { width: roomWidth, depth: roomDepth } = this.roomScene.room;
+      for (const object of this.roomScene.objects.filter(isOpeningObject)) {
+        const inward = { front: [0, 0, 1], back: [0, 0, -1], left: [1, 0, 0], right: [-1, 0, 0] }[object.wall];
+        if (!inward) continue;
+        const alongX = object.wall === 'back' || object.wall === 'front';
+        const plane = object.wall === 'front' ? -roomDepth / 2
+          : object.wall === 'back' ? roomDepth / 2
+            : object.wall === 'left' ? -roomWidth / 2 : roomWidth / 2;
+        const across = alongX ? object.position.x - roomWidth / 2 : object.position.z - roomDepth / 2;
+        const centre = new THREE.Vector3(
+          alongX ? across : plane,
+          object.position.y + object.dimensions.height / 2,
+          alongX ? plane : across,
+        );
+        const into = new THREE.Vector3(inward[0], 0, inward[2]);
+        const light = new THREE.RectAreaLight(0xffffff, 0, object.dimensions.width, object.dimensions.height);
+        light.position.copy(centre).addScaledVector(into, 0.02);
+        light.lookAt(centre.clone().add(into));
+        light.userData.openingId = object.id;
+        this.scene.add(light);
+        this.windowLights.push(light);
       }
     }
     if (enabled) {
@@ -734,12 +785,28 @@ this.renderer.localClippingEnabled = true;
     this.keyLight.castShadow = state.sun.daylight > 0.02;
     this.keyLight.visible = state.sun.daylight > 0;
 
-    // Keep a small neutral fill so interior surfaces and the shadows they carry
-    // stay readable. Exterior light comes from the shadow-casting sun, which the
-    // room shell blocks except at open apertures, so this fill must be strong
-    // enough that furniture is legible when the sun is not reaching the room.
+    // The radiosity model supplies the fill: the sky seen through each opening
+    // plus the light that bounced off the surfaces it lit. This is what drives
+    // the room brightening by day through its windows rather than a fixed
+    // constant, and it keeps furniture legible when the sun is not reaching it.
+    const context = lightContext(this.roomScene, state);
+    this.radiosityContext = context;
+    const { width: fillWidth, depth: fillDepth } = this.roomScene.room;
+    const sample = { x: fillWidth / 2, y: 0.75, z: fillDepth / 2 };
+    const ambient = skyLux(context, sample) + indirectLux(context, sample);
     this.hemisphereLight.color.setHex(0xeaf3ed);
-    this.hemisphereLight.intensity = 0.4;
+    this.hemisphereLight.intensity = 0.35 + 2.2 * THREE.MathUtils.clamp(ambient / SKY_FILL_REFERENCE_LUX, 0, 1);
+    for (const light of this.windowLights ?? []) {
+      const opening = context.windows.find((window) => window.object.id === light.userData.openingId);
+      if (!opening) {
+        light.visible = false;
+        continue;
+      }
+      const radiance = windowRadiance(context, opening);
+      light.color.setRGB(state.sky.colour.r, state.sky.colour.g, state.sky.colour.b);
+      light.power = radiance * opening.area * Math.PI * WINDOW_LIGHT_GAIN;
+      light.visible = radiance > 0 && state.sun.daylight > 0.01;
+    }
 
     this.scene.background.setRGB(state.background.r, state.background.g, state.background.b);
     this.renderer.toneMappingExposure = state.exposure;
