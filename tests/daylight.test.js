@@ -22,9 +22,11 @@ const near = (actual, expected, tolerance, label) => {
     `${label}: expected about ${expected}, got ${actual}`);
 };
 
+const emptyScene = () => ({ ...createRoomScene(), objects: [], nextWindowId: 1, nextDoorId: 1 });
+
 const sceneWithWindow = (wall = 'back', open = true) => {
-  const withWindow = addWindow(createRoomScene(), wall);
-  return setWindowOpen(withWindow.scene, 'window-1', open).scene;
+  const withWindow = addWindow(emptyScene(), wall);
+  return setWindowOpen(withWindow.scene, withWindow.object.id, open).scene;
 };
 
 test('sun direction is a unit vector pointing up and toward the azimuth', () => {
