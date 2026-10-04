@@ -27,7 +27,8 @@ test('elapsed time, mode reuse, baseline comparison, and saved scenarios work to
     await page.goto(url);
     await page.locator('#show-airflow').click();
     await settled(page, 3);
-    assert.equal(await page.locator('#field-display-label').textContent(), 'Slice');
+    assert.equal(await page.locator('#field-display-label').textContent(), 'Volume');
+    await page.locator('#scenario-storage summary').click();
     await page.locator('#capture-baseline').click();
     await settled(page, 3);
     assert.match(await page.locator('#comparison-reading').textContent(), /\+0\.000 m\/s/);
@@ -35,6 +36,7 @@ test('elapsed time, mode reuse, baseline comparison, and saved scenarios work to
     await page.locator('[data-device-enabled]').uncheck();
     await settled(page, 3);
     await page.locator('#show-temperature').click();
+    await page.locator('#probe-control summary').click();
     await settled(page, 3);
     assert.match(await page.locator('#probe-reading').textContent(), /°C/);
     assert.equal(await page.locator('#field-legend-min').textContent(), '10.0 °C');
@@ -50,7 +52,20 @@ test('elapsed time, mode reuse, baseline comparison, and saved scenarios work to
     assert.match(await page.locator('#saved-scenarios').textContent(), /Fan off/);
     await page.locator('[data-select-object="fan-1"]').click();
     assert.equal(await page.locator('[data-device-enabled]').isChecked(), false);
+    await page.locator('#scenario-storage summary').click();
     await page.locator('#restore-baseline').click();
+    await page.locator('[data-select-object="fan-1"]').click();
+    assert.equal(await page.locator('[data-device-enabled]').isChecked(), true);
+    await page.locator('#scenario-storage summary').click();
+    await page.locator('#saved-scenarios').selectOption('0');
+    await page.locator('#load-scenario').click();
+    await page.locator('[data-select-object="fan-1"]').click();
+    assert.equal(await page.locator('[data-device-enabled]').isChecked(), false);
+    await page.locator('#scenario-storage summary').click();
+    await page.locator('#delete-scenario').click();
+    assert.doesNotMatch(await page.locator('#saved-scenarios').textContent(), /Fan off/);
+    await page.locator('#scenario-storage summary').click();
+    await page.locator('#reset-room').click();
     await page.locator('[data-select-object="fan-1"]').click();
     assert.equal(await page.locator('[data-device-enabled]').isChecked(), true);
     assert.deepEqual(errors, []);

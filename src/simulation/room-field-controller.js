@@ -15,7 +15,7 @@ export class RoomFieldController {
     this.debounceMs = debounceMs;
     this.scene = null;
     this.mode = null;
-    this.displayStyles = { airflow: 'slice', temperature: 'surfaces', light: 'preview' };
+    this.displayStyles = { airflow: 'volume', temperature: 'surfaces', light: 'preview' };
     this.sliceHeight = 1.2;
     this.durationSeconds = 3;
     this.cellSize = 0.15;

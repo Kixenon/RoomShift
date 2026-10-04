@@ -313,9 +313,10 @@ function createInfraredPlane(result, scene, wall) {
   const geometry = new THREE.PlaneGeometry(span, horizontal ? grid.depth : grid.height, segmentsX, segmentsY);
   const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
     vertexColors: true,
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,
+    transparent: false,
+    alphaTest: 0.5,
+    depthWrite: true,
+    side: THREE.FrontSide,
     toneMapped: false,
   }));
   mesh.name = `infrared-${wall}`;
@@ -358,9 +359,7 @@ function createInfraredPlane(result, scene, wall) {
       return Math.abs(along - center) <= window.dimensions.width / 2
         && point.y >= window.position.y && point.y <= window.position.y + window.dimensions.height;
     });
-    const thermalContrast = clamp(Math.abs(temperature - result.ambientTemperature) / 2, 0, 1);
-    colors[index * 4 + 3] = insideOpening ? 0
-      : (horizontal ? 0.24 : 0.16) + thermalContrast * 0.36;
+    colors[index * 4 + 3] = insideOpening ? 0 : 1;
   }
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
   mesh.renderOrder = 1;
@@ -386,7 +385,7 @@ export function createTemperatureObjectLayer(result, objectGroups = new Map()) {
     color: 0xffffff,
     vertexColors: true,
     transparent: true,
-    depthWrite: false,
+    depthWrite: true,
     side: THREE.DoubleSide,
     toneMapped: false,
     polygonOffset: true,
@@ -431,8 +430,7 @@ export function createTemperatureObjectLayer(result, objectGroups = new Map()) {
           result.ambientTemperature,
         );
         infraredColor(temperature, result, color).toArray(colors, vertex * 4);
-        const contrast = clamp(Math.abs(temperature - result.ambientTemperature) / 2, 0, 1);
-        colors[vertex * 4 + 3] = 0.22 + contrast * 0.48;
+        colors[vertex * 4 + 3] = 1;
       }
       geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
       overlayMesh.geometry = geometry;

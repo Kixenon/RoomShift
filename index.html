@@ -128,7 +128,21 @@
         </div>
         <div class="inspector-content" id="inspector-content">
           <section class="inspector-section room-section">
-            <div class="section-heading"><span>Room</span></div>
+            <div class="section-heading"><span>Room</span><details id="scenario-storage" class="room-actions field-display-control">
+              <summary class="tool-button" aria-label="Room actions" title="Room actions" aria-haspopup="menu" aria-expanded="false">⋯</summary>
+              <div class="field-display-menu" role="menu" aria-label="Room actions">
+                <input id="scenario-name" maxlength="80" placeholder="Name" aria-label="Scenario name" />
+                <button id="save-scenario" class="field-display-option" type="button" role="menuitem">Save</button>
+                <select id="saved-scenarios" aria-label="Saved scenarios"><option value="">Choose saved…</option></select>
+                <button id="load-scenario" class="field-display-option" type="button" role="menuitem">Load</button>
+                <button id="delete-scenario" class="field-display-option" type="button" role="menuitem">Delete</button>
+                <button id="reset-room" class="field-display-option" type="button" role="menuitem">Reset room</button>
+                <hr />
+                <button id="capture-baseline" class="field-display-option" type="button" role="menuitem">Set baseline</button>
+                <button id="restore-baseline" class="field-display-option" type="button" role="menuitem" disabled>Restore baseline</button>
+                <button id="clear-baseline" class="field-display-option" type="button" role="menuitem" disabled>Clear baseline</button>
+              </div>
+            </details></div>
             <div class="dimension-fields">
               <label class="field"><span>Width</span><input id="room-width" aria-label="Room width in meters" type="number" min="2" max="20" step="0.1" value="5.2" /></label>
               <label class="field"><span>Depth</span><input id="room-depth" aria-label="Room depth in meters" type="number" min="2" max="20" step="0.1" value="4" /></label>
@@ -149,32 +163,22 @@
 
           <section class="inspector-section simulation-section" id="simulation-settings" hidden>
             <div class="section-heading"><span>Simulation</span><output id="simulation-time-value">3 s</output></div>
-            <label class="field"><span>Elapsed time</span><input id="simulation-time" type="range" min="0" max="120" step="0.5" value="3" aria-label="Elapsed simulation time in seconds" /></label>
+            <label class="field"><span title="Time since the room started at Initial air temperature. Two minutes may be too short to reach equilibrium.">Elapsed · seconds</span><input id="simulation-time" type="range" min="0" max="120" step="0.5" value="3" aria-label="Elapsed simulation time in seconds" /></label>
             <label class="field"><span>Detail</span><select id="simulation-resolution" aria-label="Simulation resolution"><option value="0.075">Fine · 0.075 m</option><option value="0.15" selected>Standard · 0.15 m</option><option value="0.25">Quick · 0.25 m</option></select></label>
             <p id="simulation-status" class="simulation-note" aria-live="polite">Choose Air or Heat to inspect a time point.</p>
             <details class="simulation-details"><summary>Display scale</summary>
               <div class="dimension-fields"><label class="field"><span>Min °C</span><input id="temperature-min" type="number" min="-20" max="59" value="10" /></label><label class="field"><span>Max °C</span><input id="temperature-max" type="number" min="-19" max="60" value="30" /></label></div>
-              <p class="simulation-note">Fixed scales keep scenarios comparable. Surface colors show nearby air, not material temperature.</p>
+
             </details>
-            <div class="section-heading"><span>Measurement point · m</span></div>
+            <details id="probe-control" class="simulation-details"><summary>Measurement point · m</summary>
             <div class="dimension-fields">
               <label class="field"><span>X</span><input id="probe-x" type="number" min="0" step="0.05" value="2.6" aria-label="Measurement point X" /></label>
               <label class="field"><span>Y</span><input id="probe-y" type="number" min="0" step="0.05" value="1.2" aria-label="Measurement point Y" /></label>
               <label class="field"><span>Z</span><input id="probe-z" type="number" min="0" step="0.05" value="2" aria-label="Measurement point Z" /></label>
             </div>
-            <output id="probe-reading" class="simulation-note">—</output>
+            <output id="probe-reading" class="simulation-note">—</output></details>
             <output id="comparison-reading" class="simulation-note"></output>
-            <p class="simulation-note">Uncalibrated estimate. Coarse detail can change results; check a finer grid before choosing a layout.</p>
-          </section>
-          <section class="inspector-section">
-            <div class="section-heading"><span>Scenarios</span></div>
-            <div class="scenario-actions"><button id="capture-baseline" type="button">Set baseline</button><button id="restore-baseline" type="button" disabled>Restore baseline</button><button id="clear-baseline" type="button" disabled>Clear</button></div>
-            <p id="baseline-status" class="simulation-note">Set a baseline, then edit the room to compare.</p>
-            <details id="scenario-storage" class="simulation-details"><summary>Saved scenarios</summary>
-            <label class="field"><span>Name</span><input id="scenario-name" maxlength="80" placeholder="Fan beside desk" aria-label="Scenario name" /></label>
-            <div class="scenario-actions"><button id="save-scenario" type="button">Save scenario</button><select id="saved-scenarios" aria-label="Saved scenarios"><option value="">Load a scenario…</option></select><button id="delete-scenario" type="button">Delete saved</button></div>
-            <p id="save-status" class="simulation-note">Saved on this browser.</p>
-            </details>
+
           </section>
 
           <section class="inspector-section object-list-section">

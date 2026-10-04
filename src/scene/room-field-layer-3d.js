@@ -37,7 +37,7 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
   layer.name = `room-field-${mode}`;
   layer.userData.fieldMode = mode;
   layer.userData.volumeVoxelCount = 0;
-  const displayStyle = options.displayStyle ?? (options.volumetric ? 'volume' : mode === 'airflow' ? 'slice' : 'surfaces');
+  const displayStyle = options.displayStyle ?? (options.volumetric ? 'volume' : mode === 'airflow' ? 'volume' : 'surfaces');
   if (mode === 'temperature') {
     if (displayStyle === 'volume') {
       const volume = createFieldVolume(result, mode);
@@ -48,7 +48,7 @@ export function createRoomFieldLayer(result, mode, roomScene, options = {}) {
     } else {
       layer.add(createTemperatureSurfaceLayer(result, roomScene));
     }
-    layer.add(createTemperatureObjectLayer(result, options.objectGroups));
+    if (displayStyle === 'surfaces') layer.add(createTemperatureObjectLayer(result, options.objectGroups));
   } else if (mode === 'airflow') {
     if (displayStyle === 'volume') {
       const volume = createFieldVolume(result, mode);

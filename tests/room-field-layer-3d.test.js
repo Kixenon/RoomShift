@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as THREE from 'three';
 import { addWindow, createRoomScene } from '../src/model/room-scene.js';
 import { createRoomFieldLayer, getAirflowColor, getLightColor, getTemperatureColor } from '../src/scene/room-field-layer-3d.js';
 import { simulateRoomFields } from '../src/simulation/room-fields-3d.js';
@@ -39,19 +40,22 @@ test('temperature maps the solved field onto infrared room surfaces', () => {
   assert.ok(surfaces?.isGroup);
   assert.equal(surfaces.children.length, 6);
   assert.equal(colors.itemSize, 4);
+  assert.equal(floor.material.transparent, false);
+  assert.equal(floor.material.side, THREE.FrontSide);
+  assert.equal(floor.material.depthWrite, true);
   assert.ok(Math.min(...colors.array.filter((_, index) => index % 4 === 3)) >= 0.23);
-  assert.ok(Math.max(...colors.array.filter((_, index) => index % 4 === 3)) <= 0.61);
+  assert.ok(Math.max(...colors.array.filter((_, index) => index % 4 === 3)) === 1);
   assert.notDeepEqual(Array.from(colors.array.slice(0, 3)), Array.from(colors.array.slice(-4, -1)));
   assert.equal(layer.userData.volumeVoxelCount, 0);
   assert.equal(volumeFor(layer), undefined);
 });
 
-test('airflow defaults to an instantaneous speed slice with no animation work', () => {
+test('airflow defaults to a speed volume with no animation work', () => {
   const scene = createRoomScene();
   const result = simulateRoomFields(scene, { steps: 2 });
   const layer = createRoomFieldLayer(result, 'airflow', scene);
-  assert.equal(layer.userData.airflowVisualization, 'speed-slice');
-  assert.equal(layer.children[0].name, 'field-slice-airflow');
+  assert.equal(layer.userData.airflowVisualization, 'volume');
+  assert.ok(volumeFor(layer));
   assert.equal(layer.userData.animate, undefined);
 });
 

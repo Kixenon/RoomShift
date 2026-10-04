@@ -51,7 +51,7 @@ test('selecting a field mode sends the current scene and renders its worker resu
   harness.worker.respond({ requestId: request.requestId, result });
 
   assert.deepEqual(harness.rendered[0].slice(0, 2), [result, 'airflow']);
-  assert.deepEqual(harness.rendered[0][2], { displayStyle: 'slice', sliceHeight: 1.2, objectGroups: undefined });
+  assert.deepEqual(harness.rendered[0][2], { displayStyle: 'volume', sliceHeight: 1.2, objectGroups: undefined });
   assert.equal(harness.states.at(-1).loading, false);
   assert.equal(harness.states.at(-1).result, result);
 });
@@ -173,10 +173,10 @@ test('changing the display while an edited scene solves does not cancel that sol
   harness.controller.setScene(scene('two'));
   await flushTimers();
   request = harness.worker.requests.at(-1);
-  harness.controller.setDisplayStyle('volume');
+  harness.controller.setDisplayStyle('slice');
   assert.equal(harness.controller.inFlight.requestId, request.requestId);
   assert.equal(harness.controller.inFlight.cancelRequested, undefined);
   harness.worker.respond({ requestId: request.requestId, result: { grid: {}, fields: {}, stats: {} } });
-  assert.equal(harness.rendered.at(-1)[2].displayStyle, 'volume');
+  assert.equal(harness.rendered.at(-1)[2].displayStyle, 'slice');
   assert.equal(harness.states.at(-1).loading, false);
 });

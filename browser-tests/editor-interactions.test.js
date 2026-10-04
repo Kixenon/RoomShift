@@ -218,7 +218,7 @@ test('air, heat, and light fields update automatically and after scene edits', a
   assert.ok(Number.isFinite(Number(await canvas.getAttribute('data-field-rms-divergence'))));
   assert.match(await page.locator('#field-legend-title').textContent(), /Airflow/);
   assert.equal(await page.locator('#show-airflow').getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('#field-display-label').textContent(), 'Slice');
+  assert.equal(await page.locator('#field-display-label').textContent(), 'Volume');
   assert.equal(await canvas.getAttribute('data-gas-density-max'), null);
 
   await page.locator('#field-display-button').click();

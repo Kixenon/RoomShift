@@ -205,10 +205,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(39, 129, 109
 .simulation-note { display: block; margin: 8px 0; color: #65786e; font-size: 10px; line-height: 1.5; }
 .simulation-section .field { margin-bottom: 9px; }
 .simulation-section input[type="range"] { width: 100%; }
-.simulation-section select, .scenario-actions select { min-width: 0; max-width: 100%; font-size: 10px; }
+.simulation-section select { min-width: 0; max-width: 100%; font-size: 10px; }
 .simulation-details summary { cursor: pointer; font-size: 10px; margin: 10px 0; }
-.scenario-actions { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
-.scenario-actions button, .scenario-actions select { padding: 6px; border: 1px solid #dce6df; background: #fff; border-radius: 5px; color: #426253; font-size: 10px; }
-.scenario-actions button { cursor: pointer; }
-.scenario-actions button:disabled { opacity: .4; cursor: default; }
 #simulation-status, #probe-reading, #comparison-reading { font-variant-numeric: tabular-nums; }
+
+.room-actions > summary { min-width: 26px; width: 26px; height: 24px; font-size: 18px; padding: 0; }
+.room-actions > summary::after { display: none; }
+.room-actions .field-display-menu { left: auto; right: 0; width: 170px; }
+.room-actions input, .room-actions select { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 5px; font: inherit; }
+.room-actions hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
+.room-actions button:disabled { opacity: .4; cursor: default; }
