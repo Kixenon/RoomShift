@@ -423,7 +423,11 @@ export class RoomViewport {
     ceiling.name = 'daylight-ceiling-occluder';
     ceiling.rotation.x = -Math.PI / 2;
     ceiling.position.y = height;
-    ceiling.castShadow = true;
+    // The ceiling is the last piece of the shell that still has to stop the sun.
+    // The walls below already carry real apertures for every open window and door,
+    // so daylight arrives through those openings; letting the roof cast as well
+    // would seal the room a second time and leave the furniture unlit.
+    ceiling.castShadow = false;
     ceiling.raycast = () => {};
     this.sceneRoot.add(ceiling);
     const outline = new THREE.LineSegments(
@@ -691,10 +695,12 @@ export class RoomViewport {
     this.keyLight.castShadow = state.sun.daylight > 0.02;
     this.keyLight.visible = state.sun.daylight > 0;
 
-    // Keep only a small neutral fill for readability. Exterior light comes from
-    // the shadow-casting sun, which the room shell blocks except at open apertures.
+    // Keep a small neutral fill so interior surfaces and the shadows they carry
+    // stay readable. Exterior light comes from the shadow-casting sun, which the
+    // room shell blocks except at open apertures, so this fill must be strong
+    // enough that furniture is legible when the sun is not reaching the room.
     this.hemisphereLight.color.setHex(0xeaf3ed);
-    this.hemisphereLight.intensity = 0.06;
+    this.hemisphereLight.intensity = 0.4;
 
     this.scene.background.setRGB(state.background.r, state.background.g, state.background.b);
     this.renderer.toneMappingExposure = state.exposure;
